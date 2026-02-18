@@ -9,3 +9,14 @@ Planned features:
 - High-order singular quadrature matching BIEST.
 - JAX autodiff support.
 
+Docs
+----
+
+Sphinx documentation lives in `docs/` and is configured for ReadTheDocs.
+It includes the equations, numerics, implementation details, and validation
+strategy. Run locally:
+
+```bash
+pip install -r docs/requirements.txt
+sphinx-build -b html docs docs/_build/html
+```

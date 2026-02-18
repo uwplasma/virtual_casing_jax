@@ -14,7 +14,8 @@ Test Categories
    - FFT-based resampling and derivatives match C++ outputs.
 
 2. **Kernel Parity**
-   - Laplace and Biot-Savart kernels match reference outputs on random points.
+   - Laplace and Biot-Savart kernels match analytic formulas and reference
+     scaling (``1/(4*pi)``).
 
 3. **Boundary Integral Parity**
    - Double-layer self-test returns ``0.5`` jump for constant density.

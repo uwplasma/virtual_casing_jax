@@ -44,6 +44,39 @@ The two vector layer potentials used are:
 
 The kernels are (up to scaling) derivatives of ``1 / |r|``.
 
+Kernel Formulas
+---------------
+
+Let ``r = x - x'`` be the displacement from a source to a target point.
+The kernels implemented follow the BIEST convention with a ``1/(4*pi)`` factor.
+
+Laplace single-layer:
+
+.. math::
+
+   G(r) = \\frac{1}{4\\pi \\lVert r \\rVert}
+
+Gradient of single-layer:
+
+.. math::
+
+   \\nabla G(r) = -\\frac{r}{4\\pi \\lVert r \\rVert^3}
+
+Second derivatives:
+
+.. math::
+
+   \\partial_i\\partial_j G(r) = \\frac{1}{4\\pi}\\left(-\\delta_{ij}\\lVert r \\rVert^{-3} + 3 r_i r_j \\lVert r \\rVert^{-5}\\right)
+
+Biot-Savart (single-layer):
+
+.. math::
+
+   \\mathbf{K}(r) = \\frac{1}{4\\pi} \\frac{\\mathbf{f} \\times r}{\\lVert r \\rVert^3}
+
+The derivative ``FxdU`` for Biot-Savart is implemented explicitly to match the
+reference code in ``biest/kernel.hpp``.
+
 Off-Surface Evaluation
 ----------------------
 
