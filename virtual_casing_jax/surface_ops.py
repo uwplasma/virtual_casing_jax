@@ -7,22 +7,16 @@ import jax.numpy as jnp
 TWOPI = 2.0 * jnp.pi
 
 
-def _fft_norm_factor(n):
-    return 1.0 / jnp.sqrt(jnp.asarray(n, dtype=jnp.float64))
-
-
 def fft_r2c(x, nt: int, npol: int):
     """Unitary r2c FFT over (nt, npol) axes."""
     x = jnp.asarray(x)
-    y = jnp.fft.rfftn(x, axes=(-2, -1))
-    return y * _fft_norm_factor(nt * npol)
+    return jnp.fft.rfftn(x, axes=(-2, -1), norm="ortho")
 
 
 def fft_c2r(y, nt: int, npol: int):
     """Unitary c2r FFT over (nt, npol) axes."""
     y = jnp.asarray(y)
-    x = jnp.fft.irfftn(y, s=(nt, npol), axes=(-2, -1))
-    return x * _fft_norm_factor(nt * npol)
+    return jnp.fft.irfftn(y, s=(nt, npol), axes=(-2, -1), norm="ortho")
 
 
 def rotate_toroidal(X, nt: int, npol: int, dtheta):
@@ -121,38 +115,28 @@ def upsample(X0, nt0: int, np0: int, nt1: int, np1: int):
     ntt = min(nt0_, nt1_)
     npp = min(np0_, np1_)
 
-    # Scaling for Nyquist modes
-    def _scale_t_pos(t):
-        scale_t = 1.0
-        if (nt0 % 2 == 0) and (nt0_ < nt1_) and (t == ntt // 2):
-            scale_t = 0.5
-        if (nt1 % 2 == 0) and (nt1_ < nt0_) and (t == ntt // 2):
-            scale_t = 2.0
-        return scale_t
-
-    def _scale_t_neg(t):
-        scale_t = 1.0
-        if (nt0 % 2 == 0) and (nt0_ < nt1_) and (t == ntt // 2 - 1):
-            scale_t = 0.5
-        if (nt1 % 2 == 0) and (nt1_ < nt0_) and (t == ntt // 2 - 1):
-            scale_t = 2.0
-        return scale_t
-
-    def _scale_p(p):
-        scale_p = 1.0
-        if (np0 % 2 == 0) and (np0_ < np1_) and (p == npp - 1):
-            scale_p = 0.5
-        if (np1 % 2 == 0) and (np1_ < np0_) and (p == npp - 1):
-            scale_p = 2.0
-        return scale_p
-
     t_pos = jnp.arange(0, ntt // 2 + 1)
     t_neg = jnp.arange(0, ntt // 2)
     p_idx = jnp.arange(0, npp)
 
-    scale_t_pos = jnp.vectorize(_scale_t_pos)(t_pos)
-    scale_t_neg = jnp.vectorize(_scale_t_neg)(t_neg)
-    scale_p = jnp.vectorize(_scale_p)(p_idx)
+    scale_t_pos = jnp.ones_like(t_pos, dtype=coeff0.real.dtype)
+    scale_t_neg = jnp.ones_like(t_neg, dtype=coeff0.real.dtype)
+    scale_p = jnp.ones_like(p_idx, dtype=coeff0.real.dtype)
+
+    if (nt0 % 2 == 0) and (nt0_ < nt1_) and (ntt // 2 < t_pos.size):
+        scale_t_pos = scale_t_pos.at[ntt // 2].set(0.5)
+    if (nt1 % 2 == 0) and (nt1_ < nt0_) and (ntt // 2 < t_pos.size):
+        scale_t_pos = scale_t_pos.at[ntt // 2].set(2.0)
+
+    if (nt0 % 2 == 0) and (nt0_ < nt1_) and (ntt // 2 - 1 < t_neg.size) and (ntt // 2 - 1 >= 0):
+        scale_t_neg = scale_t_neg.at[ntt // 2 - 1].set(0.5)
+    if (nt1 % 2 == 0) and (nt1_ < nt0_) and (ntt // 2 - 1 < t_neg.size) and (ntt // 2 - 1 >= 0):
+        scale_t_neg = scale_t_neg.at[ntt // 2 - 1].set(2.0)
+
+    if (np0 % 2 == 0) and (np0_ < np1_) and (npp - 1 >= 0):
+        scale_p = scale_p.at[npp - 1].set(0.5)
+    if (np1 % 2 == 0) and (np1_ < np0_) and (npp - 1 >= 0):
+        scale_p = scale_p.at[npp - 1].set(2.0)
 
     # Positive frequencies
     coeff1 = coeff1.at[:, t_pos[:, None], p_idx[None, :]].set(
@@ -189,3 +173,87 @@ def resample(X0, nt0: int, np0: int, nt1: int, np1: int):
     # Decimate
     X1 = X_up[:, ::skip_tor, ::skip_pol]
     return X1
+
+
+def grad2d(X, nt: int, npol: int):
+    """Spectral surface derivatives (BIEST SurfaceOp::Grad2D).
+
+    Returns dX with shape (dof * 2, nt, npol) where entries are ordered
+    as [dX_t, dX_p] per component.
+    """
+    X = jnp.asarray(X)
+    dof = int(X.shape[0])
+    coeff = fft_r2c(X, nt, npol)
+
+    t = jnp.arange(nt, dtype=coeff.real.dtype)
+    k_t = jnp.where(t > (nt // 2), t - nt, t)
+    coeff_t = coeff * (-1j * TWOPI) * k_t[None, :, None]
+    dX_t = fft_c2r(coeff_t, nt, npol)
+
+    p = jnp.arange(npol // 2 + 1, dtype=coeff.real.dtype)
+    coeff_p = coeff * (-1j * TWOPI) * p[None, None, :]
+    dX_p = fft_c2r(coeff_p, nt, npol)
+
+    dX = jnp.zeros((dof * 2, nt, npol), dtype=X.dtype)
+    dX = dX.at[0::2].set(dX_t)
+    dX = dX.at[1::2].set(dX_p)
+    return dX
+
+
+def surf_normal_area_elem(dX, X=None):
+    """Compute unit normal and area element (BIEST SurfNormalAreaElem).
+
+    dX: (6, nt, npol) for 3D surfaces (dX_t, dX_p per component).
+    X: optional (3, nt, npol) coordinates for orientation.
+    Returns (normal, area_elem) with shapes (3, nt, npol) and (nt, npol).
+    """
+    dX = jnp.asarray(dX)
+    nt = dX.shape[1]
+    npol = dX.shape[2]
+    n = nt * npol
+
+    xt = jnp.stack([dX[0], dX[2], dX[4]], axis=0)
+    xp = jnp.stack([dX[1], dX[3], dX[5]], axis=0)
+
+    cross = jnp.stack(
+        [
+            xt[1] * xp[2] - xp[1] * xt[2],
+            xt[2] * xp[0] - xp[2] * xt[0],
+            xt[0] * xp[1] - xp[0] * xt[1],
+        ],
+        axis=0,
+    )
+    area = jnp.sqrt(jnp.sum(cross * cross, axis=0))
+    normal = cross / area
+    area_elem = area / float(n)
+
+    if X is not None:
+        X = jnp.asarray(X)
+        X_flat = X.reshape(-1)
+        normal_flat = normal.reshape(-1)
+        idx = jnp.argmax(X_flat)
+        orient = jnp.where(normal_flat[idx] < 0, -1.0, 1.0)
+        normal = normal * orient
+
+    return normal, area_elem
+
+
+def dot_prod(A, B):
+    """SoA dot product: A,B shape (3, nt, npol) -> (nt, npol)."""
+    A = jnp.asarray(A)
+    B = jnp.asarray(B)
+    return A[0] * B[0] + A[1] * B[1] + A[2] * B[2]
+
+
+def cross_prod(A, B):
+    """SoA cross product: A,B shape (3, nt, npol) -> (3, nt, npol)."""
+    A = jnp.asarray(A)
+    B = jnp.asarray(B)
+    return jnp.stack(
+        [
+            A[1] * B[2] - B[1] * A[2],
+            A[2] * B[0] - B[2] * A[0],
+            A[0] * B[1] - B[0] * A[1],
+        ],
+        axis=0,
+    )

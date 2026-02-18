@@ -1,7 +1,16 @@
 """virtual_casing_jax package."""
 
 from . import surface_ops
-from .surface_ops import complete_vec_field, rotate_toroidal, upsample, resample
+from .surface_ops import (
+    complete_vec_field,
+    rotate_toroidal,
+    upsample,
+    resample,
+    grad2d,
+    surf_normal_area_elem,
+    dot_prod,
+    cross_prod,
+)
 from .kernels import (
     laplace_fx_u,
     laplace_fxd_u,
@@ -16,6 +25,10 @@ __all__ = [
     "rotate_toroidal",
     "upsample",
     "resample",
+    "grad2d",
+    "surf_normal_area_elem",
+    "dot_prod",
+    "cross_prod",
     "laplace_fx_u",
     "laplace_fxd_u",
     "laplace_fxd2_u",

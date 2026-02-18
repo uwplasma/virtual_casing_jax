@@ -12,6 +12,7 @@ Test Categories
 
 1. **Surface Operator Parity**
    - FFT-based resampling and derivatives match C++ outputs.
+   - Surface normals, dot/cross products, and area elements match dumps.
 
 2. **Kernel Parity**
    - Laplace and Biot-Savart kernels match analytic formulas and reference

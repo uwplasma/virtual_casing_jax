@@ -31,6 +31,36 @@ The JAX implementation uses unitary FFTs to match the normalization in
 SCTL. The reference FFT wrapper scales by ``1/sqrt(N)`` on both forward
 and inverse transforms.
 
+Surface Differentiation and Normals
+-----------------------------------
+
+Surface derivatives are computed spectrally. For a Fourier mode
+``exp(2*pi*i*(m*theta + n*phi))``:
+
+- ``partial_theta`` multiplies the coefficient by ``-2*pi*i*m``.
+- ``partial_phi`` multiplies the coefficient by ``-2*pi*i*n``.
+
+The negative sign matches the FFT sign convention used in BIEST's
+``Grad2D`` implementation.
+
+Toroidal frequencies use signed indices ``m`` with the Nyquist index
+treated as positive, matching the reference implementation:
+
+``m = t`` for ``t <= Nt/2`` and ``m = t - Nt`` otherwise.
+
+Given ``X_theta`` and ``X_phi``, the unit normal and area element are:
+
+.. math::
+
+   n = \\frac{X_{\\theta} \\times X_{\\phi}}
+            {\\lVert X_{\\theta} \\times X_{\\phi} \\rVert},
+   \\quad
+   dA = \\frac{\\lVert X_{\\theta} \\times X_{\\phi} \\rVert}{N},
+
+with ``N = Nt * Np`` grid points. The orientation is chosen so that the
+normal component corresponding to the maximum coordinate among ``x,y,z``
+is positive, matching BIEST's convention.
+
 Singular Quadrature
 -------------------
 
