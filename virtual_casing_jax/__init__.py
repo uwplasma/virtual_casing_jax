@@ -22,6 +22,8 @@ from .integrals import (
     laplace_fxd_u_eval,
     laplace_fxd_u_eval_vec,
     field_period_target_coords,
+    biotsavart_fx_u_eval,
+    computeB_offsurface_baseline,
 )
 
 __all__ = [
@@ -42,4 +44,6 @@ __all__ = [
     "laplace_fxd_u_eval",
     "laplace_fxd_u_eval_vec",
     "field_period_target_coords",
+    "biotsavart_fx_u_eval",
+    "computeB_offsurface_baseline",
 ]

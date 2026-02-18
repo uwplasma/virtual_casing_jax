@@ -63,3 +63,17 @@ and profiling instrumentation before introducing the full correction.
 
 The direct-sum implementation is chunked to limit memory use and is
 JIT-compatible using ``jax.lax.scan``.
+
+Off-Surface Baseline
+--------------------
+
+For off-surface targets the kernels are non-singular. The current
+implementation evaluates:
+
+.. math::
+
+   B(x) = \\nabla G[B\\cdot n](x) - \\text{BiotSavart}[J](x)
+
+with optional Fourier upsampling of the source grid to improve
+accuracy. This provides a drop-in baseline for ``ComputeBOffSurf`` and
+serves as the reference for future adaptive refinement.

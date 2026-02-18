@@ -4,7 +4,8 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .kernels import laplace_fxd_u
+from .kernels import laplace_fxd_u, biotsavart_fx_u
+from .surface_ops import upsample, grad2d, surf_normal_area_elem
 
 
 def _flatten_soa(x, name: str):
@@ -101,3 +102,97 @@ def laplace_fxd_u_eval_vec(X_src, X_trg, density_vec, area_elem, chunk_size: int
         in_axes=0,
         out_axes=0,
     )(density_vec)
+
+
+def biotsavart_fx_u_eval(X_src, X_trg, density_vec, area_elem, chunk_size: int = 1024):
+    """Evaluate Biot-Savart FxU by direct quadrature.
+
+    density_vec: (3, nt, np) or (3, nsrc)
+    Returns: (3, ntrg) or (3, nt, np) matching X_trg layout.
+    """
+    X_src = _flatten_soa(X_src, "X_src")
+    X_trg = _flatten_soa(X_trg, "X_trg")
+    density_vec = _flatten_soa(density_vec, "density_vec")
+    area_elem = jnp.asarray(area_elem).reshape(-1)
+
+    if X_src.shape[0] != 3 or X_trg.shape[0] != 3 or density_vec.shape[0] != 3:
+        raise ValueError("X_src, X_trg, density_vec must be 3D in SoA layout")
+
+    nsrc = X_src.shape[1]
+    ntrg = X_trg.shape[1]
+    if area_elem.shape[0] != nsrc:
+        raise ValueError("area_elem must match source grid size")
+
+    weights = density_vec * area_elem[None, :]
+    Xs = jnp.transpose(X_src, (1, 0))  # (nsrc, 3)
+    Xt = jnp.transpose(X_trg, (1, 0))  # (ntrg, 3)
+
+    if chunk_size is None or chunk_size <= 0:
+        dx = Xt[:, None, :] - Xs[None, :, :]
+        fvec = jnp.transpose(weights, (1, 0))[None, :, :]
+        contrib = biotsavart_fx_u(dx, fvec)
+        out = jnp.sum(contrib, axis=1)
+        return jnp.transpose(out, (1, 0))
+
+    pad = (-nsrc) % chunk_size
+    if pad:
+        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
+        weights = jnp.pad(weights, ((0, 0), (0, pad)))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = nsrc_pad // chunk_size
+
+    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+    W_chunks = weights.reshape((3, n_chunks, chunk_size)).transpose(1, 2, 0)
+
+    def scan_fn(acc, xs):
+        Xc, Wc = xs
+        dx = Xt[:, None, :] - Xc[None, :, :]
+        fvec = Wc[None, :, :]
+        contrib = biotsavart_fx_u(dx, fvec)
+        acc = acc + jnp.sum(contrib, axis=1)
+        return acc, None
+
+    init = jnp.zeros((ntrg, 3), dtype=Xs.dtype)
+    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
+    return jnp.transpose(out, (1, 0))
+
+
+def computeB_offsurface_baseline(
+    X_src,
+    BdotN,
+    J,
+    Xt,
+    upsample_factor: int = 1,
+    chunk_size: int = 1024,
+    ext: bool = True,
+):
+    """Baseline off-surface evaluation using direct quadrature.
+
+    This mirrors ExtVacuumField behavior (no singular correction) with
+    optional upsampling for improved accuracy.
+    """
+    X_src = jnp.asarray(X_src)
+    BdotN = jnp.asarray(BdotN)
+    J = jnp.asarray(J)
+
+    nt = X_src.shape[1]
+    npol = X_src.shape[2]
+
+    if upsample_factor > 1:
+        nt1 = nt * upsample_factor
+        np1 = npol * upsample_factor
+        X_src = upsample(X_src, nt, npol, nt1, np1)
+        BdotN = upsample(BdotN[None, ...], nt, npol, nt1, np1)[0]
+        J = upsample(J, nt, npol, nt1, np1)
+
+    dX = grad2d(X_src, X_src.shape[1], X_src.shape[2])
+    _, area_elem = surf_normal_area_elem(dX, X_src)
+
+    sign = 1.0 if ext else -1.0
+    gradG = laplace_fxd_u_eval(X_src, Xt, BdotN * sign, area_elem, chunk_size=chunk_size)
+    bs = biotsavart_fx_u_eval(X_src, Xt, J * sign, area_elem, chunk_size=chunk_size)
+
+    # For external fields, B = gradG[BdotN] - BiotSavart[J]
+    if ext:
+        return gradG - bs
+    return gradG + bs

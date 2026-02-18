@@ -8,6 +8,7 @@ from virtual_casing_jax.integrals import (
     laplace_fxd_u_eval,
     laplace_fxd_u_eval_vec,
     field_period_target_coords,
+    computeB_offsurface_baseline,
 )
 from virtual_casing_jax.surface_ops import surf_normal_area_elem
 
@@ -35,6 +36,15 @@ def _load_case(prefix: str):
     Bvc = load_dump(DATA_DIR / f"{prefix}_computeB_Bvc")
     B_on_trg = load_dump(DATA_DIR / f"{prefix}_computeB_B_on_trg")
     return X, dX, BdotN, J, gradG_BdotN, gradG_J, Bvc, B_on_trg
+
+
+def _load_offsurf_case(prefix: str):
+    X = load_dump(DATA_DIR / f"{prefix}_computeBOff_quad_coord")
+    BdotN = load_dump(DATA_DIR / f"{prefix}_computeBOff_BdotN")
+    J = load_dump(DATA_DIR / f"{prefix}_computeBOff_J")
+    Xt = load_dump(DATA_DIR / f"{prefix}_computeBOff_Xt")
+    Bvc = load_dump(DATA_DIR / f"{prefix}_computeBOff_Bvc")
+    return X, BdotN, J, Xt, Bvc
 
 
 @pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
@@ -138,3 +148,26 @@ def test_baseline_computeB_parity(prefix):
 
     rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
     assert rel < 0.08
+
+
+def test_baseline_computeBOff_parity_case_vc():
+    prefix = "case_vc"
+    if not _dump_exists(prefix, "computeBOff_Bvc"):
+        pytest.skip("parity dump not available")
+
+    X, BdotN, J, Xt, Bvc_ref = _load_offsurf_case(prefix)
+
+    Bvc = np.asarray(
+        computeB_offsurface_baseline(
+            jnp.asarray(X),
+            jnp.asarray(BdotN),
+            jnp.asarray(J),
+            jnp.asarray(Xt),
+            upsample_factor=4,
+            chunk_size=2048,
+            ext=True,
+        )
+    )
+
+    rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
+    assert rel < 0.15

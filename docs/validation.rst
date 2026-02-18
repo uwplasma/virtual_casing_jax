@@ -27,6 +27,8 @@ Test Categories
    - Baseline ``ComputeB`` using direct-sum integrals matches reference
      within coarse tolerances.
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.
+   - Off-surface ``ComputeBOffSurf`` baseline is validated using
+     upsampled direct-sum quadrature.
 
 Tolerance Policy
 ----------------
