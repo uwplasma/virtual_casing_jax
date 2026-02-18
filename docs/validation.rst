@@ -24,6 +24,8 @@ Test Categories
    - Double-layer self-test returns ``0.5`` jump for constant density.
 
 4. **End-to-End Virtual Casing Parity**
+   - Baseline ``ComputeB`` using direct-sum integrals matches reference
+     within coarse tolerances.
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.
 
 Tolerance Policy
