@@ -19,6 +19,8 @@ Test Categories
      scaling (``1/(4*pi)``).
 
 3. **Boundary Integral Parity**
+   - Baseline direct-sum ``LaplaceFxdU`` matches reference up to
+     singular-correction errors.
    - Double-layer self-test returns ``0.5`` jump for constant density.
 
 4. **End-to-End Virtual Casing Parity**

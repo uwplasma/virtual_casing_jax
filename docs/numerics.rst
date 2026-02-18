@@ -61,6 +61,27 @@ with ``N = Nt * Np`` grid points. The orientation is chosen so that the
 normal component corresponding to the maximum coordinate among ``x,y,z``
 is positive, matching BIEST's convention.
 
+Field-Period Target Selection
+-----------------------------
+
+The BIEST field-period operator evaluates on a **subset** of the
+quadrature grid. Given:
+
+- ``quad_nt`` / ``quad_np``: quadrature grid sizes for the full surface.
+- ``trg_nt`` / ``trg_np``: target grid sizes for one field period.
+- ``nfp``: number of field periods.
+
+The target indices are selected by uniform strides:
+
+.. math::
+
+   \\text{skip}_t = \\frac{\\text{quad\\_nt}}{n_{fp}\\,\\text{trg\\_nt}}, \\quad
+   \\text{skip}_p = \\frac{\\text{quad\\_np}}{\\text{trg\\_np}}
+
+and ``(i,j)`` maps to the quadrature index
+``(t,p) = (i * skip_t, j * skip_p)`` with ``i \\in [0, trg_nt)``.
+This picks points from the first field period only.
+
 Singular Quadrature
 -------------------
 

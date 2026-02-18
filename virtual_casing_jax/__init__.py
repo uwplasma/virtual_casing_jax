@@ -18,6 +18,11 @@ from .kernels import (
     biotsavart_fx_u,
     biotsavart_fxd_u,
 )
+from .integrals import (
+    laplace_fxd_u_eval,
+    laplace_fxd_u_eval_vec,
+    field_period_target_coords,
+)
 
 __all__ = [
     "surface_ops",
@@ -34,4 +39,7 @@ __all__ = [
     "laplace_fxd2_u",
     "biotsavart_fx_u",
     "biotsavart_fxd_u",
+    "laplace_fxd_u_eval",
+    "laplace_fxd_u_eval_vec",
+    "field_period_target_coords",
 ]

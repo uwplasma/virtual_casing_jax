@@ -9,6 +9,15 @@ singular kernels. Performance and memory efficiency are addressed via:
 - Precomputed quadrature tables and interpolation matrices.
 - Optional rematerialization to reduce memory in the backward pass.
 
+Baseline (Direct-Sum) Path
+--------------------------
+
+The initial JAX implementation evaluates Laplace FxdU using a direct
+quadrature with chunking and ``jax.lax.scan``. This avoids materializing
+the full ``N_trg x N_src`` kernel matrix and keeps memory use linear in
+the chunk size. The baseline is primarily for correctness and parity
+instrumentation; singular corrections will be layered on later.
+
 CPU and GPU
 -----------
 

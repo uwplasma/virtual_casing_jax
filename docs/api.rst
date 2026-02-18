@@ -10,3 +10,8 @@ API
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: virtual_casing_jax.integrals
+   :members:
+   :undoc-members:
+   :show-inheritance:
