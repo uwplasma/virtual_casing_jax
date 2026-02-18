@@ -23,3 +23,4 @@ Tips and Tricks
 - Cache POU and interpolation tables for each ``(PATCH_DIM, RAD_DIM)``.
 - For parity checks, use float64; for production, use mixed precision
   with float32 inputs.
+  Enable ``jax_enable_x64`` in tests to match the reference C++ results.

@@ -6,7 +6,12 @@ import pytest
 import jax.numpy as jnp
 
 from virtual_casing_jax.surface_ops import upsample, resample
-from .dump_io import load_dump
+
+# Allow direct import of dump_io when tests are not a package.
+import sys
+from pathlib import Path as _Path
+sys.path.append(str(_Path(__file__).parent))
+from dump_io import load_dump  # noqa: E402
 
 DATA_DIR = Path(__file__).parent / "data"
 
