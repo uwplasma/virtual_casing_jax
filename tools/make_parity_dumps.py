@@ -56,6 +56,7 @@ def make_simsopt_vmec_case(dst_dir: Path):
     except Exception:
         print("simsopt not available; skipping simsopt parity dumps")
         return
+    import virtual_casing as vc_module
 
     test_dir = Path(__file__).resolve().parents[2] / "simsopt" / "tests" / "test_files"
     wout = test_dir / "wout_20220102-01-053-003_QH_nfp4_aspect6p5_beta0p05_iteratedWithSfincs_reference.nc"
@@ -64,7 +65,46 @@ def make_simsopt_vmec_case(dst_dir: Path):
         return
 
     vmec = Vmec(str(wout))
-    _ = VirtualCasing.from_vmec(vmec, src_nphi=8, src_ntheta=8, trgt_nphi=6, trgt_ntheta=6, use_stellsym=True)
+    vc = VirtualCasing.from_vmec(
+        vmec,
+        src_nphi=8,
+        src_ntheta=8,
+        trgt_nphi=6,
+        trgt_ntheta=6,
+        use_stellsym=True,
+        digits=6,
+    )
+
+    gamma = vc.gamma
+    B_total = vc.B_total
+    src_nphi = vc.src_nphi
+    src_ntheta = vc.src_ntheta
+    trgt_nphi = vc.trgt_nphi
+    trgt_ntheta = vc.trgt_ntheta
+
+    gamma1d = np.zeros(src_nphi * src_ntheta * 3)
+    B1d = np.zeros(src_nphi * src_ntheta * 3)
+    for jxyz in range(3):
+        gamma1d[jxyz * src_nphi * src_ntheta:(jxyz + 1) * src_nphi * src_ntheta] = \
+            gamma[:, :, jxyz].flatten(order="C")
+        B1d[jxyz * src_nphi * src_ntheta:(jxyz + 1) * src_nphi * src_ntheta] = \
+            B_total[:, :, jxyz].flatten(order="C")
+
+    vcasing = vc_module.VirtualCasing()
+    vcasing.setup(
+        6,
+        vc.nfp,
+        True,
+        src_nphi,
+        src_ntheta,
+        gamma1d,
+        src_nphi,
+        src_ntheta,
+        trgt_nphi,
+        trgt_ntheta,
+    )
+    _ = vcasing.compute_external_B(B1d)
+    _ = vcasing.compute_external_gradB(B1d)
 
 
 def main():

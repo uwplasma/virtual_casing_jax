@@ -64,6 +64,18 @@ def _load_gradb_case(prefix: str):
 
 
 def _infer_nfp(prefix: str):
+    if _dump_exists(prefix, "computeGradB_B0_complete") and _dump_exists(prefix, "setup_X"):
+        B0 = load_dump(DATA_DIR / f"{prefix}_computeGradB_B0_complete")
+        base = load_dump(DATA_DIR / f"{prefix}_setup_X")
+        if B0.shape[1] % base.shape[1] != 0:
+            raise ValueError("computeGradB_B0_complete must be an integer multiple of setup_X in toroidal dimension")
+        return B0.shape[1] // base.shape[1]
+    if _dump_exists(prefix, "computeB_B0_complete") and _dump_exists(prefix, "setup_X"):
+        B0 = load_dump(DATA_DIR / f"{prefix}_computeB_B0_complete")
+        base = load_dump(DATA_DIR / f"{prefix}_setup_X")
+        if B0.shape[1] % base.shape[1] != 0:
+            raise ValueError("computeB_B0_complete must be an integer multiple of setup_X in toroidal dimension")
+        return B0.shape[1] // base.shape[1]
     if _dump_exists(prefix, "setup_surface_coord") and _dump_exists(prefix, "setup_X"):
         surf = load_dump(DATA_DIR / f"{prefix}_setup_surface_coord")
         base = load_dump(DATA_DIR / f"{prefix}_setup_X")
@@ -325,8 +337,8 @@ def test_adaptive_computeBOff_parity_case_vc():
     assert rel < 1e-2
 
 
-def test_laplace_fxd2_u_eval_singular_parity_case_vc():
-    prefix = "case_vc"
+@pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
+def test_laplace_fxd2_u_eval_singular_parity(prefix):
     if not _dump_exists(prefix, "computeGradB_gradgradG_BdotN"):
         pytest.skip("parity dump not available")
 
@@ -353,8 +365,8 @@ def test_laplace_fxd2_u_eval_singular_parity_case_vc():
     assert rel < 5e-3
 
 
-def test_laplace_fxd2_u_eval_vec_singular_parity_case_vc():
-    prefix = "case_vc"
+@pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
+def test_laplace_fxd2_u_eval_vec_singular_parity(prefix):
     if not _dump_exists(prefix, "computeGradB_gradG_J"):
         pytest.skip("parity dump not available")
 
@@ -377,11 +389,12 @@ def test_laplace_fxd2_u_eval_vec_singular_parity_case_vc():
     out = np.asarray(out).reshape((3, 3, 3, trg_nt, trg_np))
 
     rel = np.linalg.norm(out - gradG_J) / (np.linalg.norm(gradG_J) + 1e-14)
-    assert rel < 5e-3
+    tol = 5e-3 if prefix == "case_vc" else 8e-3
+    assert rel < tol
 
 
-def test_computeGradB_parity_case_vc():
-    prefix = "case_vc"
+@pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
+def test_computeGradB_parity(prefix):
     if not _dump_exists(prefix, "computeGradB_gradBvc"):
         pytest.skip("parity dump not available")
 
@@ -424,4 +437,5 @@ def test_computeGradB_parity_case_vc():
     gradBvc = gradBvc + gradgradG_BdotN
 
     rel = np.linalg.norm(gradBvc - gradBvc_ref) / (np.linalg.norm(gradBvc_ref) + 1e-14)
-    assert rel < 5e-3
+    tol = 5e-3 if prefix == "case_vc" else 6e-3
+    assert rel < tol
