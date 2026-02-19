@@ -59,7 +59,10 @@ def _reconstruct_B0(
     return np.asarray(B0)
 
 
-@pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt", "case_vc_w7x"])
+@pytest.mark.parametrize(
+    "prefix",
+    ["case_vc", "case_vc_large", "case_simsopt", "case_simsopt_large", "case_vc_w7x", "case_vc_w7x_large"],
+)
 def test_virtual_casing_computeB_parity(prefix):
     if not (DATA_DIR / f"{prefix}_computeB_Bvc.bin").exists():
         pytest.skip("parity dump not available")
@@ -75,8 +78,11 @@ def test_virtual_casing_computeB_parity(prefix):
 
     tol_map = {
         "case_vc": 1e-4,
+        "case_vc_large": 1e-4,
         "case_simsopt": 1e-4,
+        "case_simsopt_large": 1e-4,
         "case_vc_w7x": 1e-3,
+        "case_vc_w7x_large": 1e-3,
     }
     B0 = _reconstruct_B0(
         prefix,
@@ -91,8 +97,11 @@ def test_virtual_casing_computeB_parity(prefix):
 
     digits_map = {
         "case_vc": 5,
+        "case_vc_large": 6,
         "case_simsopt": 6,
+        "case_simsopt_large": 6,
         "case_vc_w7x": 6,
+        "case_vc_w7x_large": 6,
     }
     digits = digits_map[prefix]
     vc = VirtualCasingJAX()
@@ -121,8 +130,11 @@ def test_virtual_casing_computeB_parity(prefix):
     rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
     tol_map = {
         "case_vc": 3e-4,
+        "case_vc_large": 6e-4,
         "case_simsopt": 6e-4,
+        "case_simsopt_large": 8e-4,
         "case_vc_w7x": 8e-4,
+        "case_vc_w7x_large": 1.2e-3,
     }
     tol = tol_map[prefix]
     assert rel < tol

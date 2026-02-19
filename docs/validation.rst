@@ -50,6 +50,10 @@ Test Categories
      (``case_vc_w7x``) to ~1e-3 relative error.
    - ``VirtualCasingJAX.compute_external_gradB`` matches the W7-X parity
      case (``case_vc_w7x``) to ~2e-2 relative error.
+   - Large-grid parity cases (``case_vc_large``, ``case_vc_w7x_large``,
+     ``case_simsopt_large``) exercise higher-resolution B/GradB paths.
+   - Off-surface B/GradB parity includes larger target sets via
+     ``case_vc_large``.
    - Autodiff of ``compute_external_B_autodiff`` matches the C++
      ``ComputeGradB`` outputs on both parity cases.
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.

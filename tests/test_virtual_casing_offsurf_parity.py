@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 import jax.numpy as jnp
 
 from virtual_casing_jax.virtual_casing import VirtualCasingJAX
@@ -28,7 +29,18 @@ def _infer_setup(prefix: str, kind: str):
     return X, src_nt, src_np, nfp, nfp_eff, half_period
 
 
-def _reconstruct_B0(prefix: str, kind: str, src_nt: int, src_np: int, nfp: int, nfp_eff: int, half_period: bool, trg_nt: int):
+def _reconstruct_B0(
+    prefix: str,
+    kind: str,
+    src_nt: int,
+    src_np: int,
+    nfp: int,
+    nfp_eff: int,
+    half_period: bool,
+    trg_nt: int,
+    *,
+    tol: float = 1e-4,
+):
     B0_complete_ref = load_dump(DATA_DIR / f"{prefix}_{kind}_B0_complete")
     B0_complete_ref = jnp.asarray(B0_complete_ref)
     B0_complete = B0_complete_ref
@@ -43,7 +55,7 @@ def _reconstruct_B0(prefix: str, kind: str, src_nt: int, src_np: int, nfp: int, 
     B0_re = complete_vec_field(B0, False, half_period, nfp, src_nt, src_np, dtheta)
     num = np.linalg.norm(np.asarray(B0_re) - np.asarray(B0_complete_ref))
     den = np.linalg.norm(np.asarray(B0_complete_ref)) + 1e-14
-    assert num / den < 1e-4
+    assert num / den < tol
 
     return np.asarray(B0)
 
@@ -53,16 +65,21 @@ def _get_trg_shape(prefix: str):
     return Bvc.shape[1], Bvc.shape[2]
 
 
-def test_virtual_casing_computeB_offsurf_parity():
-    prefix = "case_vc"
+@pytest.mark.parametrize(
+    "prefix,digits,tol",
+    [
+        ("case_vc", 5, 5e-4),
+        ("case_vc_large", 6, 8e-4),
+        ("case_vc_w7x_large", 6, 1.5e-3),
+    ],
+)
+def test_virtual_casing_computeB_offsurf_parity(prefix, digits, tol):
     Bvc_ref = load_dump(DATA_DIR / f"{prefix}_computeBOff_Bvc")
     Xt = load_dump(DATA_DIR / f"{prefix}_computeBOff_Xt")
 
     X, src_nt, src_np, nfp, nfp_eff, half_period = _infer_setup(prefix, "computeBOff")
     trg_nt, trg_np = _get_trg_shape(prefix)
     B0 = _reconstruct_B0(prefix, "computeBOff", src_nt, src_np, nfp, nfp_eff, half_period, trg_nt)
-
-    digits = 5
     vc = VirtualCasingJAX()
     vc.setup(
         digits,
@@ -88,7 +105,7 @@ def test_virtual_casing_computeB_offsurf_parity():
     Bvc = np.asarray(Bvc)
 
     rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
-    assert rel < 5e-4
+    assert rel < tol
 
 
 def test_virtual_casing_computeBint_offsurf_parity():
@@ -129,8 +146,15 @@ def test_virtual_casing_computeBint_offsurf_parity():
     assert rel < 5e-4
 
 
-def test_virtual_casing_gradB_offsurf_parity():
-    prefix = "case_vc"
+@pytest.mark.parametrize(
+    "prefix,digits,tol",
+    [
+        ("case_vc", 5, 5e-3),
+        ("case_vc_large", 6, 8e-3),
+        ("case_vc_w7x_large", 6, 1.8e-2),
+    ],
+)
+def test_virtual_casing_gradB_offsurf_parity(prefix, digits, tol):
     gradB_ref = load_dump(DATA_DIR / f"{prefix}_computeGradBOff_gradBvc")
     Xt = load_dump(DATA_DIR / f"{prefix}_computeGradBOff_Xt")
 
@@ -138,7 +162,6 @@ def test_virtual_casing_gradB_offsurf_parity():
     trg_nt, trg_np = _get_trg_shape(prefix)
     B0 = _reconstruct_B0(prefix, "computeGradBOff", src_nt, src_np, nfp, nfp_eff, half_period, trg_nt)
 
-    digits = 5
     vc = VirtualCasingJAX()
     vc.setup(
         digits,
@@ -164,4 +187,4 @@ def test_virtual_casing_gradB_offsurf_parity():
     gradB = np.asarray(gradB)
 
     rel = np.linalg.norm(gradB - gradB_ref) / (np.linalg.norm(gradB_ref) + 1e-14)
-    assert rel < 5e-3
+    assert rel < tol

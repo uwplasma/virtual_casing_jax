@@ -61,9 +61,12 @@ def get_digits(prefix: str):
     return {
         "case_vc": 5,
         "case_vc_int": 5,
+        "case_vc_large": 6,
         "case_vc_w7x": 6,
+        "case_vc_w7x_large": 6,
         "case_simsopt": 6,
         "case_simsopt_int": 6,
+        "case_simsopt_large": 6,
     }.get(prefix, 6)
 
 
@@ -129,6 +132,9 @@ def profile(args: argparse.Namespace):
             quad_np=quad_np,
             digits=digits,
             chunk_size=args.chunk_size,
+            target_chunk_size=args.target_chunk_size,
+            pou_dtype=args.pou_dtype,
+            remat=args.remat,
         )
     elif args.op == "GradB":
         fn = vc.compute_external_gradB if args.mode == "external" else vc.compute_internal_gradB
@@ -140,6 +146,9 @@ def profile(args: argparse.Namespace):
             quad_np=quad_np,
             digits=digits,
             chunk_size=args.chunk_size,
+            target_chunk_size=args.target_chunk_size,
+            pou_dtype=args.pou_dtype,
+            remat=args.remat,
         )
     elif args.op == "Boff":
         fn = vc.compute_external_B_offsurf if args.mode == "external" else vc.compute_internal_B_offsurf
@@ -150,6 +159,7 @@ def profile(args: argparse.Namespace):
             max_Nt=args.max_nt,
             max_Np=args.max_np,
             chunk_size=args.chunk_size,
+            target_chunk_size=args.target_chunk_size,
         )
     else:
         fn = vc.compute_external_gradB_offsurf if args.mode == "external" else vc.compute_internal_gradB_offsurf
@@ -160,6 +170,7 @@ def profile(args: argparse.Namespace):
             max_Nt=args.max_nt,
             max_Np=args.max_np,
             chunk_size=args.chunk_size,
+            target_chunk_size=args.target_chunk_size,
         )
 
     # Warmup (compile / cache)
@@ -187,10 +198,25 @@ def main():
     parser.add_argument("--trace-dir", default="", help="Directory for JAX profiler trace")
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--repeat", type=int, default=1)
-    parser.add_argument("--chunk-size", type=int, default=1024)
+    parser.add_argument("--chunk-size", type=str, default="auto")
+    parser.add_argument("--target-chunk-size", type=str, default="auto")
+    parser.add_argument("--pou-dtype", type=str, default=None)
+    parser.add_argument("--remat", dest="remat", action="store_true")
+    parser.add_argument("--no-remat", dest="remat", action="store_false")
     parser.add_argument("--max-nt", type=int, default=-1)
     parser.add_argument("--max-np", type=int, default=-1)
+    parser.set_defaults(remat=None)
     args = parser.parse_args()
+
+    def _parse_chunk(val):
+        if val is None:
+            return None
+        if isinstance(val, str) and val.lower() == "auto":
+            return "auto"
+        return int(val)
+
+    args.chunk_size = _parse_chunk(args.chunk_size)
+    args.target_chunk_size = _parse_chunk(args.target_chunk_size)
 
     profile(args)
 

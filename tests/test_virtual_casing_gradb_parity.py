@@ -61,7 +61,10 @@ def _reconstruct_B0(
     return np.asarray(B0)
 
 
-@pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt", "case_vc_w7x"])
+@pytest.mark.parametrize(
+    "prefix",
+    ["case_vc", "case_vc_large", "case_simsopt", "case_simsopt_large", "case_vc_w7x", "case_vc_w7x_large"],
+)
 def test_virtual_casing_gradb_parity(prefix):
     if not (DATA_DIR / f"{prefix}_computeGradB_gradBvc.bin").exists():
         pytest.skip("parity dump not available")
@@ -77,8 +80,11 @@ def test_virtual_casing_gradb_parity(prefix):
 
     tol_map = {
         "case_vc": 1e-4,
+        "case_vc_large": 1e-4,
         "case_simsopt": 1e-4,
+        "case_simsopt_large": 1e-4,
         "case_vc_w7x": 1e-3,
+        "case_vc_w7x_large": 1e-3,
     }
     B0 = _reconstruct_B0(
         prefix,
@@ -93,8 +99,11 @@ def test_virtual_casing_gradb_parity(prefix):
 
     digits_map = {
         "case_vc": 5,
+        "case_vc_large": 6,
         "case_simsopt": 6,
+        "case_simsopt_large": 6,
         "case_vc_w7x": 6,
+        "case_vc_w7x_large": 6,
     }
     digits = digits_map[prefix]
     vc = VirtualCasingJAX()
@@ -124,8 +133,11 @@ def test_virtual_casing_gradb_parity(prefix):
     rel = np.linalg.norm(gradB - gradBvc_ref) / (np.linalg.norm(gradBvc_ref) + 1e-14)
     tol_map = {
         "case_vc": 5e-3,
+        "case_vc_large": 7e-3,
         "case_simsopt": 6e-3,
+        "case_simsopt_large": 8e-3,
         "case_vc_w7x": 2.5e-2,
+        "case_vc_w7x_large": 3.0e-2,
     }
     tol = tol_map[prefix]
     assert rel < tol

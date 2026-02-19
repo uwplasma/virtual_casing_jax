@@ -46,70 +46,133 @@ def _reset_drand48():
         print(f"Warning: could not reset drand48 state: {exc}")
 
 
-def make_virtual_casing_testdata(dst_dir: Path, mode: str):
+def _make_xt_points(npts: int):
+    if npts == 3:
+        xs = np.array([2.0, 2.1, 2.2])
+        ys = np.array([0.0, 0.1, 0.2])
+        zs = np.array([0.0, 0.0, 0.0])
+    else:
+        t = np.linspace(0.0, 1.0, npts, endpoint=False)
+        xs = 2.0 + 0.1 * t
+        ys = 0.15 * np.sin(2 * np.pi * t)
+        zs = 0.10 * np.cos(2 * np.pi * t)
+    return np.concatenate([xs, ys, zs]).tolist()
+
+
+def make_virtual_casing_case(
+    *,
+    mode: str,
+    nfp: int,
+    half_period: bool,
+    nt: int,
+    npol: int,
+    src_nt: int,
+    src_np: int,
+    trg_nt: int,
+    trg_np: int,
+    digits: int,
+    surf_type,
+    xt: list[float] | None = None,
+):
     import virtual_casing as vc
 
-    nfp = 1
-    half_period = False
-    nt = 6
-    npol = 5
-    src_nt = 6
-    src_np = 5
-    trg_nt = 4
-    trg_np = 4
-    digits = 5
-
-    X = vc.VirtualCasingTestData.surface_coordinates(nfp, half_period, nt, npol, vc.SurfType.AxisymNarrow)
+    X = vc.VirtualCasingTestData.surface_coordinates(nfp, half_period, nt, npol, surf_type)
     Bext, Bint = vc.VirtualCasingTestData.magnetic_field_data(nfp, half_period, nt, npol, X, src_nt, src_np)
     Btotal = (np.array(Bext) + np.array(Bint)).tolist()
 
     vcasing = vc.VirtualCasing()
     vcasing.setup(digits, nfp, half_period, nt, npol, X, src_nt, src_np, trg_nt, trg_np)
 
-    # Off-surface, 3 target points
-    Xt = [2.0, 2.1, 2.2, 0.0, 0.1, 0.2, 0.0, 0.0, 0.0]
+    if xt is None:
+        xt = _make_xt_points(3)
 
     if mode == "ext":
         _ = vcasing.compute_external_B(Btotal)
         _ = vcasing.compute_external_gradB(Btotal)
-        _ = vcasing.compute_external_B_offsurf(Btotal, Xt, -1, -1)
-        _ = vcasing.compute_external_gradB_offsurf(Btotal, Xt, -1, -1)
+        _ = vcasing.compute_external_B_offsurf(Btotal, xt, -1, -1)
+        _ = vcasing.compute_external_gradB_offsurf(Btotal, xt, -1, -1)
     elif mode == "int":
         _ = vcasing.compute_internal_B(Btotal)
         _ = vcasing.compute_internal_gradB(Btotal)
-        _ = vcasing.compute_internal_B_offsurf(Btotal, Xt, -1, -1)
+        _ = vcasing.compute_internal_B_offsurf(Btotal, xt, -1, -1)
     else:
         raise ValueError(f"Unknown mode: {mode}")
+
+
+def make_virtual_casing_testdata(dst_dir: Path, mode: str):
+    import virtual_casing as vc
+
+    make_virtual_casing_case(
+        mode=mode,
+        nfp=1,
+        half_period=False,
+        nt=6,
+        npol=5,
+        src_nt=6,
+        src_np=5,
+        trg_nt=4,
+        trg_np=4,
+        digits=5,
+        surf_type=vc.SurfType.AxisymNarrow,
+        xt=_make_xt_points(3),
+    )
 
 
 def make_virtual_casing_testdata_w7x(dst_dir: Path, mode: str):
     import virtual_casing as vc
 
-    nfp = 5
-    half_period = True
-    nt = 8
-    npol = 6
-    src_nt = 8
-    src_np = 6
-    trg_nt = 6
-    trg_np = 5
-    digits = 6
+    make_virtual_casing_case(
+        mode=mode,
+        nfp=5,
+        half_period=True,
+        nt=8,
+        npol=6,
+        src_nt=8,
+        src_np=6,
+        trg_nt=6,
+        trg_np=5,
+        digits=6,
+        surf_type=vc.SurfType.W7X_,
+        xt=_make_xt_points(3),
+    )
 
-    X = vc.VirtualCasingTestData.surface_coordinates(nfp, half_period, nt, npol, vc.SurfType.W7X_)
-    Bext, Bint = vc.VirtualCasingTestData.magnetic_field_data(nfp, half_period, nt, npol, X, src_nt, src_np)
-    Btotal = (np.array(Bext) + np.array(Bint)).tolist()
 
-    vcasing = vc.VirtualCasing()
-    vcasing.setup(digits, nfp, half_period, nt, npol, X, src_nt, src_np, trg_nt, trg_np)
+def make_virtual_casing_testdata_large(dst_dir: Path, mode: str):
+    import virtual_casing as vc
 
-    if mode == "ext":
-        _ = vcasing.compute_external_B(Btotal)
-        _ = vcasing.compute_external_gradB(Btotal)
-    elif mode == "int":
-        _ = vcasing.compute_internal_B(Btotal)
-        _ = vcasing.compute_internal_gradB(Btotal)
-    else:
-        raise ValueError(f"Unknown mode: {mode}")
+    make_virtual_casing_case(
+        mode=mode,
+        nfp=1,
+        half_period=False,
+        nt=14,
+        npol=10,
+        src_nt=14,
+        src_np=10,
+        trg_nt=10,
+        trg_np=8,
+        digits=6,
+        surf_type=vc.SurfType.AxisymNarrow,
+        xt=_make_xt_points(32),
+    )
+
+
+def make_virtual_casing_testdata_w7x_large(dst_dir: Path, mode: str):
+    import virtual_casing as vc
+
+    make_virtual_casing_case(
+        mode=mode,
+        nfp=5,
+        half_period=True,
+        nt=12,
+        npol=10,
+        src_nt=12,
+        src_np=10,
+        trg_nt=8,
+        trg_np=8,
+        digits=6,
+        surf_type=vc.SurfType.W7X_,
+        xt=_make_xt_points(32),
+    )
 
 
 def make_virtual_casing_testdata_dumps(dst_dir: Path):
@@ -141,7 +204,17 @@ def make_virtual_casing_testdata_dumps(dst_dir: Path):
     _write_dump(dst_dir, "case_testdata_axisym_GradBint", GradBint)
 
 
-def make_simsopt_vmec_case(dst_dir: Path, mode: str):
+def make_simsopt_vmec_case(
+    dst_dir: Path,
+    mode: str,
+    *,
+    src_nphi: int = 8,
+    src_ntheta: int = 8,
+    trgt_nphi: int = 6,
+    trgt_ntheta: int = 6,
+    digits: int = 6,
+    xt: list[float] | None = None,
+):
     try:
         from simsopt.mhd import VirtualCasing, Vmec
     except Exception:
@@ -158,12 +231,12 @@ def make_simsopt_vmec_case(dst_dir: Path, mode: str):
     vmec = Vmec(str(wout))
     vc = VirtualCasing.from_vmec(
         vmec,
-        src_nphi=8,
-        src_ntheta=8,
-        trgt_nphi=6,
-        trgt_ntheta=6,
+        src_nphi=src_nphi,
+        src_ntheta=src_ntheta,
+        trgt_nphi=trgt_nphi,
+        trgt_ntheta=trgt_ntheta,
         use_stellsym=True,
-        digits=6,
+        digits=digits,
     )
 
     gamma = vc.gamma
@@ -183,7 +256,7 @@ def make_simsopt_vmec_case(dst_dir: Path, mode: str):
 
     vcasing = vc_module.VirtualCasing()
     vcasing.setup(
-        6,
+        digits,
         vc.nfp,
         True,
         src_nphi,
@@ -197,11 +270,29 @@ def make_simsopt_vmec_case(dst_dir: Path, mode: str):
     if mode == "ext":
         _ = vcasing.compute_external_B(B1d)
         _ = vcasing.compute_external_gradB(B1d)
+        if xt is not None:
+            _ = vcasing.compute_external_B_offsurf(B1d, xt, -1, -1)
+            _ = vcasing.compute_external_gradB_offsurf(B1d, xt, -1, -1)
     elif mode == "int":
         _ = vcasing.compute_internal_B(B1d)
         _ = vcasing.compute_internal_gradB(B1d)
+        if xt is not None:
+            _ = vcasing.compute_internal_B_offsurf(B1d, xt, -1, -1)
     else:
         raise ValueError(f"Unknown mode: {mode}")
+
+
+def make_simsopt_vmec_case_large(dst_dir: Path, mode: str):
+    return make_simsopt_vmec_case(
+        dst_dir,
+        mode,
+        src_nphi=12,
+        src_ntheta=12,
+        trgt_nphi=10,
+        trgt_ntheta=10,
+        digits=6,
+        xt=_make_xt_points(32),
+    )
 
 
 def main():
@@ -220,6 +311,10 @@ def main():
         make_virtual_casing_testdata(dst_dir, mode="int")
         _copy_prefix(tmpdir, dst_dir, "case_vc_int")
 
+        os.environ["VC_DUMP_PREFIX"] = "case_vc_large"
+        make_virtual_casing_testdata_large(dst_dir, mode="ext")
+        _copy_prefix(tmpdir, dst_dir, "case_vc_large")
+
         os.environ["VC_DUMP_PREFIX"] = "case_simsopt"
         make_simsopt_vmec_case(dst_dir, mode="ext")
         _copy_prefix(tmpdir, dst_dir, "case_simsopt")
@@ -228,9 +323,17 @@ def main():
         make_simsopt_vmec_case(dst_dir, mode="int")
         _copy_prefix(tmpdir, dst_dir, "case_simsopt_int")
 
+        os.environ["VC_DUMP_PREFIX"] = "case_simsopt_large"
+        make_simsopt_vmec_case_large(dst_dir, mode="ext")
+        _copy_prefix(tmpdir, dst_dir, "case_simsopt_large")
+
         os.environ["VC_DUMP_PREFIX"] = "case_vc_w7x"
         make_virtual_casing_testdata_w7x(dst_dir, mode="ext")
         _copy_prefix(tmpdir, dst_dir, "case_vc_w7x")
+
+        os.environ["VC_DUMP_PREFIX"] = "case_vc_w7x_large"
+        make_virtual_casing_testdata_w7x_large(dst_dir, mode="ext")
+        _copy_prefix(tmpdir, dst_dir, "case_vc_w7x_large")
 
         make_virtual_casing_testdata_dumps(dst_dir)
 
