@@ -10,3 +10,7 @@ Examples:
 - `testdata_phi_grid.py`: validates the phi grid layout for half-period
   and full-period configurations.
 - `rotating_ellipse_external_B.py`: rotating-ellipse analytic reference.
+- `simsopt_stage_two_optimization_finite_beta.py`: SIMSOPT stage-2
+  finite-beta optimization example using `virtual_casing_jax.VirtualCasing`.
+- `simsopt_single_stage_optimization_finite_beta.py`: SIMSOPT single-stage
+  finite-beta optimization example using `virtual_casing_jax.VirtualCasing`.

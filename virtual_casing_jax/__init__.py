@@ -40,6 +40,7 @@ from .integrals import (
     laplace_dx_u_eval_singular,
 )
 from .virtual_casing import VirtualCasingJAX
+from .simsopt_virtual_casing import VirtualCasing
 from .utils import build_offsurface_levels
 from . import functional
 from .functional import (
@@ -95,6 +96,7 @@ __all__ = [
     "computeGradB_offsurface_adaptive_schedule",
     "laplace_dx_u_eval_singular",
     "VirtualCasingJAX",
+    "VirtualCasing",
     "build_offsurface_levels",
     "functional",
     "FunctionalSetup",

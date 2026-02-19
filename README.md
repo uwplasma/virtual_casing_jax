@@ -13,6 +13,12 @@ Performance features:
 - Mixed-precision POU/patch tables with float64 outputs.
 - Bundled Quas3/LHD/W7X geometry assets (converted from SCTL .mat).
 
+SIMSOPT compatibility:
+The package ships a SIMSOPT-compatible ``VirtualCasing`` class that
+mirrors ``simsopt.mhd.virtual_casing.VirtualCasing`` while using the
+JAX backend. Import it as ``from virtual_casing_jax import VirtualCasing``.
+See `docs/using_simsopt.rst` and the examples in `examples/` for full scripts.
+
 Docs
 ----
 

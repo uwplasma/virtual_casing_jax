@@ -26,6 +26,11 @@ API
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: virtual_casing_jax.simsopt_virtual_casing
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: virtual_casing_jax.testdata
    :members:
    :undoc-members:
