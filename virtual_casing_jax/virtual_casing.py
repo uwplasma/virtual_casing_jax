@@ -847,6 +847,7 @@ class VirtualCasingJAX:
         digits: int | None = None,
         max_Nt: int = -1,
         max_Np: int = -1,
+        adaptive: bool = False,
         chunk_size: int = 1024,
     ):
         """Compute GradBext at off-surface targets using direct quadrature.
@@ -854,13 +855,26 @@ class VirtualCasingJAX:
         The off-surface GradB path mirrors the reference implementation and
         currently uses the base resampled grid (no adaptive refinement).
         """
+        digits = self.digits if digits is None else int(digits)
         X_trg = jnp.asarray(X_trg)
         X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
         ntrg = X_trg_flat.shape[1]
 
         X_src, BdotN, J = self._offsurface_densities(B0)
-        dX = grad2d(X_src, X_src.shape[1], X_src.shape[2])
-        _, area_elem = surf_normal_area_elem(dX, X_src)
+        if adaptive:
+            X_src, BdotN, J, area_elem = _offsurface_adapt_grid(
+                X_src,
+                BdotN,
+                J,
+                X_trg_flat,
+                digits=digits,
+                max_Nt=max_Nt,
+                max_Np=max_Np,
+                chunk_size=chunk_size,
+            )
+        else:
+            dX = grad2d(X_src, X_src.shape[1], X_src.shape[2])
+            _, area_elem = surf_normal_area_elem(dX, X_src)
 
         gradG_J = laplace_fxd2_u_eval_vec(
             X_src,
@@ -899,6 +913,7 @@ class VirtualCasingJAX:
         digits: int | None = None,
         max_Nt: int = -1,
         max_Np: int = -1,
+        adaptive: bool = False,
         chunk_size: int = 1024,
     ):
         """Compute GradBint at off-surface targets using direct quadrature."""
@@ -908,6 +923,7 @@ class VirtualCasingJAX:
             digits=digits,
             max_Nt=max_Nt,
             max_Np=max_Np,
+            adaptive=adaptive,
             chunk_size=chunk_size,
         )
         return -gradB

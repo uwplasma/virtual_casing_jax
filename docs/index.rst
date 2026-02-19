@@ -11,6 +11,7 @@ JAX implementation of the virtual casing principle with high-order singular quad
    equations
    numerics
    gradb
+   offsurface
    implementation
    performance
    using_simsopt

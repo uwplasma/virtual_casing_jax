@@ -10,6 +10,15 @@ Dataset Sources
 - ``virtual-casing`` test utilities (e.g. ``VirtualCasingTestData``)
 - SIMSOPT tests in ``simsopt/tests/mhd/test_virtual_casing.py``
 
+Current Dataset Prefixes
+------------------------
+
+- ``case_vc``: external field and GradB parity (small internal test case).
+- ``case_vc_int``: internal field and GradB parity (small internal test case).
+- ``case_simsopt``: external field and GradB parity (SIMSOPT VMEC case).
+- ``case_simsopt_int``: internal field and GradB parity (SIMSOPT VMEC case).
+- ``case_vc_computeGradBOff``: off-surface GradB parity (small internal test case).
+
 Dataset Format
 --------------
 

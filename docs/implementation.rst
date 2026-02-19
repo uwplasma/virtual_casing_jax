@@ -11,7 +11,7 @@ The code is organized into the following modules:
 - ``integrals``: baseline direct-sum surface quadrature.
 - ``singular_quadrature``: POU + polar quadrature.
 - ``boundary_integral``: surface integrals with singular correction.
-- ``virtual_casing``: high-level API for on-surface and off-surface fields.
+- ``virtual_casing``: high-level API for on-surface/off-surface fields and gradients.
 
 Design Decisions
 ----------------
@@ -42,7 +42,8 @@ Compatibility with Reference Code
 
 The goal is bitwise-identical results for small test cases, and
 numerical parity for larger grids. All critical numerics and
-normalizations follow the BIEST implementation.
+normalizations follow the BIEST implementation [BIEST]_ and the
+formulation in [MCO2019]_.
 
 Boundary Integrals (Baseline)
 -----------------------------
@@ -81,6 +82,30 @@ derivatives):
 This supports parity for both ``ComputeB`` and ``ComputeGradB`` on
 on-surface targets.
 
+Internal Field Variants
+-----------------------
+
+Internal fields are derived by sign flips relative to the external
+formulation:
+
+.. math::
+
+   \mathbf{B}_{\mathrm{int}} = \frac{1}{2}\mathbf{B} -
+   \nabla G[\sigma] - \nabla \times G[\mathbf{K}],
+
+.. math::
+
+   \nabla \mathbf{B}_{\mathrm{int}} = - \nabla \mathbf{B}_{\mathrm{ext}}.
+
+The JAX implementation exposes:
+
+- ``compute_internal_B`` (on-surface)
+- ``compute_internal_gradB`` (on-surface)
+- ``compute_internal_B_offsurf`` (off-surface)
+- ``compute_internal_gradB_offsurf`` (off-surface)
+
+These mirror the C++ API names and are validated in parity tests.
+
 Off-Surface Baseline
 --------------------
 
@@ -100,8 +125,19 @@ and the corresponding field gradient:
    + \partial_i\partial_k G[\sigma].
 
 Optional Fourier upsampling improves accuracy. For off-surface ``GradB``,
-the current parity path uses the base resampled grid (matching the
-reference C++ implementation).
+the default parity path uses the base resampled grid (matching the
+reference C++ implementation), with an optional adaptive mode enabled
+for higher accuracy.
+
+Off-Surface GradB
+-----------------
+
+Off-surface GradB is evaluated with the same second-derivative kernel
+used on-surface, but without singular correction. The JAX path uses
+``laplace_fxd2_u_eval_vec`` for the vector density and assembles the curl
+term to match the reference implementation. An adaptive option is
+available to reuse the refined grid selected by the ``LaplaceDxU``
+self-test.
 
 Off-Surface Adaptive Refinement
 -------------------------------

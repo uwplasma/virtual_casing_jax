@@ -53,6 +53,8 @@ Test Categories
      for small target sets.
    - Off-surface ``ComputeGradBOffSurf`` matches reference on the
      internal virtual-casing test case.
+   - Off-surface adaptive ``GradB`` is validated against a finite-difference
+     gradient of ``ComputeBOffSurf``.
 
 Tolerance Policy
 ----------------

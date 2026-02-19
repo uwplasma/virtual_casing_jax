@@ -37,6 +37,27 @@ The interior field is obtained by reversing the signs:
    - \nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
    - \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}).
 
+Internal vs External Off-Surface
+--------------------------------
+
+For off-surface targets, the jump term is absent. The external and
+internal fields are:
+
+.. math::
+
+   \mathbf{B}_{\mathrm{ext}}(\mathbf{r}) =
+   \nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
+   - \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}),
+
+.. math::
+
+   \mathbf{B}_{\mathrm{int}}(\mathbf{r}) =
+   -\nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
+   + \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}).
+
+The off-surface gradients are obtained by differentiating these
+expressions and using the second-derivative Laplace kernel.
+
 The two vector layer potentials used are:
 
 - A Laplace single-layer gradient (``FxdU`` in the reference code)
@@ -85,7 +106,7 @@ For off-surface targets ``r``:
 .. math::
 
    \mathbf{B}_{\mathrm{ext}}(\mathbf{r}) = \nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
-   + \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}).
+   - \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}).
 
 The singular ``+1/2`` jump term is absent off the surface.
 

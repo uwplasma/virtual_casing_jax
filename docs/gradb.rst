@@ -98,6 +98,25 @@ The high-level call ``VirtualCasingJAX.compute_external_gradB`` implements:
 The implementation mirrors the C++ ``ComputeGradB`` path, including the
 **same quadrature order**, **patch selection**, and **singular corrections**.
 
+Reference Mapping
+-----------------
+
+The following functions align with the reference C++ API:
+
+- ``VirtualCasingJAX.compute_external_gradB`` →
+  ``VirtualCasing::ComputeGradBext`` (C++)
+- ``VirtualCasingJAX.compute_internal_gradB`` →
+  ``VirtualCasing::ComputeGradBint`` (C++)
+- ``VirtualCasingJAX.compute_external_gradB_offsurf`` →
+  ``VirtualCasing::ComputeGradBOffSurf`` (C++ local parity extension)
+
+The port preserves:
+
+- kernel normalizations (``1/(4*pi)``),
+- patch/POU construction,
+- hedgehog order,
+- grid placement for half-period symmetry.
+
 Singular Quadrature (POU + Polar + Hedgehog)
 --------------------------------------------
 
@@ -137,6 +156,11 @@ The JVP calls ``compute_external_gradB`` and applies:
 This provides **exact on-surface derivatives** consistent with the C++
 ``ComputeGradB`` operator, and it avoids differentiating through the
 singular correction machinery.
+
+For off-surface GradB, no custom JVP is used. The kernels are smooth
+off the surface, so JAX can differentiate through the direct quadrature
+if needed, though this is currently not JIT-friendly when adaptive
+refinement is enabled.
 
 Internal and Off-Surface GradB
 ------------------------------
@@ -232,13 +256,10 @@ Where GradB Is Used in Optimization
 Limitations (Current)
 ---------------------
 
-The current implementation is **on-surface** and **external-field** only.
-Remaining gaps before declaring a complete port include:
+The remaining gaps before declaring a complete port include:
 
-- Internal field variants (``B_int`` and ``GradB_int``).
-- Off-surface gradient validation (``ComputeGradB`` for arbitrary targets).
-- A fully functional API that treats the surface coordinates as differentiable
-  inputs (needed for shape-derivative workflows).
-
-These are tracked in the porting plan and will be addressed before SIMSOPT
-integration is considered complete.
+- A fully functional API that treats the **surface coordinates** as
+  differentiable inputs (needed for shape-derivative workflows).
+- End-to-end JIT-compatible adaptive loops (off-surface refinement is a
+  Python loop today).
+- Additional large-scale validation cases beyond the parity harnesses.

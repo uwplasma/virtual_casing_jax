@@ -33,6 +33,15 @@ Adaptive refinement requires repeated evaluations of a double-layer
 test. This is currently a Python loop; performance will improve once
 the refinement is JIT-compiled with static shape schedules.
 
+Off-Surface GradB
+-----------------
+
+The off-surface gradient evaluates second-derivative kernels and is
+more expensive than the field evaluation. The default path matches the
+C++ reference and uses the base resampled grid (no adaptive refinement).
+Enable ``adaptive=True`` only when additional accuracy is needed, and
+use ``max_Nt``/``max_Np`` to cap growth.
+
 CPU and GPU
 -----------
 

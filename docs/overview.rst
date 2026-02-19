@@ -18,9 +18,11 @@ Scope
 
 The v1 target includes:
 
-- On-surface evaluation of the external field via the virtual casing
-  principle.
+- On-surface evaluation of the **external and internal** fields via the
+  virtual casing principle.
+- On-surface gradients (``GradB``) with hyper-singular corrections.
 - Off-surface evaluation with adaptive surface upsampling.
+- Off-surface gradients (``GradB``) with direct quadrature.
 - High-order singular quadrature (partition of unity + polar change of variables).
 
 The implementation mirrors the structure of the reference code:
