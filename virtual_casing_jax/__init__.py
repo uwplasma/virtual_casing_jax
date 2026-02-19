@@ -34,7 +34,9 @@ from .integrals import (
     laplace_dx_u_eval,
     computeB_offsurface_baseline,
     computeB_offsurface_adaptive,
+    laplace_dx_u_eval_singular,
 )
+from .virtual_casing import VirtualCasingJAX
 from . import singular_quadrature
 
 __all__ = [
@@ -67,5 +69,7 @@ __all__ = [
     "laplace_dx_u_eval",
     "computeB_offsurface_baseline",
     "computeB_offsurface_adaptive",
+    "laplace_dx_u_eval_singular",
+    "VirtualCasingJAX",
     "singular_quadrature",
 ]

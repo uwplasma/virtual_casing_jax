@@ -551,6 +551,122 @@ def laplace_fxd_u_eval_vec_singular(
     )(density_vec)
 
 
+def laplace_dx_u_eval_singular(
+    X_src,
+    dX_src,
+    density,
+    trg_nt: int,
+    trg_np: int,
+    nfp: int,
+    digits: int = 5,
+    patch_dim0: int | None = None,
+    rad_dim: int | None = None,
+    chunk_size: int = 1024,
+):
+    """Evaluate Laplace DxU with singular correction on surface targets."""
+    X_src = jnp.asarray(X_src)
+    dX_src = jnp.asarray(dX_src)
+    density = jnp.asarray(density)
+
+    nt = X_src.shape[1]
+    npol = X_src.shape[2]
+
+    normal, area_elem = surf_normal_area_elem(dX_src, X_src)
+    X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
+    base = laplace_dx_u_eval(
+        X_src,
+        normal,
+        X_trg,
+        density,
+        area_elem,
+        chunk_size=chunk_size,
+    )
+
+    cond = _surface_cond(dX_src, nt, npol)
+    cond_val = float(cond)
+    if patch_dim0 is None:
+        patch_dim0 = select_patch_dim(digits, cond_val)
+    if rad_dim is None:
+        rad_dim = int(patch_dim0 * 1.6)
+
+    precomp = precompute_singular(patch_dim0, rad_dim)
+    patch_dim = precomp.patch_dim
+    ngrid = precomp.ngrid
+
+    skip_nt = nt // (nfp * trg_nt)
+    skip_np = npol // trg_np
+    t_idx = jnp.arange(trg_nt) * skip_nt
+    p_idx = jnp.arange(trg_np) * skip_np
+    tt, pp = jnp.meshgrid(t_idx, p_idx, indexing="ij")
+    t_flat = tt.reshape(-1)
+    p_flat = pp.reshape(-1)
+
+    patch_idx = _build_patch_indices(t_flat, p_flat, nt, npol, patch_dim0)
+    X_flat = X_src.reshape((3, -1))
+    dX_flat = dX_src.reshape((6, -1))
+    dens_flat = density.reshape(-1)
+
+    def gather(values):
+        return jax.vmap(lambda idx: values[:, idx])(patch_idx)
+
+    G = gather(X_flat)  # (Ntrg, 3, Ngrid)
+    Gg = gather(dX_flat)  # (Ntrg, 6, Ngrid)
+    GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
+
+    orient = float(normal_orientation(X_src, normal))
+    invNt = 1.0 / nt
+    invNp = 1.0 / npol
+
+    def corr_one(Gi, Ggi, GiF, TrgCoord):
+        n0 = Ggi[2] * Ggi[5] - Ggi[3] * Ggi[4]
+        n1 = Ggi[4] * Ggi[1] - Ggi[5] * Ggi[0]
+        n2 = Ggi[0] * Ggi[3] - Ggi[1] * Ggi[2]
+        r = jnp.sqrt(n0 * n0 + n1 * n1 + n2 * n2)
+        Ga = r * invNt * invNp
+        inv_r = 1.0 / r
+        Gn = jnp.stack([n0, n1, n2], axis=0) * inv_r * orient
+
+        # scale gradients
+        Ggs = Ggi.at[0].multiply(invNt)
+        Ggs = Ggs.at[2].multiply(invNt)
+        Ggs = Ggs.at[4].multiply(invNt)
+        Ggs = Ggs.at[1].multiply(invNp)
+        Ggs = Ggs.at[3].multiply(invNp)
+        Ggs = Ggs.at[5].multiply(invNp)
+
+        dx = TrgCoord[None, :] - Gi.T
+        MGrid = laplace_dx_u(dx, Gn.T, jnp.ones((ngrid,)))
+        MGrid = MGrid * (Ga * precomp.Gpou)
+        MGrid = MGrid.reshape((ngrid,))
+
+        P = _interp_patch(Gi, precomp)  # (3, Npolar)
+        Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        n0p = Pg[2] * Pg[5] - Pg[3] * Pg[4]
+        n1p = Pg[4] * Pg[1] - Pg[5] * Pg[0]
+        n2p = Pg[0] * Pg[3] - Pg[1] * Pg[2]
+        rp = jnp.sqrt(n0p * n0p + n1p * n1p + n2p * n2p)
+        inv_rp = 1.0 / rp
+        Pn = jnp.stack([n0p, n1p, n2p], axis=0) * inv_rp * orient
+
+        dxp = TrgCoord[None, :] - P.T
+        MPolar = laplace_dx_u(dxp, Pn.T, jnp.ones((precomp.npolar,)))
+        MPolar = MPolar * (rp * precomp.Ppou)
+
+        idx = precomp.interp_idx.reshape(-1)
+        w = precomp.M_G2P.reshape((precomp.npolar, -1))
+        contrib = (MPolar[:, None] * w).reshape(-1)
+        MGrid = MGrid.at[idx].add(contrib)
+
+        return jnp.sum(GiF * MGrid)
+
+    Trg_flat = X_trg.reshape((3, -1)).T
+    corr = jax.vmap(corr_one)(G, Gg, GF, Trg_flat)
+    corr = corr.reshape((1, trg_nt, trg_np))
+
+    base = base.reshape((1, trg_nt, trg_np))
+    return base + corr
+
+
 def laplace_fxd2_u_eval_singular(
     X_src,
     dX_src,

@@ -124,6 +124,12 @@ The JAX implementation mirrors this convention and uses the same
 hedgehog extrapolation weights at nodes ``1..16`` when
 ``HedgehogOrder=8``.
 
+For quadrature selection, the JAX port also implements the
+singular-corrected Laplace ``DxU`` (double-layer) operator with
+Hedgehog order 1. This matches the BIEST self-test that verifies the
+expected ``1/2`` jump for constant density and drives adaptive
+quadrature refinement.
+
 Adaptive Quadrature Resolution
 ------------------------------
 
