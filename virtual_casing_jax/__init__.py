@@ -37,6 +37,21 @@ from .integrals import (
     laplace_dx_u_eval_singular,
 )
 from .virtual_casing import VirtualCasingJAX
+from . import functional
+from .functional import (
+    FunctionalSetup,
+    build_surface_coord,
+    build_quad_setup,
+    build_patch_idx,
+    select_patch_dim_from_geom,
+    prepare_functional_setup,
+    compute_external_B_functional,
+    compute_internal_B_functional,
+    compute_external_gradB_functional,
+    compute_internal_gradB_functional,
+    compute_external_B_offsurf_functional,
+    compute_external_gradB_offsurf_functional,
+)
 from . import singular_quadrature
 
 __all__ = [
@@ -71,5 +86,18 @@ __all__ = [
     "computeB_offsurface_adaptive",
     "laplace_dx_u_eval_singular",
     "VirtualCasingJAX",
+    "functional",
+    "FunctionalSetup",
+    "build_surface_coord",
+    "build_quad_setup",
+    "build_patch_idx",
+    "select_patch_dim_from_geom",
+    "prepare_functional_setup",
+    "compute_external_B_functional",
+    "compute_internal_B_functional",
+    "compute_external_gradB_functional",
+    "compute_internal_gradB_functional",
+    "compute_external_B_offsurf_functional",
+    "compute_external_gradB_offsurf_functional",
     "singular_quadrature",
 ]

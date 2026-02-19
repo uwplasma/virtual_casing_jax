@@ -10,6 +10,7 @@ JAX implementation of the virtual casing principle with high-order singular quad
    overview
    equations
    numerics
+   functional
    gradb
    offsurface
    implementation

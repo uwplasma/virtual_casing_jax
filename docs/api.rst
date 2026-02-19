@@ -16,6 +16,11 @@ API
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: virtual_casing_jax.functional
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: virtual_casing_jax.virtual_casing
    :members:
    :undoc-members:
