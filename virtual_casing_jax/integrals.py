@@ -928,6 +928,54 @@ def _interp_patch(values, precomp):
     return jnp.sum(gathered * weights, axis=(2, 3))
 
 
+def _interp_patch_blocked(values, precomp, block_size: int):
+    # values: (dof, Ngrid)
+    dof = values.shape[0]
+    if values.dtype != precomp.M_G2P.dtype:
+        values = values.astype(precomp.M_G2P.dtype)
+
+    npolar = precomp.npolar
+    block_size = int(block_size)
+    if block_size <= 0 or block_size >= npolar:
+        return _interp_patch(values, precomp)
+
+    idx = precomp.interp_idx.reshape((npolar, INTERP_ORDER, INTERP_ORDER))
+    weights = precomp.M_G2P
+
+    pad = (-npolar) % block_size
+    if pad:
+        idx = jnp.pad(idx, ((0, pad), (0, 0), (0, 0)))
+        weights = jnp.pad(weights, ((0, pad), (0, 0), (0, 0)))
+    npolar_pad = npolar + pad
+    nblocks = npolar_pad // block_size
+
+    idx_blocks = idx.reshape((nblocks, block_size, INTERP_ORDER, INTERP_ORDER))
+    w_blocks = weights.reshape((nblocks, block_size, INTERP_ORDER, INTERP_ORDER))
+
+    def scan_fn(carry, xs):
+        idx_block, w_block = xs
+        gathered = jnp.take(values, idx_block, axis=1)
+        block_out = jnp.sum(gathered * w_block[None, ...], axis=(2, 3))
+        return carry, block_out
+
+    _, blocks = jax.lax.scan(scan_fn, None, (idx_blocks, w_blocks))
+    blocks = jnp.transpose(blocks, (1, 0, 2))
+    out = blocks.reshape((dof, npolar_pad))[:, :npolar]
+    return out
+
+
+def _resolve_interp_block_size(interp_block_size, npolar: int, mode: str):
+    if interp_block_size is None:
+        return None
+    if isinstance(interp_block_size, str) and interp_block_size.lower() == "auto":
+        if npolar <= 256:
+            return None
+        if mode == "gradb":
+            return 32
+        return 64
+    return int(interp_block_size)
+
+
 def laplace_fxd_u_eval_singular(
     X_src,
     dX_src,
@@ -945,6 +993,7 @@ def laplace_fxd_u_eval_singular(
     orient: float | None = None,
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool = False,
 ):
     """Evaluate Laplace FxdU with singular correction on surface targets."""
@@ -1028,8 +1077,12 @@ def laplace_fxd_u_eval_singular(
         MGrid = MGrid * (Ga * precomp.Gpou)[:, None]
 
         # polar interpolation
-        P = _interp_patch(Gi, precomp)  # (3, Npolar)
-        Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        if interp_block_size is None:
+            P = _interp_patch(Gi, precomp)  # (3, Npolar)
+            Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        else:
+            P = _interp_patch_blocked(Gi, precomp, interp_block_size)
+            Pg = _interp_patch_blocked(Ggs, precomp, interp_block_size)
         if P.dtype != TrgCoord.dtype:
             P = P.astype(TrgCoord.dtype)
         if Pg.dtype != TrgCoord.dtype:
@@ -1054,6 +1107,7 @@ def laplace_fxd_u_eval_singular(
 
     Trg_flat = X_trg.reshape((3, -1)).T
     corr_fn = jax.checkpoint(corr_one) if remat else corr_one
+    interp_block_size = _resolve_interp_block_size(interp_block_size, precomp.npolar, "b")
 
     if target_chunk_size is None or target_chunk_size <= 0:
         G = gather(X_flat, patch_idx)  # (Ntrg, 3, Ngrid)
@@ -1105,6 +1159,7 @@ def laplace_fxd_u_eval_vec_singular(
     orient: float | None = None,
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool = False,
 ):
     density_vec = jnp.asarray(density_vec)
@@ -1126,6 +1181,7 @@ def laplace_fxd_u_eval_vec_singular(
             orient=orient,
             pou_dtype=pou_dtype,
             patch_dtype=patch_dtype,
+            interp_block_size=interp_block_size,
             remat=remat,
         ),
         in_axes=0,
@@ -1150,6 +1206,7 @@ def laplace_dx_u_eval_singular(
     orient: float | None = None,
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool = False,
 ):
     """Evaluate Laplace DxU with singular correction on surface targets."""
@@ -1235,8 +1292,12 @@ def laplace_dx_u_eval_singular(
         MGrid = MGrid * (Ga * precomp.Gpou)
         MGrid = MGrid.reshape((ngrid,))
 
-        P = _interp_patch(Gi, precomp)  # (3, Npolar)
-        Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        if interp_block_size is None:
+            P = _interp_patch(Gi, precomp)  # (3, Npolar)
+            Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        else:
+            P = _interp_patch_blocked(Gi, precomp, interp_block_size)
+            Pg = _interp_patch_blocked(Ggs, precomp, interp_block_size)
         if P.dtype != TrgCoord.dtype:
             P = P.astype(TrgCoord.dtype)
         if Pg.dtype != TrgCoord.dtype:
@@ -1261,6 +1322,7 @@ def laplace_dx_u_eval_singular(
 
     Trg_flat = X_trg.reshape((3, -1)).T
     corr_fn = jax.checkpoint(corr_one) if remat else corr_one
+    interp_block_size = _resolve_interp_block_size(interp_block_size, precomp.npolar, "b")
 
     if target_chunk_size is None or target_chunk_size <= 0:
         G = gather(X_flat, patch_idx)
@@ -1313,6 +1375,7 @@ def laplace_fxd2_u_eval_singular(
     orient: float | None = None,
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool = False,
 ):
     """Evaluate Laplace Fxd2U with singular correction (Hedgehog)."""
@@ -1401,8 +1464,12 @@ def laplace_fxd2_u_eval_singular(
         MGrid = MGrid.reshape((ngrid, 9))
 
         # polar interpolation
-        P = _interp_patch(Gi, precomp)  # (3, Npolar)
-        Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        if interp_block_size is None:
+            P = _interp_patch(Gi, precomp)  # (3, Npolar)
+            Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        else:
+            P = _interp_patch_blocked(Gi, precomp, interp_block_size)
+            Pg = _interp_patch_blocked(Ggs, precomp, interp_block_size)
         if P.dtype != TrgCoord.dtype:
             P = P.astype(TrgCoord.dtype)
         if Pg.dtype != TrgCoord.dtype:
@@ -1438,6 +1505,7 @@ def laplace_fxd2_u_eval_singular(
 
     Trg_flat = X_trg.reshape((3, -1)).T
     corr_fn = jax.checkpoint(corr_one) if remat else corr_one
+    interp_block_size = _resolve_interp_block_size(interp_block_size, precomp.npolar, "gradb")
 
     if target_chunk_size is None or target_chunk_size <= 0:
         G = gather(X_flat, patch_idx)
@@ -1490,6 +1558,7 @@ def laplace_fxd2_u_eval_vec_singular(
     orient: float | None = None,
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool = False,
 ):
     density_vec = jnp.asarray(density_vec)
@@ -1512,6 +1581,7 @@ def laplace_fxd2_u_eval_vec_singular(
             orient=orient,
             pou_dtype=pou_dtype,
             patch_dtype=patch_dtype,
+            interp_block_size=interp_block_size,
             remat=remat,
         ),
         in_axes=0,

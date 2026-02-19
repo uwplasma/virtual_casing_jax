@@ -177,6 +177,9 @@ The GradB path exposes several knobs to balance speed and memory:
   weights and patch gathers inside the singular correction to float32,
   reducing the largest intermediate tensors while preserving output
   precision.
+- ``interp_block_size="auto"`` (or an integer) blocks the polar
+  interpolation in the singular correction. This reduces temporary
+  memory at the cost of additional loop overhead.
 
 These options are available on ``compute_external_gradB`` /
 ``compute_internal_gradB`` and their JIT wrappers.

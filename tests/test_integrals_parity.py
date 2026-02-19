@@ -199,6 +199,34 @@ def test_laplace_fxd_u_eval_singular_patch_dtype():
     assert rel < 2.0e-3
 
 
+def test_laplace_fxd_u_eval_singular_interp_block():
+    prefix = "case_vc"
+    if not _dump_exists(prefix, "computeB_gradG_BdotN"):
+        pytest.skip("parity dump not available")
+
+    X, dX, BdotN, _, gradG_BdotN, _, Bvc, B_on_trg = _load_case(prefix)
+    trg_nt = Bvc.shape[1]
+    trg_np = Bvc.shape[2]
+    nfp = B_on_trg.shape[1] // trg_nt
+
+    out = laplace_fxd_u_eval_singular(
+        jnp.asarray(X),
+        jnp.asarray(dX),
+        jnp.asarray(BdotN),
+        trg_nt,
+        trg_np,
+        nfp,
+        digits=5,
+        chunk_size=2048,
+        interp_block_size=32,
+    )
+    out = np.asarray(out).reshape((3, trg_nt, trg_np))
+
+    ref = gradG_BdotN
+    rel = np.linalg.norm(out - ref) / (np.linalg.norm(ref) + 1e-14)
+    assert rel < 1.2e-3
+
+
 @pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
 def test_laplace_fxd_u_eval_vec_singular_parity(prefix):
     if not _dump_exists(prefix, "computeB_gradG_J"):

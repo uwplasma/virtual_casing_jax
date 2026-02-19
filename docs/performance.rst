@@ -96,6 +96,20 @@ heuristics can be overridden via environment variables:
 - ``VCJAX_CHUNK_BOFF`` / ``VCJAX_CHUNK_BOFF_SRC`` / ``VCJAX_CHUNK_BOFF_TRG``
 - ``VCJAX_CHUNK_GRADB`` / ``VCJAX_CHUNK_GRADB_SRC`` / ``VCJAX_CHUNK_GRADB_TRG``
 
+Interpolation Blocking
+~~~~~~~~~~~~~~~~~~~~~~
+
+``interp_block_size`` controls blocking of the polar interpolation in the
+singular correction. ``interp_block_size="auto"`` (default) uses a block
+size of 64 for ``B`` and 32 for ``GradB`` when the polar grid is large,
+reducing temporary memory. Set ``interp_block_size=None`` to restore the
+full (unblocked) interpolation.
+
+On ``case_vc_large`` (CPU HLO), enabling ``interp_block_size="auto"``
+reduces the largest singular-correction temporaries to ~50 MiB (``B``)
+and ~76 MiB (``GradB``), compared to >150 MiB without interpolation
+blocking even with ``patch_dtype="float32"``.
+
 JIT Caching
 ~~~~~~~~~~~
 

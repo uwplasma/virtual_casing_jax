@@ -42,7 +42,8 @@ For the new tuning knobs:
 ```bash
 JAX_ENABLE_X64=1 XLA_FLAGS="--xla_dump_to=/tmp/vc_xla --xla_dump_hlo_as_text" \
   python tools/profile_vc.py --case case_vc_large --op GradB --jit \
-  --chunk-size auto --target-chunk-size auto --pou-dtype float32 --patch-dtype float32 --remat \
+  --chunk-size auto --target-chunk-size auto --pou-dtype float32 --patch-dtype float32 \
+  --interp-block-size auto --remat \
   --repeat 2 --trace-dir /tmp/vc_trace_case_vc_large_GradB
 
 tensorboard --logdir /tmp/vc_trace_case_vc_large_GradB

@@ -241,6 +241,7 @@ def _compute_B_signed(
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool | None = None,
 ):
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
@@ -294,6 +295,7 @@ def _compute_B_signed(
         orient=orient,
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
         remat=remat,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, trg_nt, trg_np))
@@ -314,6 +316,7 @@ def _compute_B_signed(
         orient=orient,
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
         remat=remat,
     )
     gradG_BdotN = jnp.asarray(gradG_BdotN).reshape((3, trg_nt, trg_np))
@@ -353,6 +356,7 @@ def compute_external_B_functional(
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool | None = None,
 ):
     """Compute Bext with surface coordinates as differentiable inputs."""
@@ -379,6 +383,7 @@ def compute_external_B_functional(
         target_chunk_size=target_chunk_size,
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
         remat=remat,
     )
 
@@ -406,6 +411,7 @@ def compute_internal_B_functional(
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool | None = None,
 ):
     """Compute Bint with surface coordinates as differentiable inputs."""
@@ -432,6 +438,7 @@ def compute_internal_B_functional(
         target_chunk_size=target_chunk_size,
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
         remat=remat,
     )
 
@@ -460,6 +467,7 @@ def _compute_gradB_signed(
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool | None = None,
 ):
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
@@ -504,6 +512,7 @@ def _compute_gradB_signed(
         orient=orient,
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
         remat=remat,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, trg_nt, trg_np))
@@ -524,6 +533,7 @@ def _compute_gradB_signed(
         orient=orient,
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
         remat=remat,
     )
     gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, trg_nt, trg_np))
@@ -560,6 +570,7 @@ def compute_external_gradB_functional(
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool | None = None,
 ):
     """Compute GradBext with surface coordinates as differentiable inputs."""
@@ -586,6 +597,7 @@ def compute_external_gradB_functional(
         target_chunk_size=target_chunk_size,
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
         remat=remat,
     )
 
@@ -613,6 +625,7 @@ def compute_internal_gradB_functional(
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
     patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
     remat: bool | None = None,
 ):
     """Compute GradBint with surface coordinates as differentiable inputs."""
@@ -639,6 +652,7 @@ def compute_internal_gradB_functional(
         target_chunk_size=target_chunk_size,
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
         remat=remat,
     )
 

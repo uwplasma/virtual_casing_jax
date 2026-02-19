@@ -135,6 +135,7 @@ def profile(args: argparse.Namespace):
             target_chunk_size=args.target_chunk_size,
             pou_dtype=args.pou_dtype,
             patch_dtype=args.patch_dtype,
+            interp_block_size=args.interp_block_size,
             remat=args.remat,
         )
     elif args.op == "GradB":
@@ -150,6 +151,7 @@ def profile(args: argparse.Namespace):
             target_chunk_size=args.target_chunk_size,
             pou_dtype=args.pou_dtype,
             patch_dtype=args.patch_dtype,
+            interp_block_size=args.interp_block_size,
             remat=args.remat,
         )
     elif args.op == "Boff":
@@ -204,6 +206,7 @@ def main():
     parser.add_argument("--target-chunk-size", type=str, default="auto")
     parser.add_argument("--pou-dtype", type=str, default=None)
     parser.add_argument("--patch-dtype", type=str, default=None)
+    parser.add_argument("--interp-block-size", type=str, default="auto")
     parser.add_argument("--remat", dest="remat", action="store_true")
     parser.add_argument("--no-remat", dest="remat", action="store_false")
     parser.add_argument("--max-nt", type=int, default=-1)
@@ -220,6 +223,12 @@ def main():
 
     args.chunk_size = _parse_chunk(args.chunk_size)
     args.target_chunk_size = _parse_chunk(args.target_chunk_size)
+    if args.interp_block_size is None:
+        args.interp_block_size = None
+    elif isinstance(args.interp_block_size, str) and args.interp_block_size.lower() == "auto":
+        args.interp_block_size = "auto"
+    else:
+        args.interp_block_size = int(args.interp_block_size)
 
     profile(args)
 
