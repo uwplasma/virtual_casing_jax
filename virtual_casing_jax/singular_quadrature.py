@@ -14,6 +14,8 @@ INTERP_ORDER = 12
 @dataclass(frozen=True)
 class SingularPrecomp:
     patch_dim0: int
+    hedgehog_order: int
+    rad_dim_base: int
     rad_dim: int
     ang_dim: int
     patch_dim: int
@@ -26,6 +28,7 @@ class SingularPrecomp:
     I_G2P: jnp.ndarray
     M_G2P: jnp.ndarray
     interp_idx: jnp.ndarray
+    hedgehog_wts: jnp.ndarray
 
 
 def _legpoly_and_deriv(x, degree: int):
@@ -102,14 +105,19 @@ def _lagrange_interp(z0, z1, i0, i1):
 
 
 @functools.lru_cache(maxsize=None)
-def precompute_singular(patch_dim0: int, rad_dim: int):
+def precompute_singular(patch_dim0: int, rad_dim: int, hedgehog_order: int = 1):
     patch_dim = 2 * patch_dim0 + 1
-    ang_dim = 2 * rad_dim
+    rad_dim_base = rad_dim
+    rad_dim = rad_dim_base * (3 if hedgehog_order > 1 else 1)
+    ang_dim = 2 * rad_dim_base
     ngrid = patch_dim * patch_dim
     npolar = rad_dim * ang_dim
     patch_rad = (patch_dim - 1) // 2
 
     qx, qw = _legendre_rule_01(rad_dim)
+    if hedgehog_order > 1:
+        qw = qw * (2.0 * qx)
+        qx = qx * qx
 
     pou = _pou_fn(patch_dim)
 
@@ -161,8 +169,25 @@ def precompute_singular(patch_dim0: int, rad_dim: int):
     jj = np.arange(INTERP_ORDER)[None, :]
     interp_idx = I_G2P[:, None, None] + ii * patch_dim + jj
 
+    # Hedgehog weights
+    if hedgehog_order > 1:
+        interp_nds = np.arange(1, 17, dtype=np.float64)
+        wts = np.zeros(hedgehog_order, dtype=np.float64)
+        for k in range(hedgehog_order):
+            pn = 1.0
+            pd = 1.0
+            for i in range(hedgehog_order):
+                if i != k:
+                    pn *= interp_nds[i]
+                    pd *= (interp_nds[i] - interp_nds[k])
+            wts[k] = pn / pd
+    else:
+        wts = np.ones(1, dtype=np.float64)
+
     return SingularPrecomp(
         patch_dim0=patch_dim0,
+        hedgehog_order=hedgehog_order,
+        rad_dim_base=rad_dim_base,
         rad_dim=rad_dim,
         ang_dim=ang_dim,
         patch_dim=patch_dim,
@@ -175,6 +200,7 @@ def precompute_singular(patch_dim0: int, rad_dim: int):
         I_G2P=jnp.asarray(I_G2P),
         M_G2P=jnp.asarray(M_G2P),
         interp_idx=jnp.asarray(interp_idx),
+        hedgehog_wts=jnp.asarray(wts),
     )
 
 

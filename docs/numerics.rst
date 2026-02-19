@@ -100,17 +100,29 @@ implementation in this repository mirrors the reference code in
 Implementation Notes
 --------------------
 
-The JAX port currently implements the partition-of-unity correction for
-the Laplace FxdU kernel with Hedgehog order 1. The patch size is chosen
-using the same thresholding rules as BIEST:
+The JAX port implements the partition-of-unity correction for Laplace
+FxdU (Hedgehog order 1) and Laplace Fxd2U (Hedgehog order > 1). The patch
+size is chosen using the same thresholding rules as BIEST:
 
 .. math::
 
    \\text{PDIM} = \\lfloor 1.6\\,\\text{digits}\\,\\text{cond} \\rfloor
 
 and then rounded up to the nearest supported template value
-``{6, 8, 12, 16, ..., 64}``. The polar quadrature order is
-``RAD_DIM = \\lfloor 1.6\\,\\text{PDIM} \\rfloor``.
+``{6, 8, 12, 16, ..., 64}``. The base polar quadrature order is
+``RAD_DIM_0 = \\lfloor 1.6\\,\\text{PDIM} \\rfloor``.
+
+For Laplace Fxd2U, BIEST uses Hedgehog quadrature with a tripled radial
+resolution while keeping the angular resolution tied to the base order:
+
+.. math::
+
+   \\text{RAD\\_DIM} = 3\\,\\text{RAD\\_DIM}_0, \\quad
+   \\text{ANG\\_DIM} = 2\\,\\text{RAD\\_DIM}_0
+
+The JAX implementation mirrors this convention and uses the same
+hedgehog extrapolation weights at nodes ``1..16`` when
+``HedgehogOrder=8``.
 
 Adaptive Quadrature Resolution
 ------------------------------

@@ -21,6 +21,8 @@ Test Categories
 3. **Boundary Integral Parity**
    - Singular-corrected ``LaplaceFxdU`` matches reference at ~1e-3
      relative error on small grids.
+   - Singular-corrected ``LaplaceFxd2U`` (Hedgehog order 8) matches
+     reference at ~5e-3 relative error on the GradB parity case.
    - Baseline direct-sum ``LaplaceFxdU`` matches reference up to
      singular-correction errors.
    - Double-layer self-test returns ``0.5`` jump for constant density.
@@ -30,6 +32,8 @@ Test Categories
      within coarse tolerances.
    - Singular-corrected ``ComputeB`` achieves ~1e-4 relative error on
      small grids.
+   - ``ComputeGradB`` matches reference within ~5e-3 on the GradB parity
+     case.
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.
    - Off-surface ``ComputeBOffSurf`` baseline is validated using
      upsampled direct-sum quadrature.

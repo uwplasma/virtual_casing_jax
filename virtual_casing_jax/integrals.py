@@ -4,7 +4,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .kernels import laplace_fxd_u, biotsavart_fx_u, laplace_dx_u
+from .kernels import laplace_fxd_u, laplace_fxd2_u, biotsavart_fx_u, laplace_dx_u
 from .surface_ops import upsample, grad2d, surf_normal_area_elem, normal_orientation
 from .singular_quadrature import precompute_singular, select_patch_dim, INTERP_ORDER
 
@@ -89,6 +89,65 @@ def laplace_fxd_u_eval(X_src, X_trg, density, area_elem, chunk_size: int = 1024)
     init = jnp.zeros((ntrg, 3), dtype=Xs.dtype)
     out, _ = jax.lax.scan(scan_fn, init, (X_chunks, w_chunks))
     return jnp.transpose(out, (1, 0))
+
+
+def laplace_fxd2_u_eval(X_src, X_trg, density, area_elem, chunk_size: int = 1024):
+    """Evaluate Laplace Fxd2U (second derivatives) by direct quadrature."""
+    X_src = _flatten_soa(X_src, "X_src")
+    X_trg = _flatten_soa(X_trg, "X_trg")
+    density = jnp.asarray(density).reshape(-1)
+    area_elem = jnp.asarray(area_elem).reshape(-1)
+
+    if X_src.shape[0] != 3 or X_trg.shape[0] != 3:
+        raise ValueError("X_src and X_trg must be 3D in SoA layout")
+
+    nsrc = X_src.shape[1]
+    ntrg = X_trg.shape[1]
+    if density.shape[0] != nsrc or area_elem.shape[0] != nsrc:
+        raise ValueError("density/area_elem must match source grid size")
+
+    weights = density * area_elem
+    Xs = jnp.transpose(X_src, (1, 0))
+    Xt = jnp.transpose(X_trg, (1, 0))
+
+    if chunk_size is None or chunk_size <= 0:
+        dx = Xt[:, None, :] - Xs[None, :, :]
+        contrib = laplace_fxd2_u(dx, weights)
+        out = jnp.sum(contrib, axis=1)
+        out = out.reshape((ntrg, 9))
+        return jnp.transpose(out, (1, 0))
+
+    pad = (-nsrc) % chunk_size
+    if pad:
+        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
+        weights = jnp.pad(weights, (0, pad))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = nsrc_pad // chunk_size
+
+    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+    W_chunks = weights.reshape((n_chunks, chunk_size))
+
+    def scan_fn(acc, xs):
+        Xc, Wc = xs
+        dx = Xt[:, None, :] - Xc[None, :, :]
+        contrib = laplace_fxd2_u(dx, Wc)
+        acc = acc + jnp.sum(contrib, axis=1)
+        return acc, None
+
+    init = jnp.zeros((ntrg, 3, 3), dtype=Xs.dtype)
+    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
+    out = out.reshape((ntrg, 9))
+    return jnp.transpose(out, (1, 0))
+
+
+def laplace_fxd2_u_eval_vec(X_src, X_trg, density_vec, area_elem, chunk_size: int = 1024):
+    """Vector-density wrapper for Laplace Fxd2U."""
+    density_vec = _flatten_soa(density_vec, "density_vec")
+    return jax.vmap(
+        lambda dens: laplace_fxd2_u_eval(X_src, X_trg, dens, area_elem, chunk_size=chunk_size),
+        in_axes=0,
+        out_axes=0,
+    )(density_vec)
 
 
 def laplace_fxd_u_eval_vec(X_src, X_trg, density_vec, area_elem, chunk_size: int = 1024):
@@ -485,6 +544,169 @@ def laplace_fxd_u_eval_vec_singular(
             digits=digits,
             patch_dim0=patch_dim0,
             rad_dim=rad_dim,
+            chunk_size=chunk_size,
+        ),
+        in_axes=0,
+        out_axes=0,
+    )(density_vec)
+
+
+def laplace_fxd2_u_eval_singular(
+    X_src,
+    dX_src,
+    density,
+    trg_nt: int,
+    trg_np: int,
+    nfp: int,
+    digits: int = 5,
+    patch_dim0: int | None = None,
+    rad_dim: int | None = None,
+    hedgehog_order: int = 8,
+    chunk_size: int = 1024,
+):
+    """Evaluate Laplace Fxd2U with singular correction (Hedgehog)."""
+    X_src = jnp.asarray(X_src)
+    dX_src = jnp.asarray(dX_src)
+    density = jnp.asarray(density)
+
+    nt = X_src.shape[1]
+    npol = X_src.shape[2]
+
+    X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
+    base = laplace_fxd2_u_eval(
+        X_src,
+        X_trg,
+        density,
+        surf_normal_area_elem(dX_src, X_src)[1],
+        chunk_size=chunk_size,
+    )
+
+    cond = _surface_cond(dX_src, nt, npol)
+    cond_val = float(cond)
+    if patch_dim0 is None:
+        patch_dim0 = select_patch_dim(digits, cond_val)
+    if rad_dim is None:
+        rad_dim = int(patch_dim0 * 1.6)
+
+    precomp = precompute_singular(patch_dim0, rad_dim, hedgehog_order)
+    patch_dim = precomp.patch_dim
+    ngrid = precomp.ngrid
+
+    skip_nt = nt // (nfp * trg_nt)
+    skip_np = npol // trg_np
+    t_idx = jnp.arange(trg_nt) * skip_nt
+    p_idx = jnp.arange(trg_np) * skip_np
+    tt, pp = jnp.meshgrid(t_idx, p_idx, indexing="ij")
+    t_flat = tt.reshape(-1)
+    p_flat = pp.reshape(-1)
+
+    patch_idx = _build_patch_indices(t_flat, p_flat, nt, npol, patch_dim0)
+    X_flat = X_src.reshape((3, -1))
+    dX_flat = dX_src.reshape((6, -1))
+    dens_flat = density.reshape(-1)
+
+    def gather(values):
+        return jax.vmap(lambda idx: values[:, idx])(patch_idx)
+
+    G = gather(X_flat)  # (Ntrg, 3, Ngrid)
+    Gg = gather(dX_flat)  # (Ntrg, 6, Ngrid)
+    GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
+
+    orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
+    invNt = 1.0 / nt
+    invNp = 1.0 / npol
+
+    interp_nds = jnp.arange(1, 17, dtype=X_src.dtype)
+    interp_nds = interp_nds[:hedgehog_order]
+
+    def corr_one(Gi, Ggi, GiF, TrgCoord):
+        # Gi: (3, Ngrid), Ggi: (6, Ngrid)
+        n0 = Ggi[2] * Ggi[5] - Ggi[3] * Ggi[4]
+        n1 = Ggi[4] * Ggi[1] - Ggi[5] * Ggi[0]
+        n2 = Ggi[0] * Ggi[3] - Ggi[1] * Ggi[2]
+        r = jnp.sqrt(n0 * n0 + n1 * n1 + n2 * n2)
+        Ga = r * invNt * invNp
+
+        # scale gradients
+        Ggs = Ggi.at[0].multiply(invNt)
+        Ggs = Ggs.at[2].multiply(invNt)
+        Ggs = Ggs.at[4].multiply(invNt)
+        Ggs = Ggs.at[1].multiply(invNp)
+        Ggs = Ggs.at[3].multiply(invNp)
+        Ggs = Ggs.at[5].multiply(invNp)
+
+        # grid kernel
+        dx = TrgCoord[None, :] - Gi.T
+        MGrid = laplace_fxd2_u(dx, jnp.ones((ngrid,)))
+        MGrid = MGrid * (Ga * precomp.Gpou)[:, None, None]
+        MGrid = MGrid.reshape((ngrid, 9))
+
+        # polar interpolation
+        P = _interp_patch(Gi, precomp)  # (3, Npolar)
+        Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        n0p = Pg[2] * Pg[5] - Pg[3] * Pg[4]
+        n1p = Pg[4] * Pg[1] - Pg[5] * Pg[0]
+        n2p = Pg[0] * Pg[3] - Pg[1] * Pg[2]
+        rp = jnp.sqrt(n0p * n0p + n1p * n1p + n2p * n2p)
+
+        # hedgehog target coordinates
+        ntrg0 = Ggi[2, patch_dim0 * patch_dim + patch_dim0] * Ggi[5, patch_dim0 * patch_dim + patch_dim0] - Ggi[3, patch_dim0 * patch_dim + patch_dim0] * Ggi[4, patch_dim0 * patch_dim + patch_dim0]
+        ntrg1 = Ggi[4, patch_dim0 * patch_dim + patch_dim0] * Ggi[1, patch_dim0 * patch_dim + patch_dim0] - Ggi[5, patch_dim0 * patch_dim + patch_dim0] * Ggi[0, patch_dim0 * patch_dim + patch_dim0]
+        ntrg2 = Ggi[0, patch_dim0 * patch_dim + patch_dim0] * Ggi[3, patch_dim0 * patch_dim + patch_dim0] - Ggi[1, patch_dim0 * patch_dim + patch_dim0] * Ggi[2, patch_dim0 * patch_dim + patch_dim0]
+        rtrg = jnp.sqrt(ntrg0 * ntrg0 + ntrg1 * ntrg1 + ntrg2 * ntrg2)
+        scal = jnp.sqrt(rtrg * invNt * invNp) * orient / rtrg * (-20.0 / precomp.rad_dim)
+        nvec = jnp.array([ntrg0, ntrg1, ntrg2]) * scal
+        TrgCoordPolar = TrgCoord[None, :] + interp_nds[:, None] * nvec[None, :]
+
+        dxp = TrgCoordPolar[None, :, :] - P.T[:, None, :]
+        MPolar = laplace_fxd2_u(dxp, jnp.ones((precomp.npolar, hedgehog_order)))
+        MPolar = MPolar * (rp * precomp.Ppou)[:, None, None, None]
+        MPolar = MPolar.reshape((precomp.npolar, hedgehog_order, 9))
+        MPolar = jnp.tensordot(MPolar, precomp.hedgehog_wts, axes=(1, 0))
+
+        # scatter polar contributions back to grid
+        idx = precomp.interp_idx.reshape(-1)
+        w = precomp.M_G2P.reshape((precomp.npolar, -1))
+        for k in range(9):
+            contrib = (MPolar[:, k:k+1] * w).reshape(-1)
+            MGrid = MGrid.at[idx, k].add(contrib)
+
+        return jnp.sum(GiF[:, None] * MGrid, axis=0)
+
+    Trg_flat = X_trg.reshape((3, -1)).T
+    corr = jax.vmap(corr_one)(G, Gg, GF, Trg_flat)
+    corr = corr.T.reshape((9, trg_nt, trg_np))
+
+    base = base.reshape((9, trg_nt, trg_np))
+    return base + corr
+
+
+def laplace_fxd2_u_eval_vec_singular(
+    X_src,
+    dX_src,
+    density_vec,
+    trg_nt: int,
+    trg_np: int,
+    nfp: int,
+    digits: int = 5,
+    patch_dim0: int | None = None,
+    rad_dim: int | None = None,
+    hedgehog_order: int = 8,
+    chunk_size: int = 1024,
+):
+    density_vec = jnp.asarray(density_vec)
+    return jax.vmap(
+        lambda dens: laplace_fxd2_u_eval_singular(
+            X_src,
+            dX_src,
+            dens,
+            trg_nt,
+            trg_np,
+            nfp,
+            digits=digits,
+            patch_dim0=patch_dim0,
+            rad_dim=rad_dim,
+            hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
         ),
         in_axes=0,

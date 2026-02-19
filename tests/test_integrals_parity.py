@@ -9,6 +9,8 @@ from virtual_casing_jax.integrals import (
     laplace_fxd_u_eval_vec,
     laplace_fxd_u_eval_singular,
     laplace_fxd_u_eval_vec_singular,
+    laplace_fxd2_u_eval_singular,
+    laplace_fxd2_u_eval_vec_singular,
     field_period_target_coords,
     computeB_offsurface_baseline,
     computeB_offsurface_adaptive,
@@ -48,6 +50,27 @@ def _load_offsurf_case(prefix: str):
     Xt = load_dump(DATA_DIR / f"{prefix}_computeBOff_Xt")
     Bvc = load_dump(DATA_DIR / f"{prefix}_computeBOff_Bvc")
     return X, BdotN, J, Xt, Bvc
+
+
+def _load_gradb_case(prefix: str):
+    X = load_dump(DATA_DIR / f"{prefix}_computeGradB_quad_coord")
+    dX = load_dump(DATA_DIR / f"{prefix}_computeGradB_dX")
+    BdotN = load_dump(DATA_DIR / f"{prefix}_computeGradB_BdotN")
+    J = load_dump(DATA_DIR / f"{prefix}_computeGradB_J")
+    gradgradG_BdotN = load_dump(DATA_DIR / f"{prefix}_computeGradB_gradgradG_BdotN")
+    gradG_J = load_dump(DATA_DIR / f"{prefix}_computeGradB_gradG_J")
+    gradBvc = load_dump(DATA_DIR / f"{prefix}_computeGradB_gradBvc")
+    return X, dX, BdotN, J, gradgradG_BdotN, gradG_J, gradBvc
+
+
+def _infer_nfp(prefix: str):
+    if _dump_exists(prefix, "setup_surface_coord") and _dump_exists(prefix, "setup_X"):
+        surf = load_dump(DATA_DIR / f"{prefix}_setup_surface_coord")
+        base = load_dump(DATA_DIR / f"{prefix}_setup_X")
+        if surf.shape[1] % base.shape[1] != 0:
+            raise ValueError("setup_surface_coord must be an integer multiple of setup_X in toroidal dimension")
+        return surf.shape[1] // base.shape[1]
+    return 1
 
 
 @pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
@@ -133,7 +156,7 @@ def test_laplace_fxd_u_eval_singular_parity(prefix):
 
     ref = gradG_BdotN
     rel = np.linalg.norm(out - ref) / (np.linalg.norm(ref) + 1e-14)
-    assert rel < 1.5e-3
+    assert rel < 1.2e-3
 
 
 @pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
@@ -160,7 +183,7 @@ def test_laplace_fxd_u_eval_vec_singular_parity(prefix):
 
     ref = gradG_J
     rel = np.linalg.norm(out - ref) / (np.linalg.norm(ref) + 1e-14)
-    assert rel < 5e-4
+    assert rel < 4e-4
 
 
 @pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
@@ -300,3 +323,105 @@ def test_adaptive_computeBOff_parity_case_vc():
 
     rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
     assert rel < 1e-2
+
+
+def test_laplace_fxd2_u_eval_singular_parity_case_vc():
+    prefix = "case_vc"
+    if not _dump_exists(prefix, "computeGradB_gradgradG_BdotN"):
+        pytest.skip("parity dump not available")
+
+    X, dX, BdotN, _, gradgradG_BdotN, _, gradBvc = _load_gradb_case(prefix)
+    trg_nt = gradBvc.shape[2]
+    trg_np = gradBvc.shape[3]
+
+    nfp = _infer_nfp(prefix)
+
+    out = laplace_fxd2_u_eval_singular(
+        jnp.asarray(X),
+        jnp.asarray(dX),
+        jnp.asarray(BdotN),
+        trg_nt,
+        trg_np,
+        nfp,
+        digits=5,
+        hedgehog_order=8,
+        chunk_size=1024,
+    )
+    out = np.asarray(out).reshape((3, 3, trg_nt, trg_np))
+
+    rel = np.linalg.norm(out - gradgradG_BdotN) / (np.linalg.norm(gradgradG_BdotN) + 1e-14)
+    assert rel < 5e-3
+
+
+def test_laplace_fxd2_u_eval_vec_singular_parity_case_vc():
+    prefix = "case_vc"
+    if not _dump_exists(prefix, "computeGradB_gradG_J"):
+        pytest.skip("parity dump not available")
+
+    X, dX, _, J, _, gradG_J, gradBvc = _load_gradb_case(prefix)
+    trg_nt = gradBvc.shape[2]
+    trg_np = gradBvc.shape[3]
+    nfp = _infer_nfp(prefix)
+
+    out = laplace_fxd2_u_eval_vec_singular(
+        jnp.asarray(X),
+        jnp.asarray(dX),
+        jnp.asarray(J),
+        trg_nt,
+        trg_np,
+        nfp,
+        digits=5,
+        hedgehog_order=8,
+        chunk_size=1024,
+    )
+    out = np.asarray(out).reshape((3, 3, 3, trg_nt, trg_np))
+
+    rel = np.linalg.norm(out - gradG_J) / (np.linalg.norm(gradG_J) + 1e-14)
+    assert rel < 5e-3
+
+
+def test_computeGradB_parity_case_vc():
+    prefix = "case_vc"
+    if not _dump_exists(prefix, "computeGradB_gradBvc"):
+        pytest.skip("parity dump not available")
+
+    X, dX, BdotN, J, _, _, gradBvc_ref = _load_gradb_case(prefix)
+    trg_nt = gradBvc_ref.shape[2]
+    trg_np = gradBvc_ref.shape[3]
+    nfp = _infer_nfp(prefix)
+
+    gradgradG_BdotN = laplace_fxd2_u_eval_singular(
+        jnp.asarray(X),
+        jnp.asarray(dX),
+        jnp.asarray(BdotN),
+        trg_nt,
+        trg_np,
+        nfp,
+        digits=5,
+        hedgehog_order=8,
+        chunk_size=1024,
+    )
+    gradgradG_BdotN = np.asarray(gradgradG_BdotN).reshape((3, 3, trg_nt, trg_np))
+
+    gradG_J = laplace_fxd2_u_eval_vec_singular(
+        jnp.asarray(X),
+        jnp.asarray(dX),
+        jnp.asarray(J),
+        trg_nt,
+        trg_np,
+        nfp,
+        digits=5,
+        hedgehog_order=8,
+        chunk_size=1024,
+    )
+    gradG_J = np.asarray(gradG_J).reshape((3, 3, 3, trg_nt, trg_np))
+
+    gradBvc = np.zeros_like(gradBvc_ref)
+    for k in range(3):
+        k1 = (k + 1) % 3
+        k2 = (k + 2) % 3
+        gradBvc[k] = gradG_J[k1, k2] - gradG_J[k2, k1]
+    gradBvc = gradBvc + gradgradG_BdotN
+
+    rel = np.linalg.norm(gradBvc - gradBvc_ref) / (np.linalg.norm(gradBvc_ref) + 1e-14)
+    assert rel < 5e-3
