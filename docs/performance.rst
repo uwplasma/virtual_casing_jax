@@ -123,7 +123,14 @@ to maintain reference accuracy.
 For singular correction, the POU/polar interpolation tables can be cast
 to float32 while keeping the final accumulation in float64. Use
 ``pou_dtype="auto"`` or ``pou_dtype="float32"`` in high-level calls to
-enable this optimization.
+enable this optimization. The interpolation weights and patch gather
+values can be cast independently via ``patch_dtype="auto"`` (or
+``"float32"``), which reduces the largest temporary tensors while the
+final outputs remain in the input precision.
+
+On ``case_vc_large`` (CPU HLO), ``patch_dtype="float32"`` reduces the
+largest singular-correction gather from ~304 MiB to ~152 MiB for ``B``,
+and from ~457 MiB to ~228 MiB for ``GradB``.
 
 Precompute Reuse
 ~~~~~~~~~~~~~~~~
@@ -131,7 +138,8 @@ Precompute Reuse
 The polar quadrature tables and interpolation weights are cached via
 ``precompute_singular``. Patch index maps are cached per quadrature
 setup inside ``VirtualCasingJAX`` to avoid recomputing the patch gather
-indices on each call.
+indices on each call. Patch indices are stored as int32 to reduce memory
+traffic during gathers.
 
 Profiling and Diagnostics
 -------------------------

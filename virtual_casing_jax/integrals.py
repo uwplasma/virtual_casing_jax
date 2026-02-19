@@ -908,11 +908,11 @@ def _surface_cond(dX, nt: int, npol: int):
 
 def _build_patch_indices(t_idx, p_idx, nt: int, npol: int, patch_dim0: int):
     patch_dim = 2 * patch_dim0 + 1
-    dt = jnp.arange(-patch_dim0, patch_dim0 + 1)
-    dp = jnp.arange(-patch_dim0, patch_dim0 + 1)
+    dt = jnp.arange(-patch_dim0, patch_dim0 + 1, dtype=jnp.int32)
+    dp = jnp.arange(-patch_dim0, patch_dim0 + 1, dtype=jnp.int32)
     tt = (t_idx[:, None, None] + dt[None, :, None]) % nt
     pp = (p_idx[:, None, None] + dp[None, None, :]) % npol
-    idx = (tt * npol + pp).reshape((t_idx.shape[0], patch_dim * patch_dim))
+    idx = (tt * npol + pp).reshape((t_idx.shape[0], patch_dim * patch_dim)).astype(jnp.int32)
     return idx
 
 
@@ -920,6 +920,8 @@ def _interp_patch(values, precomp):
     # values: (dof, Ngrid)
     dof = values.shape[0]
     idx = precomp.interp_idx.reshape(-1)
+    if values.dtype != precomp.M_G2P.dtype:
+        values = values.astype(precomp.M_G2P.dtype)
     gathered = jnp.take(values, idx, axis=1)
     gathered = gathered.reshape((dof, precomp.npolar, INTERP_ORDER, INTERP_ORDER))
     weights = precomp.M_G2P[None, ...]
@@ -942,6 +944,7 @@ def laplace_fxd_u_eval_singular(
     patch_idx=None,
     orient: float | None = None,
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool = False,
 ):
     """Evaluate Laplace FxdU with singular correction on surface targets."""
@@ -972,7 +975,12 @@ def laplace_fxd_u_eval_singular(
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
 
-    precomp = precompute_singular(patch_dim0, rad_dim, pou_dtype=pou_dtype)
+    precomp = precompute_singular(
+        patch_dim0,
+        rad_dim,
+        pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
+    )
     patch_dim = precomp.patch_dim
     ngrid = precomp.ngrid
 
@@ -1022,6 +1030,10 @@ def laplace_fxd_u_eval_singular(
         # polar interpolation
         P = _interp_patch(Gi, precomp)  # (3, Npolar)
         Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        if P.dtype != TrgCoord.dtype:
+            P = P.astype(TrgCoord.dtype)
+        if Pg.dtype != TrgCoord.dtype:
+            Pg = Pg.astype(TrgCoord.dtype)
         n0p = Pg[2] * Pg[5] - Pg[3] * Pg[4]
         n1p = Pg[4] * Pg[1] - Pg[5] * Pg[0]
         n2p = Pg[0] * Pg[3] - Pg[1] * Pg[2]
@@ -1092,6 +1104,7 @@ def laplace_fxd_u_eval_vec_singular(
     patch_idx=None,
     orient: float | None = None,
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool = False,
 ):
     density_vec = jnp.asarray(density_vec)
@@ -1112,6 +1125,7 @@ def laplace_fxd_u_eval_vec_singular(
             patch_idx=patch_idx,
             orient=orient,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
         ),
         in_axes=0,
@@ -1135,6 +1149,7 @@ def laplace_dx_u_eval_singular(
     patch_idx=None,
     orient: float | None = None,
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool = False,
 ):
     """Evaluate Laplace DxU with singular correction on surface targets."""
@@ -1167,7 +1182,12 @@ def laplace_dx_u_eval_singular(
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
 
-    precomp = precompute_singular(patch_dim0, rad_dim, pou_dtype=pou_dtype)
+    precomp = precompute_singular(
+        patch_dim0,
+        rad_dim,
+        pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
+    )
     patch_dim = precomp.patch_dim
     ngrid = precomp.ngrid
 
@@ -1217,6 +1237,10 @@ def laplace_dx_u_eval_singular(
 
         P = _interp_patch(Gi, precomp)  # (3, Npolar)
         Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        if P.dtype != TrgCoord.dtype:
+            P = P.astype(TrgCoord.dtype)
+        if Pg.dtype != TrgCoord.dtype:
+            Pg = Pg.astype(TrgCoord.dtype)
         n0p = Pg[2] * Pg[5] - Pg[3] * Pg[4]
         n1p = Pg[4] * Pg[1] - Pg[5] * Pg[0]
         n2p = Pg[0] * Pg[3] - Pg[1] * Pg[2]
@@ -1288,6 +1312,7 @@ def laplace_fxd2_u_eval_singular(
     patch_idx=None,
     orient: float | None = None,
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool = False,
 ):
     """Evaluate Laplace Fxd2U with singular correction (Hedgehog)."""
@@ -1318,7 +1343,13 @@ def laplace_fxd2_u_eval_singular(
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
 
-    precomp = precompute_singular(patch_dim0, rad_dim, hedgehog_order, pou_dtype=pou_dtype)
+    precomp = precompute_singular(
+        patch_dim0,
+        rad_dim,
+        hedgehog_order,
+        pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
+    )
     patch_dim = precomp.patch_dim
     ngrid = precomp.ngrid
 
@@ -1372,6 +1403,10 @@ def laplace_fxd2_u_eval_singular(
         # polar interpolation
         P = _interp_patch(Gi, precomp)  # (3, Npolar)
         Pg = _interp_patch(Ggs, precomp)  # (6, Npolar)
+        if P.dtype != TrgCoord.dtype:
+            P = P.astype(TrgCoord.dtype)
+        if Pg.dtype != TrgCoord.dtype:
+            Pg = Pg.astype(TrgCoord.dtype)
         n0p = Pg[2] * Pg[5] - Pg[3] * Pg[4]
         n1p = Pg[4] * Pg[1] - Pg[5] * Pg[0]
         n2p = Pg[0] * Pg[3] - Pg[1] * Pg[2]
@@ -1454,6 +1489,7 @@ def laplace_fxd2_u_eval_vec_singular(
     patch_idx=None,
     orient: float | None = None,
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool = False,
 ):
     density_vec = jnp.asarray(density_vec)
@@ -1475,6 +1511,7 @@ def laplace_fxd2_u_eval_vec_singular(
             patch_idx=patch_idx,
             orient=orient,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
         ),
         in_axes=0,

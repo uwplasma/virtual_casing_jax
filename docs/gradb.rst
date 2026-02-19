@@ -173,6 +173,10 @@ The GradB path exposes several knobs to balance speed and memory:
   to reduce saved intermediates during autodiff.
 - ``pou_dtype="auto"`` (or ``"float32"``) casts POU/polar tables to
   float32 while keeping the final accumulation in float64.
+- ``patch_dtype="auto"`` (or ``"float32"``) casts the patch interpolation
+  weights and patch gathers inside the singular correction to float32,
+  reducing the largest intermediate tensors while preserving output
+  precision.
 
 These options are available on ``compute_external_gradB`` /
 ``compute_internal_gradB`` and their JIT wrappers.

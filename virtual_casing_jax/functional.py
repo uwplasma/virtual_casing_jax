@@ -84,6 +84,16 @@ def _resolve_pou_dtype(pou_dtype, value_dtype):
     return jnp.dtype(pou_dtype)
 
 
+def _resolve_patch_dtype(patch_dtype, value_dtype):
+    if patch_dtype is None:
+        return None
+    if isinstance(patch_dtype, str):
+        if patch_dtype.lower() == "auto":
+            return jnp.float32 if value_dtype == jnp.float64 else value_dtype
+        return jnp.dtype(patch_dtype)
+    return jnp.dtype(patch_dtype)
+
+
 def build_surface_coord(X, nfp: int, half_period: bool, surf_nt: int, surf_np: int, trg_nt: int):
     """Build full-field-period surface coordinates from base grid."""
     X = jnp.asarray(X).reshape((3, surf_nt, surf_np))
@@ -230,6 +240,7 @@ def _compute_B_signed(
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool | None = None,
 ):
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
@@ -238,7 +249,9 @@ def _compute_B_signed(
     )
     if remat is None:
         remat = False
-    pou_dtype = _resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+    value_dtype = jnp.asarray(B0).dtype
+    pou_dtype = _resolve_pou_dtype(pou_dtype, value_dtype)
+    patch_dtype = _resolve_patch_dtype(patch_dtype, value_dtype)
     nsrc = quad_nt * quad_np
     if X_trg is None:
         ntrg = trg_nt * trg_np
@@ -280,6 +293,7 @@ def _compute_B_signed(
         patch_idx=patch_idx,
         orient=orient,
         pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
         remat=remat,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, trg_nt, trg_np))
@@ -299,6 +313,7 @@ def _compute_B_signed(
         patch_idx=patch_idx,
         orient=orient,
         pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
         remat=remat,
     )
     gradG_BdotN = jnp.asarray(gradG_BdotN).reshape((3, trg_nt, trg_np))
@@ -337,6 +352,7 @@ def compute_external_B_functional(
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool | None = None,
 ):
     """Compute Bext with surface coordinates as differentiable inputs."""
@@ -362,6 +378,7 @@ def compute_external_B_functional(
         chunk_size=chunk_size,
         target_chunk_size=target_chunk_size,
         pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
         remat=remat,
     )
 
@@ -388,6 +405,7 @@ def compute_internal_B_functional(
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool | None = None,
 ):
     """Compute Bint with surface coordinates as differentiable inputs."""
@@ -413,6 +431,7 @@ def compute_internal_B_functional(
         chunk_size=chunk_size,
         target_chunk_size=target_chunk_size,
         pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
         remat=remat,
     )
 
@@ -440,6 +459,7 @@ def _compute_gradB_signed(
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool | None = None,
 ):
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
@@ -448,7 +468,9 @@ def _compute_gradB_signed(
     )
     if remat is None:
         remat = True
-    pou_dtype = _resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+    value_dtype = jnp.asarray(B0).dtype
+    pou_dtype = _resolve_pou_dtype(pou_dtype, value_dtype)
+    patch_dtype = _resolve_patch_dtype(patch_dtype, value_dtype)
     nsrc = quad_nt * quad_np
     ntrg = trg_nt * trg_np
     chunk_size, target_chunk_size = _resolve_chunk_sizes(
@@ -481,6 +503,7 @@ def _compute_gradB_signed(
         patch_idx=patch_idx,
         orient=orient,
         pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
         remat=remat,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, trg_nt, trg_np))
@@ -500,6 +523,7 @@ def _compute_gradB_signed(
         patch_idx=patch_idx,
         orient=orient,
         pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
         remat=remat,
     )
     gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, trg_nt, trg_np))
@@ -535,6 +559,7 @@ def compute_external_gradB_functional(
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool | None = None,
 ):
     """Compute GradBext with surface coordinates as differentiable inputs."""
@@ -560,6 +585,7 @@ def compute_external_gradB_functional(
         chunk_size=chunk_size,
         target_chunk_size=target_chunk_size,
         pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
         remat=remat,
     )
 
@@ -586,6 +612,7 @@ def compute_internal_gradB_functional(
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     pou_dtype=None,
+    patch_dtype=None,
     remat: bool | None = None,
 ):
     """Compute GradBint with surface coordinates as differentiable inputs."""
@@ -611,6 +638,7 @@ def compute_internal_gradB_functional(
         chunk_size=chunk_size,
         target_chunk_size=target_chunk_size,
         pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
         remat=remat,
     )
 

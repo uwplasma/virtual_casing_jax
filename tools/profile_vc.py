@@ -134,6 +134,7 @@ def profile(args: argparse.Namespace):
             chunk_size=args.chunk_size,
             target_chunk_size=args.target_chunk_size,
             pou_dtype=args.pou_dtype,
+            patch_dtype=args.patch_dtype,
             remat=args.remat,
         )
     elif args.op == "GradB":
@@ -148,6 +149,7 @@ def profile(args: argparse.Namespace):
             chunk_size=args.chunk_size,
             target_chunk_size=args.target_chunk_size,
             pou_dtype=args.pou_dtype,
+            patch_dtype=args.patch_dtype,
             remat=args.remat,
         )
     elif args.op == "Boff":
@@ -201,6 +203,7 @@ def main():
     parser.add_argument("--chunk-size", type=str, default="auto")
     parser.add_argument("--target-chunk-size", type=str, default="auto")
     parser.add_argument("--pou-dtype", type=str, default=None)
+    parser.add_argument("--patch-dtype", type=str, default=None)
     parser.add_argument("--remat", dest="remat", action="store_true")
     parser.add_argument("--no-remat", dest="remat", action="store_false")
     parser.add_argument("--max-nt", type=int, default=-1)

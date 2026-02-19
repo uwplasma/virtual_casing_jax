@@ -110,9 +110,17 @@ def precompute_singular(
     rad_dim: int,
     hedgehog_order: int = 1,
     pou_dtype=None,
+    patch_dtype=None,
+    index_dtype=None,
 ):
     if pou_dtype is not None:
         pou_dtype = np.dtype(pou_dtype)
+    if patch_dtype is not None:
+        patch_dtype = np.dtype(patch_dtype)
+    if index_dtype is None:
+        index_dtype = np.int32
+    else:
+        index_dtype = np.dtype(index_dtype)
     patch_dim = 2 * patch_dim0 + 1
     rad_dim_base = rad_dim
     rad_dim = rad_dim_base * (3 if hedgehog_order > 1 else 1)
@@ -148,7 +156,7 @@ def precompute_singular(
             Ppou[i * ang_dim + j] = pou(qx[i]) * dr * rdt
 
     # Interpolation map
-    I_G2P = np.zeros(npolar, dtype=np.int64)
+    I_G2P = np.zeros(npolar, dtype=index_dtype)
     M_G2P = np.zeros((npolar, INTERP_ORDER, INTERP_ORDER), dtype=np.float64)
     h_ang = 2.0 * math.pi / ang_dim
     h_int = 1.0 / (INTERP_ORDER - 1)
@@ -191,10 +199,15 @@ def precompute_singular(
     else:
         wts = np.ones(1, dtype=np.float64)
 
-    def _cast(arr):
+    def _cast_pou(arr):
         if pou_dtype is None:
             return jnp.asarray(arr)
         return jnp.asarray(arr, dtype=pou_dtype)
+
+    def _cast_patch(arr):
+        if patch_dtype is None:
+            return jnp.asarray(arr)
+        return jnp.asarray(arr, dtype=patch_dtype)
 
     return SingularPrecomp(
         patch_dim0=patch_dim0,
@@ -207,12 +220,12 @@ def precompute_singular(
         npolar=npolar,
         qx=jnp.asarray(qx),
         qw=jnp.asarray(qw),
-        Gpou=_cast(Gpou),
-        Ppou=_cast(Ppou),
-        I_G2P=jnp.asarray(I_G2P),
-        M_G2P=_cast(M_G2P),
-        interp_idx=jnp.asarray(interp_idx),
-        hedgehog_wts=_cast(wts),
+        Gpou=_cast_pou(Gpou),
+        Ppou=_cast_pou(Ppou),
+        I_G2P=jnp.asarray(I_G2P, dtype=jnp.dtype(index_dtype)),
+        M_G2P=_cast_patch(M_G2P),
+        interp_idx=jnp.asarray(interp_idx, dtype=jnp.dtype(index_dtype)),
+        hedgehog_wts=_cast_pou(wts),
     )
 
 

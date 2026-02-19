@@ -94,6 +94,15 @@ class VirtualCasingJAX:
             return jnp.dtype(pou_dtype)
         return jnp.dtype(pou_dtype)
 
+    def _resolve_patch_dtype(self, patch_dtype, value_dtype):
+        if patch_dtype is None:
+            return None
+        if isinstance(patch_dtype, str):
+            if patch_dtype.lower() == "auto":
+                return jnp.float32 if value_dtype == jnp.float64 else value_dtype
+            return jnp.dtype(patch_dtype)
+        return jnp.dtype(patch_dtype)
+
     def setup(
         self,
         digits: int,
@@ -318,6 +327,7 @@ class VirtualCasingJAX:
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
         pou_dtype=None,
+        patch_dtype=None,
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
@@ -335,6 +345,7 @@ class VirtualCasingJAX:
             remat = True
 
         pou_dtype = self._resolve_pou_dtype(pou_dtype, B0.dtype)
+        patch_dtype = self._resolve_patch_dtype(patch_dtype, B0.dtype)
         nsrc = self._grad_setup.quad_nt * self._grad_setup.quad_np
         ntrg = self.trg_nt * self.trg_np
         chunk_size, target_chunk_size = self._resolve_chunk_sizes(
@@ -385,6 +396,7 @@ class VirtualCasingJAX:
             patch_idx=patch_idx,
             orient=self._grad_setup.orient,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, self.trg_nt, self.trg_np))
@@ -404,6 +416,7 @@ class VirtualCasingJAX:
             patch_idx=patch_idx,
             orient=self._grad_setup.orient,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
         )
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape(
@@ -430,6 +443,7 @@ class VirtualCasingJAX:
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
         pou_dtype=None,
+        patch_dtype=None,
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
@@ -445,6 +459,7 @@ class VirtualCasingJAX:
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
@@ -461,6 +476,7 @@ class VirtualCasingJAX:
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
         pou_dtype=None,
+        patch_dtype=None,
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
@@ -476,6 +492,7 @@ class VirtualCasingJAX:
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
@@ -495,12 +512,14 @@ class VirtualCasingJAX:
         target_chunk_size = kwargs.get("target_chunk_size", "auto")
         remat = kwargs.get("remat")
         pou_dtype = kwargs.get("pou_dtype")
+        patch_dtype = kwargs.get("patch_dtype")
         nsrc = self._grad_setup.quad_nt * self._grad_setup.quad_np
         ntrg = self.trg_nt * self.trg_np
         chunk_size, target_chunk_size = self._resolve_chunk_sizes(
             "gradb", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
         )
         pou_dtype = self._resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+        patch_dtype = self._resolve_patch_dtype(patch_dtype, jnp.asarray(B0).dtype)
 
         key = (
             "gradB",
@@ -512,6 +531,7 @@ class VirtualCasingJAX:
             target_chunk_size,
             remat,
             pou_dtype,
+            patch_dtype,
         )
         fn = self._jit_cache.get(key)
         if fn is None:
@@ -520,6 +540,7 @@ class VirtualCasingJAX:
             call_kwargs["target_chunk_size"] = target_chunk_size
             call_kwargs["remat"] = remat
             call_kwargs["pou_dtype"] = pou_dtype
+            call_kwargs["patch_dtype"] = patch_dtype
             fn = jax.jit(
                 lambda B: self.compute_external_gradB(
                     B,
@@ -543,6 +564,7 @@ class VirtualCasingJAX:
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
         pou_dtype=None,
+        patch_dtype=None,
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
@@ -560,6 +582,7 @@ class VirtualCasingJAX:
             remat = False
 
         pou_dtype = self._resolve_pou_dtype(pou_dtype, B0.dtype)
+        patch_dtype = self._resolve_patch_dtype(patch_dtype, B0.dtype)
         nsrc = self._b_setup.quad_nt * self._b_setup.quad_np
         if X_trg is None:
             ntrg = self.trg_nt * self.trg_np
@@ -619,6 +642,7 @@ class VirtualCasingJAX:
             patch_idx=patch_idx,
             orient=self._b_setup.orient,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, self.trg_nt, self.trg_np))
@@ -638,6 +662,7 @@ class VirtualCasingJAX:
             patch_idx=patch_idx,
             orient=self._b_setup.orient,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
         )
         gradG_BdotN = jnp.asarray(gradG_BdotN).reshape((3, self.trg_nt, self.trg_np))
@@ -671,6 +696,7 @@ class VirtualCasingJAX:
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
         pou_dtype=None,
+        patch_dtype=None,
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
@@ -686,6 +712,7 @@ class VirtualCasingJAX:
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
@@ -702,6 +729,7 @@ class VirtualCasingJAX:
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
         pou_dtype=None,
+        patch_dtype=None,
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
@@ -717,6 +745,7 @@ class VirtualCasingJAX:
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
             pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
             remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
@@ -736,12 +765,14 @@ class VirtualCasingJAX:
         target_chunk_size = kwargs.get("target_chunk_size", "auto")
         remat = kwargs.get("remat")
         pou_dtype = kwargs.get("pou_dtype")
+        patch_dtype = kwargs.get("patch_dtype")
         nsrc = self._b_setup.quad_nt * self._b_setup.quad_np
         ntrg = self.trg_nt * self.trg_np
         chunk_size, target_chunk_size = self._resolve_chunk_sizes(
             "b", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
         )
         pou_dtype = self._resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+        patch_dtype = self._resolve_patch_dtype(patch_dtype, jnp.asarray(B0).dtype)
 
         key = (
             "B",
@@ -752,6 +783,7 @@ class VirtualCasingJAX:
             target_chunk_size,
             remat,
             pou_dtype,
+            patch_dtype,
         )
         fn = self._jit_cache.get(key)
         if fn is None:
@@ -760,6 +792,7 @@ class VirtualCasingJAX:
             call_kwargs["target_chunk_size"] = target_chunk_size
             call_kwargs["remat"] = remat
             call_kwargs["pou_dtype"] = pou_dtype
+            call_kwargs["patch_dtype"] = patch_dtype
             fn = jax.jit(
                 lambda B: self.compute_external_B(
                     B,
@@ -785,12 +818,14 @@ class VirtualCasingJAX:
         target_chunk_size = kwargs.get("target_chunk_size", "auto")
         remat = kwargs.get("remat")
         pou_dtype = kwargs.get("pou_dtype")
+        patch_dtype = kwargs.get("patch_dtype")
         nsrc = self._b_setup.quad_nt * self._b_setup.quad_np
         ntrg = self.trg_nt * self.trg_np
         chunk_size, target_chunk_size = self._resolve_chunk_sizes(
             "b", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
         )
         pou_dtype = self._resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+        patch_dtype = self._resolve_patch_dtype(patch_dtype, jnp.asarray(B0).dtype)
 
         key = (
             "Bint",
@@ -801,6 +836,7 @@ class VirtualCasingJAX:
             target_chunk_size,
             remat,
             pou_dtype,
+            patch_dtype,
         )
         fn = self._jit_cache.get(key)
         if fn is None:
@@ -809,6 +845,7 @@ class VirtualCasingJAX:
             call_kwargs["target_chunk_size"] = target_chunk_size
             call_kwargs["remat"] = remat
             call_kwargs["pou_dtype"] = pou_dtype
+            call_kwargs["patch_dtype"] = patch_dtype
             fn = jax.jit(
                 lambda B: self.compute_internal_B(
                     B,
@@ -854,12 +891,14 @@ class VirtualCasingJAX:
         target_chunk_size = kwargs.get("target_chunk_size", "auto")
         remat = kwargs.get("remat")
         pou_dtype = kwargs.get("pou_dtype")
+        patch_dtype = kwargs.get("patch_dtype")
         nsrc = self._grad_setup.quad_nt * self._grad_setup.quad_np
         ntrg = self.trg_nt * self.trg_np
         chunk_size, target_chunk_size = self._resolve_chunk_sizes(
             "gradb", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
         )
         pou_dtype = self._resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+        patch_dtype = self._resolve_patch_dtype(patch_dtype, jnp.asarray(B0).dtype)
 
         key = (
             "gradBint",
@@ -871,6 +910,7 @@ class VirtualCasingJAX:
             target_chunk_size,
             remat,
             pou_dtype,
+            patch_dtype,
         )
         fn = self._jit_cache.get(key)
         if fn is None:
@@ -879,6 +919,7 @@ class VirtualCasingJAX:
             call_kwargs["target_chunk_size"] = target_chunk_size
             call_kwargs["remat"] = remat
             call_kwargs["pou_dtype"] = pou_dtype
+            call_kwargs["patch_dtype"] = patch_dtype
             fn = jax.jit(
                 lambda B: self.compute_internal_gradB(
                     B,
@@ -901,6 +942,7 @@ class VirtualCasingJAX:
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
         pou_dtype=None,
+        patch_dtype=None,
         remat: bool | None = None,
         hedgehog_order: int = 8,
     ):
@@ -939,6 +981,7 @@ class VirtualCasingJAX:
                 chunk_size=chunk_size,
                 target_chunk_size=target_chunk_size,
                 pou_dtype=pou_dtype,
+                patch_dtype=patch_dtype,
                 remat=remat,
             )
             gradb = self.compute_external_gradB(
@@ -950,6 +993,7 @@ class VirtualCasingJAX:
                 chunk_size=chunk_size,
                 target_chunk_size=target_chunk_size,
                 pou_dtype=pou_dtype,
+                patch_dtype=patch_dtype,
                 remat=remat,
             )
             db = jnp.einsum("k i t p, i t p -> k t p", gradb, dxtrg)
