@@ -28,7 +28,9 @@ def rotate_toroidal(X, nt: int, npol: int, dtheta):
         return X
     X = jnp.asarray(X)
     coeff = fft_r2c(X, nt, npol)
-    m = jnp.fft.fftfreq(nt) * nt
+    # Match BIEST frequency indexing: t - (t > Nt/2 ? Nt : 0)
+    m = jnp.arange(nt)
+    m = jnp.where(m > (nt // 2), m - nt, m)
     phase = jnp.exp(1j * m[:, None] * dtheta)
     coeff = coeff * phase[None, :, :]
     return fft_c2r(coeff, nt, npol)

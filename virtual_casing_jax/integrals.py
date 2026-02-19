@@ -4,7 +4,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .kernels import laplace_fxd_u, laplace_fxd2_u, biotsavart_fx_u, laplace_dx_u
+from .kernels import laplace_fxd_u, laplace_fxd2_u, biotsavart_fx_u, biotsavart_fxd_u, laplace_dx_u
 from .surface_ops import upsample, resample, grad2d, surf_normal_area_elem, normal_orientation
 from .singular_quadrature import precompute_singular, select_patch_dim, INTERP_ORDER
 
@@ -215,6 +215,59 @@ def biotsavart_fx_u_eval(X_src, X_trg, density_vec, area_elem, chunk_size: int =
     init = jnp.zeros((ntrg, 3), dtype=Xs.dtype)
     out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
     return jnp.transpose(out, (1, 0))
+
+
+def biotsavart_fxd_u_eval(X_src, X_trg, density_vec, area_elem, chunk_size: int = 512):
+    """Evaluate Biot-Savart FxdU by direct quadrature.
+
+    density_vec: (3, nt, np) or (3, nsrc)
+    Returns: (3, 3, ntrg) or (3, 3, nt, np) matching X_trg layout.
+    """
+    X_src = _flatten_soa(X_src, "X_src")
+    X_trg = _flatten_soa(X_trg, "X_trg")
+    density_vec = _flatten_soa(density_vec, "density_vec")
+    area_elem = jnp.asarray(area_elem).reshape(-1)
+
+    if X_src.shape[0] != 3 or X_trg.shape[0] != 3 or density_vec.shape[0] != 3:
+        raise ValueError("X_src, X_trg, density_vec must be 3D in SoA layout")
+
+    nsrc = X_src.shape[1]
+    ntrg = X_trg.shape[1]
+    if area_elem.shape[0] != nsrc:
+        raise ValueError("area_elem must match source grid size")
+
+    weights = density_vec * area_elem[None, :]
+    Xs = jnp.transpose(X_src, (1, 0))  # (nsrc, 3)
+    Xt = jnp.transpose(X_trg, (1, 0))  # (ntrg, 3)
+
+    if chunk_size is None or chunk_size <= 0:
+        dx = Xt[:, None, :] - Xs[None, :, :]
+        fvec = jnp.transpose(weights, (1, 0))[None, :, :]
+        contrib = biotsavart_fxd_u(dx, fvec)
+        out = jnp.sum(contrib, axis=1)
+        return jnp.transpose(out, (1, 2, 0))
+
+    pad = (-nsrc) % chunk_size
+    if pad:
+        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
+        weights = jnp.pad(weights, ((0, 0), (0, pad)))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = nsrc_pad // chunk_size
+
+    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+    W_chunks = weights.reshape((3, n_chunks, chunk_size)).transpose(1, 2, 0)
+
+    def scan_fn(acc, xs):
+        Xc, Wc = xs
+        dx = Xt[:, None, :] - Xc[None, :, :]
+        fvec = Wc[None, :, :]
+        contrib = biotsavart_fxd_u(dx, fvec)
+        acc = acc + jnp.sum(contrib, axis=1)
+        return acc, None
+
+    init = jnp.zeros((ntrg, 3, 3), dtype=Xs.dtype)
+    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
+    return jnp.transpose(out, (1, 2, 0))
 
 
 def laplace_dx_u_eval(X_src, n_src, X_trg, density, area_elem, chunk_size: int = 1024):

@@ -31,6 +31,7 @@ from .integrals import (
     laplace_fxd2_u_eval_vec_singular,
     field_period_target_coords,
     biotsavart_fx_u_eval,
+    biotsavart_fxd_u_eval,
     laplace_dx_u_eval,
     computeB_offsurface_baseline,
     computeB_offsurface_adaptive,
@@ -55,6 +56,8 @@ from .functional import (
     compute_external_gradB_offsurf_functional,
 )
 from . import singular_quadrature
+from . import testdata
+from .testdata import SurfType, VirtualCasingTestData, surface_coordinates, magnetic_field_data, magnetic_field_grad_data
 
 __all__ = [
     "surface_ops",
@@ -83,6 +86,7 @@ __all__ = [
     "laplace_fxd2_u_eval_vec_singular",
     "field_period_target_coords",
     "biotsavart_fx_u_eval",
+    "biotsavart_fxd_u_eval",
     "laplace_dx_u_eval",
     "computeB_offsurface_baseline",
     "computeB_offsurface_adaptive",
@@ -104,4 +108,10 @@ __all__ = [
     "compute_external_B_offsurf_functional",
     "compute_external_gradB_offsurf_functional",
     "singular_quadrature",
+    "testdata",
+    "SurfType",
+    "VirtualCasingTestData",
+    "surface_coordinates",
+    "magnetic_field_data",
+    "magnetic_field_grad_data",
 ]

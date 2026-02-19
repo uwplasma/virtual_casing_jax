@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import json
 
 
 def _copy_prefix(src_dir: Path, dst_dir: Path, prefix: str):
@@ -17,6 +18,32 @@ def _copy_prefix(src_dir: Path, dst_dir: Path, prefix: str):
         meta = path.with_suffix(".json")
         if meta.exists():
             shutil.copy2(meta, dst_dir / meta.name)
+
+
+def _write_dump(dst_dir: Path, name: str, arr: np.ndarray):
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    arr = np.asarray(arr)
+    meta = {
+        "dtype": "float32" if arr.dtype == np.float32 else "float64",
+        "shape": list(arr.shape),
+    }
+    bin_path = dst_dir / f"{name}.bin"
+    json_path = dst_dir / f"{name}.json"
+    arr.astype(arr.dtype).tofile(bin_path)
+    with json_path.open("w") as f:
+        json.dump(meta, f, indent=2)
+
+
+def _reset_drand48():
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None)
+        libc.srand48.argtypes = [ctypes.c_long]
+        libc.srand48.restype = None
+        libc.srand48(ctypes.c_long(0x1234ABCD))
+    except Exception as exc:
+        print(f"Warning: could not reset drand48 state: {exc}")
 
 
 def make_virtual_casing_testdata(dst_dir: Path, mode: str):
@@ -83,6 +110,35 @@ def make_virtual_casing_testdata_w7x(dst_dir: Path, mode: str):
         _ = vcasing.compute_internal_gradB(Btotal)
     else:
         raise ValueError(f"Unknown mode: {mode}")
+
+
+def make_virtual_casing_testdata_dumps(dst_dir: Path):
+    import virtual_casing as vc
+
+    nfp = 1
+    half_period = False
+    nt = 6
+    npol = 5
+    trg_nt = 4
+    trg_np = 4
+
+    X = vc.VirtualCasingTestData.surface_coordinates(nfp, half_period, nt, npol, vc.SurfType.AxisymNarrow)
+
+    _reset_drand48()
+    Bext, Bint = vc.VirtualCasingTestData.magnetic_field_data(nfp, half_period, nt, npol, X, trg_nt, trg_np)
+    Bext = np.array(Bext).reshape(3, trg_nt, trg_np)
+    Bint = np.array(Bint).reshape(3, trg_nt, trg_np)
+    _write_dump(dst_dir, "case_testdata_axisym_Bext", Bext)
+    _write_dump(dst_dir, "case_testdata_axisym_Bint", Bint)
+
+    _reset_drand48()
+    GradBext, GradBint = vc.VirtualCasingTestData.magnetic_field_grad_data(
+        nfp, half_period, nt, npol, X, trg_nt, trg_np
+    )
+    GradBext = np.array(GradBext).reshape(3, 3, trg_nt, trg_np)
+    GradBint = np.array(GradBint).reshape(3, 3, trg_nt, trg_np)
+    _write_dump(dst_dir, "case_testdata_axisym_GradBext", GradBext)
+    _write_dump(dst_dir, "case_testdata_axisym_GradBint", GradBint)
 
 
 def make_simsopt_vmec_case(dst_dir: Path, mode: str):
@@ -175,6 +231,8 @@ def main():
         os.environ["VC_DUMP_PREFIX"] = "case_vc_w7x"
         make_virtual_casing_testdata_w7x(dst_dir, mode="ext")
         _copy_prefix(tmpdir, dst_dir, "case_vc_w7x")
+
+        make_virtual_casing_testdata_dumps(dst_dir)
 
     print(f"Parity dumps written to {dst_dir}")
 

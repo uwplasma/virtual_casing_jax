@@ -28,6 +28,8 @@ Test Categories
    - Double-layer self-test returns ``0.5`` jump for constant density.
 
 4. **End-to-End Virtual Casing Parity**
+   - ``VirtualCasingTestData`` B/GradB datasets are regenerated in JAX and
+     matched against C++ dumps (``case_testdata_axisym``).
    - Baseline ``ComputeB`` using direct-sum integrals matches reference
      within coarse tolerances.
    - Singular-corrected ``ComputeB`` achieves ~1e-4 relative error on
