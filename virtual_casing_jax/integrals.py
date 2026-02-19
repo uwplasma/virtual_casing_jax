@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 
 from .kernels import laplace_fxd_u, laplace_fxd2_u, biotsavart_fx_u, laplace_dx_u
-from .surface_ops import upsample, grad2d, surf_normal_area_elem, normal_orientation
+from .surface_ops import upsample, resample, grad2d, surf_normal_area_elem, normal_orientation
 from .singular_quadrature import precompute_singular, select_patch_dim, INTERP_ORDER
 
 
@@ -334,6 +334,179 @@ def computeB_offsurface_adaptive(
     gradG = laplace_fxd_u_eval(X_src, Xt, BdotN, area_elem, chunk_size=chunk_size)
     bs = biotsavart_fx_u_eval(X_src, Xt, J, area_elem, chunk_size=chunk_size)
     return sign * (gradG - bs)
+
+
+def computeB_offsurface_adaptive_schedule(
+    X_src,
+    BdotN,
+    J,
+    Xt,
+    *,
+    levels: tuple[tuple[int, int], ...],
+    digits: int = 5,
+    ext: bool = True,
+    chunk_size: int = 1024,
+):
+    """JIT-friendly adaptive off-surface evaluation with fixed refinement schedule.
+
+    The refinement schedule is provided as a static tuple of (Nt, Np) pairs.
+    Shapes are static per-level, so this function can be JIT-compiled with
+    ``levels`` marked static. The method updates the result only while the
+    double-layer self-test error exceeds the tolerance.
+    """
+    X_src = jnp.asarray(X_src)
+    BdotN = jnp.asarray(BdotN)
+    J = jnp.asarray(J)
+    Xt = jnp.asarray(Xt)
+
+    if len(levels) == 0:
+        raise ValueError("levels must contain at least one (Nt, Np) pair")
+
+    nt0 = int(X_src.shape[1])
+    np0 = int(X_src.shape[2])
+    tol = 10.0 ** (-digits)
+    sign = 1.0 if ext else -1.0
+
+    def eval_level(nt, npol):
+        X_lvl = resample(X_src, nt0, np0, nt, npol)
+        BdotN_lvl = resample(BdotN[None, ...], nt0, np0, nt, npol)[0]
+        J_lvl = resample(J, nt0, np0, nt, npol)
+
+        dX = grad2d(X_lvl, nt, npol)
+        normal, area_elem = surf_normal_area_elem(dX, X_lvl)
+
+        ones = jnp.ones((nt, npol), dtype=X_lvl.dtype)
+        U = laplace_dx_u_eval(
+            X_lvl,
+            normal,
+            Xt,
+            ones,
+            area_elem,
+            chunk_size=chunk_size,
+        )
+        U = jnp.asarray(U).reshape(-1)
+        err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
+
+        gradG = laplace_fxd_u_eval(X_lvl, Xt, BdotN_lvl, area_elem, chunk_size=chunk_size)
+        bs = biotsavart_fx_u_eval(X_lvl, Xt, J_lvl, area_elem, chunk_size=chunk_size)
+        return sign * (gradG - bs), err
+
+    nt_init, np_init = levels[0]
+    B_best, err_best = eval_level(int(nt_init), int(np_init))
+
+    for nt, npol in levels[1:]:
+        nt_i = int(nt)
+        np_i = int(npol)
+
+        def update(state):
+            return eval_level(nt_i, np_i)
+
+        def keep(state):
+            return state
+
+        B_best, err_best = jax.lax.cond(
+            err_best > tol,
+            update,
+            keep,
+            operand=(B_best, err_best),
+        )
+
+    return B_best
+
+
+def computeGradB_offsurface_adaptive_schedule(
+    X_src,
+    BdotN,
+    J,
+    Xt,
+    *,
+    levels: tuple[tuple[int, int], ...],
+    digits: int = 5,
+    ext: bool = True,
+    chunk_size: int = 1024,
+):
+    """JIT-friendly adaptive off-surface GradB evaluation with fixed schedule."""
+    X_src = jnp.asarray(X_src)
+    BdotN = jnp.asarray(BdotN)
+    J = jnp.asarray(J)
+    Xt = jnp.asarray(Xt)
+
+    if len(levels) == 0:
+        raise ValueError("levels must contain at least one (Nt, Np) pair")
+
+    nt0 = int(X_src.shape[1])
+    np0 = int(X_src.shape[2])
+    tol = 10.0 ** (-digits)
+    sign = 1.0 if ext else -1.0
+
+    def eval_level(nt, npol):
+        X_lvl = resample(X_src, nt0, np0, nt, npol)
+        BdotN_lvl = resample(BdotN[None, ...], nt0, np0, nt, npol)[0]
+        J_lvl = resample(J, nt0, np0, nt, npol)
+
+        dX = grad2d(X_lvl, nt, npol)
+        normal, area_elem = surf_normal_area_elem(dX, X_lvl)
+
+        ones = jnp.ones((nt, npol), dtype=X_lvl.dtype)
+        U = laplace_dx_u_eval(
+            X_lvl,
+            normal,
+            Xt,
+            ones,
+            area_elem,
+            chunk_size=chunk_size,
+        )
+        U = jnp.asarray(U).reshape(-1)
+        err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
+
+        gradG_J = laplace_fxd2_u_eval_vec(
+            X_lvl,
+            Xt,
+            J_lvl,
+            area_elem,
+            chunk_size=chunk_size,
+        )
+        gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, Xt.shape[1]))
+
+        gradgradG_BdotN = laplace_fxd2_u_eval(
+            X_lvl,
+            Xt,
+            BdotN_lvl,
+            area_elem,
+            chunk_size=chunk_size,
+        )
+        gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, Xt.shape[1]))
+
+        gradB = jnp.zeros((3, 3, Xt.shape[1]), dtype=gradG_J.dtype)
+        for k in range(3):
+            k1 = (k + 1) % 3
+            k2 = (k + 2) % 3
+            gradB = gradB.at[k].set(gradG_J[k1, k2] - gradG_J[k2, k1])
+
+        gradB = gradB + gradgradG_BdotN
+        return gradB * sign, err
+
+    nt_init, np_init = levels[0]
+    grad_best, err_best = eval_level(int(nt_init), int(np_init))
+
+    for nt, npol in levels[1:]:
+        nt_i = int(nt)
+        np_i = int(npol)
+
+        def update(state):
+            return eval_level(nt_i, np_i)
+
+        def keep(state):
+            return state
+
+        grad_best, err_best = jax.lax.cond(
+            err_best > tol,
+            update,
+            keep,
+            operand=(grad_best, err_best),
+        )
+
+    return grad_best
 
 
 def _offsurface_adapt_grid(

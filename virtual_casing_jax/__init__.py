@@ -34,6 +34,8 @@ from .integrals import (
     laplace_dx_u_eval,
     computeB_offsurface_baseline,
     computeB_offsurface_adaptive,
+    computeB_offsurface_adaptive_schedule,
+    computeGradB_offsurface_adaptive_schedule,
     laplace_dx_u_eval_singular,
 )
 from .virtual_casing import VirtualCasingJAX
@@ -84,6 +86,8 @@ __all__ = [
     "laplace_dx_u_eval",
     "computeB_offsurface_baseline",
     "computeB_offsurface_adaptive",
+    "computeB_offsurface_adaptive_schedule",
+    "computeGradB_offsurface_adaptive_schedule",
     "laplace_dx_u_eval_singular",
     "VirtualCasingJAX",
     "functional",

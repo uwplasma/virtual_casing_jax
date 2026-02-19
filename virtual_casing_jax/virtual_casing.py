@@ -27,6 +27,8 @@ from .integrals import (
     laplace_fxd2_u_eval_vec_singular,
     laplace_dx_u_eval_singular,
     computeB_offsurface_adaptive,
+    computeB_offsurface_adaptive_schedule,
+    computeGradB_offsurface_adaptive_schedule,
     _offsurface_adapt_grid,
     _build_patch_indices,
     _surface_cond,
@@ -839,6 +841,60 @@ class VirtualCasingJAX:
             return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
         return out
 
+    def compute_external_B_offsurf_schedule(
+        self,
+        B0,
+        *,
+        X_trg,
+        levels: tuple[tuple[int, int], ...],
+        digits: int | None = None,
+        chunk_size: int = 1024,
+    ):
+        """Compute Bext off-surface using a fixed adaptive refinement schedule."""
+        digits = self.digits if digits is None else int(digits)
+        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_trg = jnp.asarray(X_trg)
+        out = computeB_offsurface_adaptive_schedule(
+            X_src,
+            BdotN,
+            J,
+            X_trg,
+            levels=levels,
+            digits=digits,
+            ext=True,
+            chunk_size=chunk_size,
+        )
+        if X_trg.ndim == 3:
+            return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
+        return out
+
+    def compute_internal_B_offsurf_schedule(
+        self,
+        B0,
+        *,
+        X_trg,
+        levels: tuple[tuple[int, int], ...],
+        digits: int | None = None,
+        chunk_size: int = 1024,
+    ):
+        """Compute Bint off-surface using a fixed adaptive refinement schedule."""
+        digits = self.digits if digits is None else int(digits)
+        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_trg = jnp.asarray(X_trg)
+        out = computeB_offsurface_adaptive_schedule(
+            X_src,
+            BdotN,
+            J,
+            X_trg,
+            levels=levels,
+            digits=digits,
+            ext=False,
+            chunk_size=chunk_size,
+        )
+        if X_trg.ndim == 3:
+            return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
+        return out
+
     def compute_external_gradB_offsurf(
         self,
         B0,
@@ -927,3 +983,59 @@ class VirtualCasingJAX:
             chunk_size=chunk_size,
         )
         return -gradB
+
+    def compute_external_gradB_offsurf_schedule(
+        self,
+        B0,
+        *,
+        X_trg,
+        levels: tuple[tuple[int, int], ...],
+        digits: int | None = None,
+        chunk_size: int = 1024,
+    ):
+        """Compute GradBext off-surface using a fixed adaptive refinement schedule."""
+        digits = self.digits if digits is None else int(digits)
+        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_trg = jnp.asarray(X_trg)
+        X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
+        gradB = computeGradB_offsurface_adaptive_schedule(
+            X_src,
+            BdotN,
+            J,
+            X_trg_flat,
+            levels=levels,
+            digits=digits,
+            ext=True,
+            chunk_size=chunk_size,
+        )
+        if X_trg.ndim == 3:
+            return jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
+        return gradB
+
+    def compute_internal_gradB_offsurf_schedule(
+        self,
+        B0,
+        *,
+        X_trg,
+        levels: tuple[tuple[int, int], ...],
+        digits: int | None = None,
+        chunk_size: int = 1024,
+    ):
+        """Compute GradBint off-surface using a fixed adaptive refinement schedule."""
+        digits = self.digits if digits is None else int(digits)
+        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_trg = jnp.asarray(X_trg)
+        X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
+        gradB = computeGradB_offsurface_adaptive_schedule(
+            X_src,
+            BdotN,
+            J,
+            X_trg_flat,
+            levels=levels,
+            digits=digits,
+            ext=False,
+            chunk_size=chunk_size,
+        )
+        if X_trg.ndim == 3:
+            return jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
+        return gradB

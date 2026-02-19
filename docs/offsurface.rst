@@ -87,6 +87,30 @@ This logic is implemented in
 ``_offsurface_adapt_grid``, mirroring
 ``ExtVacuumField::EvalOffSurface`` in the C++ code.
 
+JIT-Friendly Schedule
+---------------------
+
+The Python adaptive loop changes grid sizes dynamically, which is not
+compatible with JIT compilation. For JIT-friendly workflows, a fixed
+refinement schedule can be provided:
+
+``computeB_offsurface_adaptive_schedule`` and
+``computeGradB_offsurface_adaptive_schedule`` accept a static tuple of
+``(Nt, Np)`` pairs (e.g. ``((24, 24), (48, 48), (96, 96))``). The
+implementation evaluates each level and **updates the result only when**
+the double-layer error is above the tolerance. This preserves the adaptive
+decision while keeping the shapes static, so the function is JIT-safe.
+
+High-level wrappers are exposed as:
+
+- ``VirtualCasingJAX.compute_external_B_offsurf_schedule``
+- ``VirtualCasingJAX.compute_internal_B_offsurf_schedule``
+- ``VirtualCasingJAX.compute_external_gradB_offsurf_schedule``
+- ``VirtualCasingJAX.compute_internal_gradB_offsurf_schedule``
+
+These wrappers reuse the same density construction as the base off-surface
+path, and support JIT when ``levels`` is passed as a static argument.
+
 Off-Surface GradB (Base vs Adaptive)
 ------------------------------------
 
