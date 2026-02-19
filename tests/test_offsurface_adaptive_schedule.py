@@ -61,3 +61,60 @@ def test_offsurface_adaptive_schedule_matches_python():
         digits=digits,
     )
     np.testing.assert_allclose(grad_sched, np.asarray(grad_py), rtol=5e-5, atol=5e-7)
+
+
+def test_offsurface_adaptive_schedule_jit_auto():
+    nfp = 1
+    half_period = False
+    surf_nt = 6
+    surf_np = 5
+    src_nt = 6
+    src_np = 5
+    trg_nt = 6
+    trg_np = 5
+    digits = 2
+
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.03 + 0.08
+
+    vc = VirtualCasingJAX()
+    vc.setup(digits, nfp, half_period, surf_nt, surf_np, X, src_nt, src_np, trg_nt, trg_np)
+
+    Xt = jnp.array([[2.1], [0.05], [0.02]])
+
+    X_src, _, _ = vc._offsurface_densities(B0)
+    nt0 = int(X_src.shape[1])
+    np0 = int(X_src.shape[2])
+    max_Nt = nt0 * 8
+    max_Np = np0 * 8
+
+    b_py = vc.compute_external_B_offsurf(B0, X_trg=Xt, digits=digits, max_Nt=max_Nt, max_Np=max_Np)
+    b_jit = vc.compute_external_B_offsurf_schedule_jit(
+        B0,
+        X_trg=Xt,
+        levels="auto",
+        digits=digits,
+        max_Nt=max_Nt,
+        max_Np=max_Np,
+        max_levels=4,
+    )
+    np.testing.assert_allclose(np.asarray(b_jit), np.asarray(b_py), rtol=5e-6, atol=5e-8)
+
+    grad_py = vc.compute_external_gradB_offsurf(
+        B0,
+        X_trg=Xt,
+        digits=digits,
+        max_Nt=max_Nt,
+        max_Np=max_Np,
+        adaptive=True,
+    )
+    grad_jit = vc.compute_external_gradB_offsurf_schedule_jit(
+        B0,
+        X_trg=Xt,
+        levels="auto",
+        digits=digits,
+        max_Nt=max_Nt,
+        max_Np=max_Np,
+        max_levels=4,
+    )
+    np.testing.assert_allclose(np.asarray(grad_jit), np.asarray(grad_py), rtol=5e-5, atol=5e-7)

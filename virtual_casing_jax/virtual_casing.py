@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import jax
 import jax.numpy as jnp
 
-from .utils import autotune_chunk_sizes
+from .utils import autotune_chunk_sizes, build_offsurface_levels
 from .surface_ops import (
     complete_vec_field,
     resample,
@@ -102,6 +102,20 @@ class VirtualCasingJAX:
                 return jnp.float32 if value_dtype == jnp.float64 else value_dtype
             return jnp.dtype(patch_dtype)
         return jnp.dtype(patch_dtype)
+
+    def _resolve_offsurface_levels(
+        self,
+        levels,
+        *,
+        nt0: int,
+        np0: int,
+        max_Nt: int,
+        max_Np: int,
+        max_levels: int,
+    ):
+        if levels is None or (isinstance(levels, str) and levels.lower() == "auto"):
+            return build_offsurface_levels(nt0, np0, max_Nt=max_Nt, max_Np=max_Np, max_levels=max_levels)
+        return tuple((int(nt), int(np)) for nt, np in levels)
 
     def setup(
         self,
@@ -1168,14 +1182,25 @@ class VirtualCasingJAX:
         B0,
         *,
         X_trg,
-        levels: tuple[tuple[int, int], ...],
+        levels: tuple[tuple[int, int], ...] | str | None,
         digits: int | None = None,
+        max_Nt: int = -1,
+        max_Np: int = -1,
+        max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bext off-surface using a fixed adaptive refinement schedule."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
+        levels = self._resolve_offsurface_levels(
+            levels,
+            nt0=int(X_src.shape[1]),
+            np0=int(X_src.shape[2]),
+            max_Nt=max_Nt,
+            max_Np=max_Np,
+            max_levels=max_levels,
+        )
         X_trg = jnp.asarray(X_trg)
         nsrc = X_src.shape[1] * X_src.shape[2]
         ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
@@ -1197,19 +1222,89 @@ class VirtualCasingJAX:
             return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
         return out
 
+    def compute_external_B_offsurf_schedule_jit(
+        self,
+        B0,
+        *,
+        X_trg,
+        levels: tuple[tuple[int, int], ...] | str | None = "auto",
+        digits: int | None = None,
+        max_Nt: int = -1,
+        max_Np: int = -1,
+        max_levels: int = 6,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        donate: bool = False,
+    ):
+        """JIT-compiled schedule-based off-surface Bext."""
+        digits = self.digits if digits is None else int(digits)
+        X_src, _, _ = self._offsurface_densities(B0)
+        levels = self._resolve_offsurface_levels(
+            levels,
+            nt0=int(X_src.shape[1]),
+            np0=int(X_src.shape[2]),
+            max_Nt=max_Nt,
+            max_Np=max_Np,
+            max_levels=max_levels,
+        )
+        X_trg = jnp.asarray(X_trg)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "boff", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
+
+        key = (
+            "Boff_schedule",
+            digits,
+            levels,
+            chunk_size,
+            target_chunk_size,
+            donate,
+        )
+        fn = self._jit_cache.get(key)
+        if fn is None:
+            fn = jax.jit(
+                lambda B, Xt: self.compute_external_B_offsurf_schedule(
+                    B,
+                    X_trg=Xt,
+                    levels=levels,
+                    digits=digits,
+                    max_Nt=max_Nt,
+                    max_Np=max_Np,
+                    max_levels=max_levels,
+                    chunk_size=chunk_size,
+                    target_chunk_size=target_chunk_size,
+                ),
+                donate_argnums=(0,) if donate else (),
+            )
+            self._jit_cache[key] = fn
+        return fn(B0, X_trg)
+
     def compute_internal_B_offsurf_schedule(
         self,
         B0,
         *,
         X_trg,
-        levels: tuple[tuple[int, int], ...],
+        levels: tuple[tuple[int, int], ...] | str | None,
         digits: int | None = None,
+        max_Nt: int = -1,
+        max_Np: int = -1,
+        max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bint off-surface using a fixed adaptive refinement schedule."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
+        levels = self._resolve_offsurface_levels(
+            levels,
+            nt0=int(X_src.shape[1]),
+            np0=int(X_src.shape[2]),
+            max_Nt=max_Nt,
+            max_Np=max_Np,
+            max_levels=max_levels,
+        )
         X_trg = jnp.asarray(X_trg)
         nsrc = X_src.shape[1] * X_src.shape[2]
         ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
@@ -1230,6 +1325,65 @@ class VirtualCasingJAX:
         if X_trg.ndim == 3:
             return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
         return out
+
+    def compute_internal_B_offsurf_schedule_jit(
+        self,
+        B0,
+        *,
+        X_trg,
+        levels: tuple[tuple[int, int], ...] | str | None = "auto",
+        digits: int | None = None,
+        max_Nt: int = -1,
+        max_Np: int = -1,
+        max_levels: int = 6,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        donate: bool = False,
+    ):
+        """JIT-compiled schedule-based off-surface Bint."""
+        digits = self.digits if digits is None else int(digits)
+        X_src, _, _ = self._offsurface_densities(B0)
+        levels = self._resolve_offsurface_levels(
+            levels,
+            nt0=int(X_src.shape[1]),
+            np0=int(X_src.shape[2]),
+            max_Nt=max_Nt,
+            max_Np=max_Np,
+            max_levels=max_levels,
+        )
+        X_trg = jnp.asarray(X_trg)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "boff", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
+
+        key = (
+            "Bint_off_schedule",
+            digits,
+            levels,
+            chunk_size,
+            target_chunk_size,
+            donate,
+        )
+        fn = self._jit_cache.get(key)
+        if fn is None:
+            fn = jax.jit(
+                lambda B, Xt: self.compute_internal_B_offsurf_schedule(
+                    B,
+                    X_trg=Xt,
+                    levels=levels,
+                    digits=digits,
+                    max_Nt=max_Nt,
+                    max_Np=max_Np,
+                    max_levels=max_levels,
+                    chunk_size=chunk_size,
+                    target_chunk_size=target_chunk_size,
+                ),
+                donate_argnums=(0,) if donate else (),
+            )
+            self._jit_cache[key] = fn
+        return fn(B0, X_trg)
 
     def compute_external_gradB_offsurf(
         self,
@@ -1335,14 +1489,25 @@ class VirtualCasingJAX:
         B0,
         *,
         X_trg,
-        levels: tuple[tuple[int, int], ...],
+        levels: tuple[tuple[int, int], ...] | str | None,
         digits: int | None = None,
+        max_Nt: int = -1,
+        max_Np: int = -1,
+        max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBext off-surface using a fixed adaptive refinement schedule."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
+        levels = self._resolve_offsurface_levels(
+            levels,
+            nt0=int(X_src.shape[1]),
+            np0=int(X_src.shape[2]),
+            max_Nt=max_Nt,
+            max_Np=max_Np,
+            max_levels=max_levels,
+        )
         X_trg = jnp.asarray(X_trg)
         X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
         nsrc = X_src.shape[1] * X_src.shape[2]
@@ -1365,19 +1530,89 @@ class VirtualCasingJAX:
             return jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
         return gradB
 
+    def compute_external_gradB_offsurf_schedule_jit(
+        self,
+        B0,
+        *,
+        X_trg,
+        levels: tuple[tuple[int, int], ...] | str | None = "auto",
+        digits: int | None = None,
+        max_Nt: int = -1,
+        max_Np: int = -1,
+        max_levels: int = 6,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        donate: bool = False,
+    ):
+        """JIT-compiled schedule-based off-surface GradBext."""
+        digits = self.digits if digits is None else int(digits)
+        X_src, _, _ = self._offsurface_densities(B0)
+        levels = self._resolve_offsurface_levels(
+            levels,
+            nt0=int(X_src.shape[1]),
+            np0=int(X_src.shape[2]),
+            max_Nt=max_Nt,
+            max_Np=max_Np,
+            max_levels=max_levels,
+        )
+        X_trg = jnp.asarray(X_trg)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "gradb_off", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
+
+        key = (
+            "GradBoff_schedule",
+            digits,
+            levels,
+            chunk_size,
+            target_chunk_size,
+            donate,
+        )
+        fn = self._jit_cache.get(key)
+        if fn is None:
+            fn = jax.jit(
+                lambda B, Xt: self.compute_external_gradB_offsurf_schedule(
+                    B,
+                    X_trg=Xt,
+                    levels=levels,
+                    digits=digits,
+                    max_Nt=max_Nt,
+                    max_Np=max_Np,
+                    max_levels=max_levels,
+                    chunk_size=chunk_size,
+                    target_chunk_size=target_chunk_size,
+                ),
+                donate_argnums=(0,) if donate else (),
+            )
+            self._jit_cache[key] = fn
+        return fn(B0, X_trg)
+
     def compute_internal_gradB_offsurf_schedule(
         self,
         B0,
         *,
         X_trg,
-        levels: tuple[tuple[int, int], ...],
+        levels: tuple[tuple[int, int], ...] | str | None,
         digits: int | None = None,
+        max_Nt: int = -1,
+        max_Np: int = -1,
+        max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBint off-surface using a fixed adaptive refinement schedule."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
+        levels = self._resolve_offsurface_levels(
+            levels,
+            nt0=int(X_src.shape[1]),
+            np0=int(X_src.shape[2]),
+            max_Nt=max_Nt,
+            max_Np=max_Np,
+            max_levels=max_levels,
+        )
         X_trg = jnp.asarray(X_trg)
         X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
         nsrc = X_src.shape[1] * X_src.shape[2]
@@ -1399,3 +1634,62 @@ class VirtualCasingJAX:
         if X_trg.ndim == 3:
             return jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
         return gradB
+
+    def compute_internal_gradB_offsurf_schedule_jit(
+        self,
+        B0,
+        *,
+        X_trg,
+        levels: tuple[tuple[int, int], ...] | str | None = "auto",
+        digits: int | None = None,
+        max_Nt: int = -1,
+        max_Np: int = -1,
+        max_levels: int = 6,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        donate: bool = False,
+    ):
+        """JIT-compiled schedule-based off-surface GradBint."""
+        digits = self.digits if digits is None else int(digits)
+        X_src, _, _ = self._offsurface_densities(B0)
+        levels = self._resolve_offsurface_levels(
+            levels,
+            nt0=int(X_src.shape[1]),
+            np0=int(X_src.shape[2]),
+            max_Nt=max_Nt,
+            max_Np=max_Np,
+            max_levels=max_levels,
+        )
+        X_trg = jnp.asarray(X_trg)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "gradb_off", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
+
+        key = (
+            "GradBint_off_schedule",
+            digits,
+            levels,
+            chunk_size,
+            target_chunk_size,
+            donate,
+        )
+        fn = self._jit_cache.get(key)
+        if fn is None:
+            fn = jax.jit(
+                lambda B, Xt: self.compute_internal_gradB_offsurf_schedule(
+                    B,
+                    X_trg=Xt,
+                    levels=levels,
+                    digits=digits,
+                    max_Nt=max_Nt,
+                    max_Np=max_Np,
+                    max_levels=max_levels,
+                    chunk_size=chunk_size,
+                    target_chunk_size=target_chunk_size,
+                ),
+                donate_argnums=(0,) if donate else (),
+            )
+            self._jit_cache[key] = fn
+        return fn(B0, X_trg)

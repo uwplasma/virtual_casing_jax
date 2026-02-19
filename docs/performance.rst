@@ -129,6 +129,18 @@ Use ``compute_external_B_batch`` or ``compute_external_gradB_batch`` when
 evaluating many fields in parallel (e.g., multiple VMEC surfaces or
 Monte Carlo samples). These functions use ``vmap`` to avoid Python loops.
 
+Off-surface Schedule + JIT
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The adaptive off-surface refinement loop in the Python API is not
+JIT-compatible. For JIT-friendly evaluation, use the schedule-based
+methods with ``levels="auto"`` to build a fixed refinement schedule
+(doubling in ``Nt``/``Np`` up to ``max_Nt``/``max_Np``). The JIT wrappers
+(``compute_external_B_offsurf_schedule_jit`` /
+``compute_external_gradB_offsurf_schedule_jit``) accept ``donate=True``
+to reduce peak memory. For custom schedules, use
+``virtual_casing_jax.utils.build_offsurface_levels``.
+
 Precision Tradeoffs
 ~~~~~~~~~~~~~~~~~~~
 

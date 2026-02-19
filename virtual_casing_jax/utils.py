@@ -65,3 +65,28 @@ def autotune_chunk_sizes(op: str, nsrc: int, ntrg: int, backend: str | None = No
             trg = min(trg, ntrg)
 
     return int(src), (None if trg is None else int(trg))
+
+
+def build_offsurface_levels(
+    nt0: int,
+    np0: int,
+    max_Nt: int = -1,
+    max_Np: int = -1,
+    max_levels: int = 6,
+):
+    """Build a doubling refinement schedule for off-surface evaluation."""
+    nt = int(nt0)
+    npol = int(np0)
+    levels = [(nt, npol)]
+    for _ in range(max_levels - 1):
+        nt2 = nt * 2
+        np2 = npol * 2
+        if max_Nt > 0:
+            nt2 = min(nt2, max_Nt)
+        if max_Np > 0:
+            np2 = min(np2, max_Np)
+        if nt2 == nt and np2 == npol:
+            break
+        levels.append((int(nt2), int(np2)))
+        nt, npol = nt2, np2
+    return tuple(levels)
