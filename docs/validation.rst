@@ -19,7 +19,8 @@ Test Categories
      scaling (``1/(4*pi)``).
 
 3. **Boundary Integral Parity**
-   - Singular-corrected ``LaplaceFxdU`` matches reference on small grids.
+   - Singular-corrected ``LaplaceFxdU`` matches reference at ~1e-3
+     relative error on small grids.
    - Baseline direct-sum ``LaplaceFxdU`` matches reference up to
      singular-correction errors.
    - Double-layer self-test returns ``0.5`` jump for constant density.
@@ -27,7 +28,8 @@ Test Categories
 4. **End-to-End Virtual Casing Parity**
    - Baseline ``ComputeB`` using direct-sum integrals matches reference
      within coarse tolerances.
-   - Singular-corrected ``ComputeB`` improves parity on small grids.
+   - Singular-corrected ``ComputeB`` achieves ~1e-4 relative error on
+     small grids.
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.
    - Off-surface ``ComputeBOffSurf`` baseline is validated using
      upsampled direct-sum quadrature.

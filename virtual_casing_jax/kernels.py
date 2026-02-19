@@ -54,6 +54,21 @@ def laplace_fxd2_u(dx, f):
     return u * f[..., None, None] / FOUR_PI
 
 
+def laplace_dx_u(dx, n, f):
+    """Laplace double-layer kernel: (-(n·dx) * f) / (4*pi*r^3).
+
+    dx: (..., 3)
+    n: (..., 3) source normals
+    f: (...,)
+    returns (...,)
+    """
+    r2 = jnp.sum(dx * dx, axis=-1)
+    rinv = _safe_rinv(r2)
+    rinv3 = rinv * rinv * rinv
+    ndotr = -jnp.sum(n * dx, axis=-1)
+    return f * ndotr * rinv3 / FOUR_PI
+
+
 def biotsavart_fx_u(dx, fvec):
     """Biot-Savart kernel: (f x dx) / (4*pi*r^3).
 

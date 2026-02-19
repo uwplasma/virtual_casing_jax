@@ -132,7 +132,7 @@ def test_laplace_fxd_u_eval_singular_parity(prefix):
 
     ref = gradG_BdotN
     rel = np.linalg.norm(out - ref) / (np.linalg.norm(ref) + 1e-14)
-    assert rel < 5e-2
+    assert rel < 1.5e-3
 
 
 @pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
@@ -159,7 +159,7 @@ def test_laplace_fxd_u_eval_vec_singular_parity(prefix):
 
     ref = gradG_J
     rel = np.linalg.norm(out - ref) / (np.linalg.norm(ref) + 1e-14)
-    assert rel < 5e-2
+    assert rel < 5e-4
 
 
 @pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
@@ -250,7 +250,7 @@ def test_singular_computeB_parity(prefix):
     Bvc = Bvc + gradG_BdotN + 0.5 * B_on
 
     rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
-    assert rel < 2e-2
+    assert rel < 3e-4
 
 
 def test_baseline_computeBOff_parity_case_vc():

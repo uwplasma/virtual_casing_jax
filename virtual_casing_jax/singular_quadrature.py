@@ -28,12 +28,45 @@ class SingularPrecomp:
     interp_idx: jnp.ndarray
 
 
+def _legpoly_and_deriv(x, degree: int):
+    if degree == 0:
+        return np.ones_like(x), np.zeros_like(x)
+    if degree == 1:
+        return x.copy(), np.ones_like(x)
+    p0 = np.ones_like(x)
+    p1 = x.copy()
+    dp0 = np.zeros_like(x)
+    dp1 = np.ones_like(x)
+    for n in range(2, degree + 1):
+        scal0 = -(n - 1) / n
+        scal1 = (2 * n - 1) / n
+        p = scal1 * x * p1 + scal0 * p0
+        dp = scal1 * (p1 + x * dp1) + scal0 * dp0
+        p0, p1 = p1, p
+        dp0, dp1 = dp1, dp
+    return p1, dp1
+
+
 def _legendre_rule_01(order: int):
-    """Gauss-Legendre nodes/weights on [0, 1]."""
-    x, w = np.polynomial.legendre.leggauss(order)
-    x = 0.5 * (x + 1.0)
-    w = 0.5 * w
-    return x, w
+    """Gauss-Legendre nodes/weights on [0, 1] matching SCTL."""
+    x = np.empty(order, dtype=np.float64)
+    for i in range(order):
+        x[i] = -(
+            1
+            - 1.0 / (8 * order * order)
+            + 1.0 / (8 * order * order * order)
+        ) * math.cos(math.pi * (4 * i + 3) / (4 * order + 2))
+    for _ in range(5):
+        p, dp = _legpoly_and_deriv(x, order)
+        dx = p / dp
+        x = x - dx
+        if np.max(np.abs(dx)) < np.finfo(np.float64).eps:
+            break
+
+    nds = 0.5 * (x + 1.0)
+    _, dp = _legpoly_and_deriv(x, order)
+    wts = 1.0 / ((1.0 - x * x) * (dp * dp))
+    return nds, wts
 
 
 def _pou_fn(patch_dim: int):

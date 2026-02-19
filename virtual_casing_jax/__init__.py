@@ -16,6 +16,7 @@ from .kernels import (
     laplace_fx_u,
     laplace_fxd_u,
     laplace_fxd2_u,
+    laplace_dx_u,
     biotsavart_fx_u,
     biotsavart_fxd_u,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "laplace_fx_u",
     "laplace_fxd_u",
     "laplace_fxd2_u",
+    "laplace_dx_u",
     "biotsavart_fx_u",
     "biotsavart_fxd_u",
     "laplace_fxd_u_eval",
