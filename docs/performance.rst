@@ -100,3 +100,64 @@ The polar quadrature tables and interpolation weights are cached via
 ``precompute_singular``. Patch index maps are cached per quadrature
 setup inside ``VirtualCasingJAX`` to avoid recomputing the patch gather
 indices on each call.
+
+Profiling and Diagnostics
+-------------------------
+
+JAX Profiler (TensorBoard)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use the profiling harness in ``tools/profile_vc.py`` to emit a trace
+that can be opened in TensorBoard:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python tools/profile_vc.py \
+     --case case_vc --op B --jit --repeat 5 \
+     --trace-dir /tmp/vc_trace
+
+   tensorboard --logdir /tmp/vc_trace
+
+The trace includes XLA compilation time, kernel launches, and host-to-device
+transfer costs. Always call ``jax.block_until_ready`` (handled by the script)
+to ensure timings reflect actual execution.
+
+XLA HLO / MLIR Dumps
+~~~~~~~~~~~~~~~~~~~~
+
+To inspect XLA lowering and fusion decisions, enable dump flags:
+
+.. code-block:: bash
+
+   XLA_FLAGS=\"--xla_dump_to=/tmp/xla --xla_dump_hlo_as_text\" \\
+   JAX_ENABLE_X64=1 python tools/profile_vc.py --case case_vc --op GradB --jit
+
+The dump directory contains HLO modules and MLIR. These are useful for
+verifying fusion, identifying large intermediates, and checking precision
+lowering.
+
+Kernel-Level GPU Profiling
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On NVIDIA GPUs, use ``nsys`` or ``nvprof`` to profile kernel launches:
+
+.. code-block:: bash
+
+   nsys profile -o /tmp/vc_profile \\
+     python tools/profile_vc.py --case case_vc --op B --jit --repeat 10
+
+Pair this with the JAX trace to correlate high-level ops with GPU kernels.
+
+Memory Audits
+~~~~~~~~~~~~~
+
+Memory usage is dominated by chunked kernel evaluation and intermediate
+arrays during singular correction. Use smaller ``chunk_size`` values to
+reduce peak memory, and profile with multiple chunk sizes to identify
+the best speed/memory tradeoff. For large runs, consider setting:
+
+.. code-block:: bash
+
+   export XLA_PYTHON_CLIENT_MEM_FRACTION=0.8
+
+to control the allocator footprint on GPU.

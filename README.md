@@ -22,3 +22,18 @@ strategy. Run locally:
 pip install -r docs/requirements.txt
 sphinx-build -b html docs docs/_build/html
 ```
+
+Profiling
+---------
+
+Use the profiling harness to capture JAX traces and inspect performance:
+
+```bash
+JAX_ENABLE_X64=1 python tools/profile_vc.py --case case_vc --op B --jit \
+  --repeat 5 --trace-dir /tmp/vc_trace
+
+tensorboard --logdir /tmp/vc_trace
+```
+
+See `docs/performance.rst` for XLA HLO dumps, GPU kernel profiling, and
+memory tuning guidance.
