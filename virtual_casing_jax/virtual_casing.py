@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import jax
 import jax.numpy as jnp
 
+from .utils import autotune_chunk_sizes
 from .surface_ops import (
     complete_vec_field,
     resample,
@@ -54,6 +55,44 @@ class VirtualCasingJAX:
         self._grad_setup: QuadSetup | None = None
         self._b_setup: QuadSetup | None = None
         self._jit_cache: dict[tuple, callable] = {}
+
+    def _resolve_chunk_sizes(
+        self,
+        op: str,
+        chunk_size,
+        target_chunk_size,
+        *,
+        nsrc: int,
+        ntrg: int,
+    ):
+        """Resolve source/target chunk sizes with optional auto tuning."""
+        chunk_auto = chunk_size is None or (isinstance(chunk_size, str) and chunk_size.lower() == "auto")
+        target_auto = isinstance(target_chunk_size, str) and target_chunk_size.lower() == "auto"
+
+        if chunk_auto:
+            src_auto, trg_auto = autotune_chunk_sizes(op, nsrc, ntrg)
+            chunk_size = src_auto
+            if target_auto:
+                target_chunk_size = trg_auto
+        else:
+            chunk_size = int(chunk_size)
+            if target_auto:
+                _, trg_auto = autotune_chunk_sizes(op, nsrc, ntrg)
+                target_chunk_size = trg_auto
+
+        if target_chunk_size is not None and not isinstance(target_chunk_size, str):
+            target_chunk_size = int(target_chunk_size)
+
+        return chunk_size, target_chunk_size
+
+    def _resolve_pou_dtype(self, pou_dtype, value_dtype):
+        if pou_dtype is None:
+            return None
+        if isinstance(pou_dtype, str):
+            if pou_dtype.lower() == "auto":
+                return jnp.float32 if value_dtype == jnp.float64 else value_dtype
+            return jnp.dtype(pou_dtype)
+        return jnp.dtype(pou_dtype)
 
     def setup(
         self,
@@ -276,7 +315,10 @@ class VirtualCasingJAX:
         quad_np: int | None = None,
         digits: int | None = None,
         hedgehog_order: int = 8,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        pou_dtype=None,
+        remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -288,6 +330,16 @@ class VirtualCasingJAX:
         assert self._grad_setup is not None
 
         B0 = jnp.asarray(B0).reshape((3, self.src_nt, self.src_np))
+
+        if remat is None:
+            remat = True
+
+        pou_dtype = self._resolve_pou_dtype(pou_dtype, B0.dtype)
+        nsrc = self._grad_setup.quad_nt * self._grad_setup.quad_np
+        ntrg = self.trg_nt * self.trg_np
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "gradb", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
 
         dtheta = 0.0
         if self.half_period:
@@ -329,8 +381,11 @@ class VirtualCasingJAX:
             patch_dim0=patch_dim0,
             hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
             patch_idx=patch_idx,
             orient=self._grad_setup.orient,
+            pou_dtype=pou_dtype,
+            remat=remat,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, self.trg_nt, self.trg_np))
 
@@ -345,8 +400,11 @@ class VirtualCasingJAX:
             patch_dim0=patch_dim0,
             hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
             patch_idx=patch_idx,
             orient=self._grad_setup.orient,
+            pou_dtype=pou_dtype,
+            remat=remat,
         )
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape(
             (3, 3, self.trg_nt, self.trg_np)
@@ -369,7 +427,10 @@ class VirtualCasingJAX:
         quad_np: int | None = None,
         digits: int | None = None,
         hedgehog_order: int = 8,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        pou_dtype=None,
+        remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -382,6 +443,9 @@ class VirtualCasingJAX:
             digits=digits,
             hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+            pou_dtype=pou_dtype,
+            remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
         )
@@ -394,7 +458,10 @@ class VirtualCasingJAX:
         quad_np: int | None = None,
         digits: int | None = None,
         hedgehog_order: int = 8,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        pou_dtype=None,
+        remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -407,6 +474,9 @@ class VirtualCasingJAX:
             digits=digits,
             hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+            pou_dtype=pou_dtype,
+            remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
         )
@@ -421,15 +491,41 @@ class VirtualCasingJAX:
         self._ensure_grad_setup(quad_nt, quad_np, digits)
         patch_dim0, patch_idx = self._get_patch_idx(self._grad_setup, digits)
 
-        key = ("gradB", digits, quad_nt, quad_np, kwargs.get("hedgehog_order", 8), kwargs.get("chunk_size", 1024))
+        chunk_size = kwargs.get("chunk_size", "auto")
+        target_chunk_size = kwargs.get("target_chunk_size", "auto")
+        remat = kwargs.get("remat")
+        pou_dtype = kwargs.get("pou_dtype")
+        nsrc = self._grad_setup.quad_nt * self._grad_setup.quad_np
+        ntrg = self.trg_nt * self.trg_np
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "gradb", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
+        pou_dtype = self._resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+
+        key = (
+            "gradB",
+            digits,
+            quad_nt,
+            quad_np,
+            kwargs.get("hedgehog_order", 8),
+            chunk_size,
+            target_chunk_size,
+            remat,
+            pou_dtype,
+        )
         fn = self._jit_cache.get(key)
         if fn is None:
+            call_kwargs = dict(kwargs)
+            call_kwargs["chunk_size"] = chunk_size
+            call_kwargs["target_chunk_size"] = target_chunk_size
+            call_kwargs["remat"] = remat
+            call_kwargs["pou_dtype"] = pou_dtype
             fn = jax.jit(
                 lambda B: self.compute_external_gradB(
                     B,
                     patch_dim0=patch_dim0,
                     patch_idx=patch_idx,
-                    **kwargs,
+                    **call_kwargs,
                 )
             )
             self._jit_cache[key] = fn
@@ -444,7 +540,10 @@ class VirtualCasingJAX:
         quad_nt: int | None = None,
         quad_np: int | None = None,
         digits: int | None = None,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        pou_dtype=None,
+        remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -456,6 +555,25 @@ class VirtualCasingJAX:
         assert self._b_setup is not None
 
         B0 = jnp.asarray(B0).reshape((3, self.src_nt, self.src_np))
+
+        if remat is None:
+            remat = False
+
+        pou_dtype = self._resolve_pou_dtype(pou_dtype, B0.dtype)
+        nsrc = self._b_setup.quad_nt * self._b_setup.quad_np
+        if X_trg is None:
+            ntrg = self.trg_nt * self.trg_np
+        else:
+            X_trg_arr = jnp.asarray(X_trg)
+            if X_trg_arr.ndim == 3:
+                ntrg = X_trg_arr.shape[1] * X_trg_arr.shape[2]
+            elif X_trg_arr.ndim == 2:
+                ntrg = X_trg_arr.shape[1]
+            else:
+                raise ValueError("X_trg must have shape (3, nt, np) or (3, ntrg)")
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "b", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
 
         dtheta = 0.0
         if self.half_period:
@@ -497,8 +615,11 @@ class VirtualCasingJAX:
             digits=digits,
             patch_dim0=patch_dim0,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
             patch_idx=patch_idx,
             orient=self._b_setup.orient,
+            pou_dtype=pou_dtype,
+            remat=remat,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, self.trg_nt, self.trg_np))
 
@@ -513,8 +634,11 @@ class VirtualCasingJAX:
             digits=digits,
             patch_dim0=patch_dim0,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
             patch_idx=patch_idx,
             orient=self._b_setup.orient,
+            pou_dtype=pou_dtype,
+            remat=remat,
         )
         gradG_BdotN = jnp.asarray(gradG_BdotN).reshape((3, self.trg_nt, self.trg_np))
 
@@ -544,7 +668,10 @@ class VirtualCasingJAX:
         quad_nt: int | None = None,
         quad_np: int | None = None,
         digits: int | None = None,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        pou_dtype=None,
+        remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -557,6 +684,9 @@ class VirtualCasingJAX:
             quad_np=quad_np,
             digits=digits,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+            pou_dtype=pou_dtype,
+            remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
         )
@@ -569,7 +699,10 @@ class VirtualCasingJAX:
         quad_nt: int | None = None,
         quad_np: int | None = None,
         digits: int | None = None,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        pou_dtype=None,
+        remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -582,6 +715,9 @@ class VirtualCasingJAX:
             quad_np=quad_np,
             digits=digits,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+            pou_dtype=pou_dtype,
+            remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
         )
@@ -596,15 +732,40 @@ class VirtualCasingJAX:
         self._ensure_b_setup(quad_nt, quad_np, digits)
         patch_dim0, patch_idx = self._get_patch_idx(self._b_setup, digits)
 
-        key = ("B", digits, quad_nt, quad_np, kwargs.get("chunk_size", 1024))
+        chunk_size = kwargs.get("chunk_size", "auto")
+        target_chunk_size = kwargs.get("target_chunk_size", "auto")
+        remat = kwargs.get("remat")
+        pou_dtype = kwargs.get("pou_dtype")
+        nsrc = self._b_setup.quad_nt * self._b_setup.quad_np
+        ntrg = self.trg_nt * self.trg_np
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "b", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
+        pou_dtype = self._resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+
+        key = (
+            "B",
+            digits,
+            quad_nt,
+            quad_np,
+            chunk_size,
+            target_chunk_size,
+            remat,
+            pou_dtype,
+        )
         fn = self._jit_cache.get(key)
         if fn is None:
+            call_kwargs = dict(kwargs)
+            call_kwargs["chunk_size"] = chunk_size
+            call_kwargs["target_chunk_size"] = target_chunk_size
+            call_kwargs["remat"] = remat
+            call_kwargs["pou_dtype"] = pou_dtype
             fn = jax.jit(
                 lambda B: self.compute_external_B(
                     B,
                     patch_dim0=patch_dim0,
                     patch_idx=patch_idx,
-                    **kwargs,
+                    **call_kwargs,
                 )
             )
             self._jit_cache[key] = fn
@@ -620,15 +781,40 @@ class VirtualCasingJAX:
         self._ensure_b_setup(quad_nt, quad_np, digits)
         patch_dim0, patch_idx = self._get_patch_idx(self._b_setup, digits)
 
-        key = ("Bint", digits, quad_nt, quad_np, kwargs.get("chunk_size", 1024))
+        chunk_size = kwargs.get("chunk_size", "auto")
+        target_chunk_size = kwargs.get("target_chunk_size", "auto")
+        remat = kwargs.get("remat")
+        pou_dtype = kwargs.get("pou_dtype")
+        nsrc = self._b_setup.quad_nt * self._b_setup.quad_np
+        ntrg = self.trg_nt * self.trg_np
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "b", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
+        pou_dtype = self._resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+
+        key = (
+            "Bint",
+            digits,
+            quad_nt,
+            quad_np,
+            chunk_size,
+            target_chunk_size,
+            remat,
+            pou_dtype,
+        )
         fn = self._jit_cache.get(key)
         if fn is None:
+            call_kwargs = dict(kwargs)
+            call_kwargs["chunk_size"] = chunk_size
+            call_kwargs["target_chunk_size"] = target_chunk_size
+            call_kwargs["remat"] = remat
+            call_kwargs["pou_dtype"] = pou_dtype
             fn = jax.jit(
                 lambda B: self.compute_internal_B(
                     B,
                     patch_dim0=patch_dim0,
                     patch_idx=patch_idx,
-                    **kwargs,
+                    **call_kwargs,
                 )
             )
             self._jit_cache[key] = fn
@@ -664,15 +850,41 @@ class VirtualCasingJAX:
         self._ensure_grad_setup(quad_nt, quad_np, digits)
         patch_dim0, patch_idx = self._get_patch_idx(self._grad_setup, digits)
 
-        key = ("gradBint", digits, quad_nt, quad_np, kwargs.get("hedgehog_order", 8), kwargs.get("chunk_size", 1024))
+        chunk_size = kwargs.get("chunk_size", "auto")
+        target_chunk_size = kwargs.get("target_chunk_size", "auto")
+        remat = kwargs.get("remat")
+        pou_dtype = kwargs.get("pou_dtype")
+        nsrc = self._grad_setup.quad_nt * self._grad_setup.quad_np
+        ntrg = self.trg_nt * self.trg_np
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "gradb", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
+        pou_dtype = self._resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+
+        key = (
+            "gradBint",
+            digits,
+            quad_nt,
+            quad_np,
+            kwargs.get("hedgehog_order", 8),
+            chunk_size,
+            target_chunk_size,
+            remat,
+            pou_dtype,
+        )
         fn = self._jit_cache.get(key)
         if fn is None:
+            call_kwargs = dict(kwargs)
+            call_kwargs["chunk_size"] = chunk_size
+            call_kwargs["target_chunk_size"] = target_chunk_size
+            call_kwargs["remat"] = remat
+            call_kwargs["pou_dtype"] = pou_dtype
             fn = jax.jit(
                 lambda B: self.compute_internal_gradB(
                     B,
                     patch_dim0=patch_dim0,
                     patch_idx=patch_idx,
-                    **kwargs,
+                    **call_kwargs,
                 )
             )
             self._jit_cache[key] = fn
@@ -686,7 +898,10 @@ class VirtualCasingJAX:
         quad_nt: int | None = None,
         quad_np: int | None = None,
         digits: int | None = None,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
+        pou_dtype=None,
+        remat: bool | None = None,
         hedgehog_order: int = 8,
     ):
         """Compute Bext with a custom JVP that matches ComputeGradB on-surface."""
@@ -706,6 +921,9 @@ class VirtualCasingJAX:
                 quad_np=quad_np,
                 digits=digits,
                 chunk_size=chunk_size,
+                target_chunk_size=target_chunk_size,
+                pou_dtype=pou_dtype,
+                remat=remat,
             )
 
         @_eval.defjvp
@@ -719,6 +937,9 @@ class VirtualCasingJAX:
                 quad_np=quad_np,
                 digits=digits,
                 chunk_size=chunk_size,
+                target_chunk_size=target_chunk_size,
+                pou_dtype=pou_dtype,
+                remat=remat,
             )
             gradb = self.compute_external_gradB(
                 B0,
@@ -727,6 +948,9 @@ class VirtualCasingJAX:
                 digits=digits,
                 hedgehog_order=hedgehog_order,
                 chunk_size=chunk_size,
+                target_chunk_size=target_chunk_size,
+                pou_dtype=pou_dtype,
+                remat=remat,
             )
             db = jnp.einsum("k i t p, i t p -> k t p", gradb, dxtrg)
             return b, db
@@ -790,12 +1014,18 @@ class VirtualCasingJAX:
         digits: int | None = None,
         max_Nt: int = -1,
         max_Np: int = -1,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bext at off-surface targets using adaptive quadrature."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         X_trg = jnp.asarray(X_trg)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "boff", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
         out = computeB_offsurface_adaptive(
             X_src,
             BdotN,
@@ -806,6 +1036,7 @@ class VirtualCasingJAX:
             max_Np=max_Np,
             ext=True,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         if X_trg.ndim == 3:
             return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
@@ -819,12 +1050,18 @@ class VirtualCasingJAX:
         digits: int | None = None,
         max_Nt: int = -1,
         max_Np: int = -1,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bint at off-surface targets using adaptive quadrature."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         X_trg = jnp.asarray(X_trg)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "boff", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
         out = computeB_offsurface_adaptive(
             X_src,
             BdotN,
@@ -835,6 +1072,7 @@ class VirtualCasingJAX:
             max_Np=max_Np,
             ext=False,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         if X_trg.ndim == 3:
             return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
@@ -847,12 +1085,18 @@ class VirtualCasingJAX:
         X_trg,
         levels: tuple[tuple[int, int], ...],
         digits: int | None = None,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bext off-surface using a fixed adaptive refinement schedule."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         X_trg = jnp.asarray(X_trg)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "boff", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
         out = computeB_offsurface_adaptive_schedule(
             X_src,
             BdotN,
@@ -862,6 +1106,7 @@ class VirtualCasingJAX:
             digits=digits,
             ext=True,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         if X_trg.ndim == 3:
             return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
@@ -874,12 +1119,18 @@ class VirtualCasingJAX:
         X_trg,
         levels: tuple[tuple[int, int], ...],
         digits: int | None = None,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bint off-surface using a fixed adaptive refinement schedule."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         X_trg = jnp.asarray(X_trg)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "boff", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
         out = computeB_offsurface_adaptive_schedule(
             X_src,
             BdotN,
@@ -889,6 +1140,7 @@ class VirtualCasingJAX:
             digits=digits,
             ext=False,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         if X_trg.ndim == 3:
             return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
@@ -903,7 +1155,8 @@ class VirtualCasingJAX:
         max_Nt: int = -1,
         max_Np: int = -1,
         adaptive: bool = False,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBext at off-surface targets using direct quadrature.
 
@@ -916,6 +1169,10 @@ class VirtualCasingJAX:
         ntrg = X_trg_flat.shape[1]
 
         X_src, BdotN, J = self._offsurface_densities(B0)
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "gradb_off", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
         if adaptive:
             X_src, BdotN, J, area_elem = _offsurface_adapt_grid(
                 X_src,
@@ -926,6 +1183,7 @@ class VirtualCasingJAX:
                 max_Nt=max_Nt,
                 max_Np=max_Np,
                 chunk_size=chunk_size,
+                target_chunk_size=target_chunk_size,
             )
         else:
             dX = grad2d(X_src, X_src.shape[1], X_src.shape[2])
@@ -937,6 +1195,7 @@ class VirtualCasingJAX:
             J,
             area_elem,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, ntrg))
 
@@ -946,6 +1205,7 @@ class VirtualCasingJAX:
             BdotN,
             area_elem,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, ntrg))
 
@@ -969,7 +1229,8 @@ class VirtualCasingJAX:
         max_Nt: int = -1,
         max_Np: int = -1,
         adaptive: bool = False,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBint at off-surface targets using direct quadrature."""
         gradB = self.compute_external_gradB_offsurf(
@@ -980,6 +1241,7 @@ class VirtualCasingJAX:
             max_Np=max_Np,
             adaptive=adaptive,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         return -gradB
 
@@ -990,13 +1252,19 @@ class VirtualCasingJAX:
         X_trg,
         levels: tuple[tuple[int, int], ...],
         digits: int | None = None,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBext off-surface using a fixed adaptive refinement schedule."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         X_trg = jnp.asarray(X_trg)
         X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg_flat.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "gradb_off", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
         gradB = computeGradB_offsurface_adaptive_schedule(
             X_src,
             BdotN,
@@ -1006,6 +1274,7 @@ class VirtualCasingJAX:
             digits=digits,
             ext=True,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         if X_trg.ndim == 3:
             return jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
@@ -1018,13 +1287,19 @@ class VirtualCasingJAX:
         X_trg,
         levels: tuple[tuple[int, int], ...],
         digits: int | None = None,
-        chunk_size: int = 1024,
+        chunk_size: int | str | None = "auto",
+        target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBint off-surface using a fixed adaptive refinement schedule."""
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         X_trg = jnp.asarray(X_trg)
         X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
+        nsrc = X_src.shape[1] * X_src.shape[2]
+        ntrg = X_trg_flat.shape[1]
+        chunk_size, target_chunk_size = self._resolve_chunk_sizes(
+            "gradb_off", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+        )
         gradB = computeGradB_offsurface_adaptive_schedule(
             X_src,
             BdotN,
@@ -1034,6 +1309,7 @@ class VirtualCasingJAX:
             digits=digits,
             ext=False,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         if X_trg.ndim == 3:
             return jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))

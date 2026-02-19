@@ -57,6 +57,22 @@ For ``Stell`` and ``W7X_``, the surface is defined by Fourier series:
 with ``Nfp=5`` for the built-in ``W7X_`` coefficients. The coefficients are
 embedded in :mod:`virtual_casing_jax.w7x_coeffs` and match the BIEST source.
 
+Bundled Geometry Assets
+-----------------------
+
+The C++ code ships additional surfaces (``Quas3``, ``LHD``, ``W7X``) as
+SCTL ``.mat`` files. For the JAX port these are converted to ``.npz`` and
+bundled under ``virtual_casing_jax/geom``. The conversion is lossless and
+uses the same scaling as the reference implementation:
+
+- ``Quas3``: scale ``0.45`` and drop the final row/column (periodic seam).
+- ``LHD``: scale ``0.25``.
+- ``W7X``: scale ``0.45``.
+
+The conversion script lives in ``tools/convert_geom_mat.py``. JAX loads
+the assets via :mod:`importlib.resources` and applies the same spectral
+upsampling as the C++ ``SurfaceOp::Upsample`` call.
+
 Synthetic Loop Fields
 ---------------------
 

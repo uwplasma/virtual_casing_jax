@@ -162,6 +162,21 @@ off the surface, so JAX can differentiate through the direct quadrature
 if needed, though this is currently not JIT-friendly when adaptive
 refinement is enabled.
 
+Performance and Memory Controls
+-------------------------------
+
+The GradB path exposes several knobs to balance speed and memory:
+
+- ``chunk_size`` and ``target_chunk_size`` enable 2D tiling over sources
+  and targets. This reduces large temporaries in the hypersingular kernels.
+- ``remat=True`` activates ``jax.checkpoint`` on the singular correction
+  to reduce saved intermediates during autodiff.
+- ``pou_dtype="auto"`` (or ``"float32"``) casts POU/polar tables to
+  float32 while keeping the final accumulation in float64.
+
+These options are available on ``compute_external_gradB`` /
+``compute_internal_gradB`` and their JIT wrappers.
+
 Internal and Off-Surface GradB
 ------------------------------
 

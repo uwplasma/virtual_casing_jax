@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 
+from .utils import autotune_chunk_sizes
 from .surface_ops import (
     complete_vec_field,
     resample,
@@ -51,6 +52,36 @@ class FunctionalSetup:
     patch_dim0: int
     patch_idx: jnp.ndarray
     orient: float
+
+
+def _resolve_chunk_sizes(op: str, chunk_size, target_chunk_size, *, nsrc: int, ntrg: int):
+    chunk_auto = chunk_size is None or (isinstance(chunk_size, str) and chunk_size.lower() == "auto")
+    target_auto = isinstance(target_chunk_size, str) and target_chunk_size.lower() == "auto"
+
+    if chunk_auto:
+        src_auto, trg_auto = autotune_chunk_sizes(op, nsrc, ntrg)
+        chunk_size = src_auto
+        if target_auto:
+            target_chunk_size = trg_auto
+    else:
+        chunk_size = int(chunk_size)
+        if target_auto:
+            _, trg_auto = autotune_chunk_sizes(op, nsrc, ntrg)
+            target_chunk_size = trg_auto
+
+    if target_chunk_size is not None and not isinstance(target_chunk_size, str):
+        target_chunk_size = int(target_chunk_size)
+    return chunk_size, target_chunk_size
+
+
+def _resolve_pou_dtype(pou_dtype, value_dtype):
+    if pou_dtype is None:
+        return None
+    if isinstance(pou_dtype, str):
+        if pou_dtype.lower() == "auto":
+            return jnp.float32 if value_dtype == jnp.float64 else value_dtype
+        return jnp.dtype(pou_dtype)
+    return jnp.dtype(pou_dtype)
 
 
 def build_surface_coord(X, nfp: int, half_period: bool, surf_nt: int, surf_np: int, trg_nt: int):
@@ -196,11 +227,31 @@ def _compute_B_signed(
     patch_idx=None,
     orient: float | None = None,
     X_trg=None,
-    chunk_size: int = 1024,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    remat: bool | None = None,
 ):
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
     quad_coord, dX, normal, _, orient = build_quad_setup(
         surface_coord, quad_nt, quad_np, orient=orient
+    )
+    if remat is None:
+        remat = False
+    pou_dtype = _resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+    nsrc = quad_nt * quad_np
+    if X_trg is None:
+        ntrg = trg_nt * trg_np
+    else:
+        X_trg_arr = jnp.asarray(X_trg)
+        if X_trg_arr.ndim == 3:
+            ntrg = X_trg_arr.shape[1] * X_trg_arr.shape[2]
+        elif X_trg_arr.ndim == 2:
+            ntrg = X_trg_arr.shape[1]
+        else:
+            raise ValueError("X_trg must have shape (3, nt, np) or (3, ntrg)")
+    chunk_size, target_chunk_size = _resolve_chunk_sizes(
+        "b", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
     )
     if patch_dim0 is None:
         patch_dim0 = select_patch_dim_from_geom(dX, quad_nt, quad_np, digits)
@@ -225,8 +276,11 @@ def _compute_B_signed(
         digits=digits,
         patch_dim0=patch_dim0,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
         patch_idx=patch_idx,
         orient=orient,
+        pou_dtype=pou_dtype,
+        remat=remat,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, trg_nt, trg_np))
 
@@ -241,8 +295,11 @@ def _compute_B_signed(
         digits=digits,
         patch_dim0=patch_dim0,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
         patch_idx=patch_idx,
         orient=orient,
+        pou_dtype=pou_dtype,
+        remat=remat,
     )
     gradG_BdotN = jnp.asarray(gradG_BdotN).reshape((3, trg_nt, trg_np))
 
@@ -277,7 +334,10 @@ def compute_external_B_functional(
     patch_idx=None,
     orient: float | None = None,
     X_trg=None,
-    chunk_size: int = 1024,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    remat: bool | None = None,
 ):
     """Compute Bext with surface coordinates as differentiable inputs."""
     return _compute_B_signed(
@@ -300,6 +360,9 @@ def compute_external_B_functional(
         orient=orient,
         X_trg=X_trg,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+        pou_dtype=pou_dtype,
+        remat=remat,
     )
 
 
@@ -322,7 +385,10 @@ def compute_internal_B_functional(
     patch_idx=None,
     orient: float | None = None,
     X_trg=None,
-    chunk_size: int = 1024,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    remat: bool | None = None,
 ):
     """Compute Bint with surface coordinates as differentiable inputs."""
     return _compute_B_signed(
@@ -345,6 +411,9 @@ def compute_internal_B_functional(
         orient=orient,
         X_trg=X_trg,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+        pou_dtype=pou_dtype,
+        remat=remat,
     )
 
 
@@ -368,11 +437,22 @@ def _compute_gradB_signed(
     patch_idx=None,
     orient: float | None = None,
     hedgehog_order: int = 8,
-    chunk_size: int = 1024,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    remat: bool | None = None,
 ):
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
     quad_coord, dX, normal, _, orient = build_quad_setup(
         surface_coord, quad_nt, quad_np, orient=orient
+    )
+    if remat is None:
+        remat = True
+    pou_dtype = _resolve_pou_dtype(pou_dtype, jnp.asarray(B0).dtype)
+    nsrc = quad_nt * quad_np
+    ntrg = trg_nt * trg_np
+    chunk_size, target_chunk_size = _resolve_chunk_sizes(
+        "gradb", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
     )
     if patch_dim0 is None:
         patch_dim0 = select_patch_dim_from_geom(dX, quad_nt, quad_np, digits)
@@ -397,8 +477,11 @@ def _compute_gradB_signed(
         patch_dim0=patch_dim0,
         hedgehog_order=hedgehog_order,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
         patch_idx=patch_idx,
         orient=orient,
+        pou_dtype=pou_dtype,
+        remat=remat,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, trg_nt, trg_np))
 
@@ -413,8 +496,11 @@ def _compute_gradB_signed(
         patch_dim0=patch_dim0,
         hedgehog_order=hedgehog_order,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
         patch_idx=patch_idx,
         orient=orient,
+        pou_dtype=pou_dtype,
+        remat=remat,
     )
     gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, trg_nt, trg_np))
 
@@ -446,7 +532,10 @@ def compute_external_gradB_functional(
     patch_idx=None,
     orient: float | None = None,
     hedgehog_order: int = 8,
-    chunk_size: int = 1024,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    remat: bool | None = None,
 ):
     """Compute GradBext with surface coordinates as differentiable inputs."""
     return _compute_gradB_signed(
@@ -469,6 +558,9 @@ def compute_external_gradB_functional(
         orient=orient,
         hedgehog_order=hedgehog_order,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+        pou_dtype=pou_dtype,
+        remat=remat,
     )
 
 
@@ -491,7 +583,10 @@ def compute_internal_gradB_functional(
     patch_idx=None,
     orient: float | None = None,
     hedgehog_order: int = 8,
-    chunk_size: int = 1024,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    remat: bool | None = None,
 ):
     """Compute GradBint with surface coordinates as differentiable inputs."""
     return _compute_gradB_signed(
@@ -514,6 +609,9 @@ def compute_internal_gradB_functional(
         orient=orient,
         hedgehog_order=hedgehog_order,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+        pou_dtype=pou_dtype,
+        remat=remat,
     )
 
 
@@ -533,7 +631,8 @@ def compute_external_B_offsurf_functional(
     trg_np: int,
     max_Nt: int = -1,
     max_Np: int = -1,
-    chunk_size: int = 1024,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
     adaptive: bool = True,
 ):
     """Compute off-surface Bext with differentiable geometry inputs."""
@@ -555,6 +654,11 @@ def compute_external_B_offsurf_functional(
     BdotN = dot_prod(B_quad, normal)
 
     X_trg = jnp.asarray(X_trg)
+    nsrc = X_src.shape[1] * X_src.shape[2]
+    ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
+    chunk_size, target_chunk_size = _resolve_chunk_sizes(
+        "boff", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+    )
     if adaptive:
         out = computeB_offsurface_adaptive(
             X_src,
@@ -566,11 +670,16 @@ def compute_external_B_offsurf_functional(
             max_Np=max_Np,
             ext=True,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
     else:
         area_elem = surf_normal_area_elem(dX, X_src)[1]
-        gradG = laplace_fxd_u_eval(X_src, X_trg, BdotN, area_elem, chunk_size=chunk_size)
-        bs = biotsavart_fx_u_eval(X_src, X_trg, J, area_elem, chunk_size=chunk_size)
+        gradG = laplace_fxd_u_eval(
+            X_src, X_trg, BdotN, area_elem, chunk_size=chunk_size, target_chunk_size=target_chunk_size
+        )
+        bs = biotsavart_fx_u_eval(
+            X_src, X_trg, J, area_elem, chunk_size=chunk_size, target_chunk_size=target_chunk_size
+        )
         out = gradG - bs
     return out
 
@@ -591,7 +700,8 @@ def compute_external_gradB_offsurf_functional(
     trg_np: int,
     max_Nt: int = -1,
     max_Np: int = -1,
-    chunk_size: int = 1024,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
     adaptive: bool = False,
 ):
     """Compute off-surface GradBext with differentiable geometry inputs."""
@@ -614,6 +724,11 @@ def compute_external_gradB_offsurf_functional(
 
     X_trg = jnp.asarray(X_trg)
     X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
+    nsrc = X_src.shape[1] * X_src.shape[2]
+    ntrg = X_trg_flat.shape[1]
+    chunk_size, target_chunk_size = _resolve_chunk_sizes(
+        "gradb_off", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
+    )
 
     if adaptive:
         X_src, BdotN, J, area_elem = _offsurface_adapt_grid(
@@ -625,6 +740,7 @@ def compute_external_gradB_offsurf_functional(
             max_Nt=max_Nt,
             max_Np=max_Np,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
 
     gradG_J = laplace_fxd2_u_eval_vec(
@@ -633,6 +749,7 @@ def compute_external_gradB_offsurf_functional(
         J,
         area_elem,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, X_trg_flat.shape[1]))
 
@@ -642,6 +759,7 @@ def compute_external_gradB_offsurf_functional(
         BdotN,
         area_elem,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
     )
     gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, X_trg_flat.shape[1]))
 

@@ -21,3 +21,6 @@ dependencies = [
 
 [tool.setuptools]
 packages = ["virtual_casing_jax"]
+
+[tool.setuptools.package-data]
+virtual_casing_jax = ["geom/*.npz"]

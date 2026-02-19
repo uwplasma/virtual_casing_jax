@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import functools
+import importlib.resources as resources
 from typing import Iterable, List, Sequence, Tuple
 
 import jax.numpy as jnp
@@ -134,6 +136,20 @@ def _fourier_surface(
     return jnp.stack([X, Y, Z], axis=0)
 
 
+@functools.lru_cache(maxsize=None)
+def _load_geom_npz(name: str):
+    geom_pkg = resources.files("virtual_casing_jax.geom")
+    path = geom_pkg.joinpath(f"{name}.npz")
+    if not path.exists():
+        raise FileNotFoundError(f"Missing bundled geometry asset: {path}")
+    with path.open("rb") as f:
+        data = np.load(f)
+        X = data["X"]
+        Y = data["Y"]
+        Z = data["Z"]
+    return jnp.stack([jnp.asarray(X), jnp.asarray(Y), jnp.asarray(Z)], axis=0)
+
+
 def _surface_base(nt: int, npol: int, surf_type: SurfType):
     if surf_type == SurfType.AxisymCircleWide:
         return _stell_geom(nt, npol, 2.0, 1.0, 1.0, True)
@@ -156,8 +172,15 @@ def _surface_base(nt: int, npol: int, surf_type: SurfType):
         zcoeff = jnp.asarray(_W7X_ZBS, dtype=jnp.float64)
         idx = jnp.arange(-10, 11)
         return _fourier_surface(nt, npol, rcoeff, zcoeff, nfp_factor=W7X_NFP, i_idx=idx, j_idx=idx)
-    if surf_type in (SurfType.Quas3, SurfType.LHD, SurfType.W7X):
-        raise NotImplementedError("SurfType uses external geom/*.mat data not bundled in JAX port.")
+    if surf_type == SurfType.Quas3:
+        base = _load_geom_npz("Quas3")
+        return upsample(base, base.shape[1], base.shape[2], nt, npol)
+    if surf_type == SurfType.LHD:
+        base = _load_geom_npz("LHD")
+        return upsample(base, base.shape[1], base.shape[2], nt, npol)
+    if surf_type == SurfType.W7X:
+        base = _load_geom_npz("W7X")
+        return upsample(base, base.shape[1], base.shape[2], nt, npol)
     if surf_type == SurfType.NoneType:
         return jnp.zeros((3, nt, npol), dtype=jnp.float64)
     raise ValueError(f"Unsupported surface type: {surf_type}")

@@ -105,7 +105,14 @@ def _lagrange_interp(z0, z1, i0, i1):
 
 
 @functools.lru_cache(maxsize=None)
-def precompute_singular(patch_dim0: int, rad_dim: int, hedgehog_order: int = 1):
+def precompute_singular(
+    patch_dim0: int,
+    rad_dim: int,
+    hedgehog_order: int = 1,
+    pou_dtype=None,
+):
+    if pou_dtype is not None:
+        pou_dtype = np.dtype(pou_dtype)
     patch_dim = 2 * patch_dim0 + 1
     rad_dim_base = rad_dim
     rad_dim = rad_dim_base * (3 if hedgehog_order > 1 else 1)
@@ -184,6 +191,11 @@ def precompute_singular(patch_dim0: int, rad_dim: int, hedgehog_order: int = 1):
     else:
         wts = np.ones(1, dtype=np.float64)
 
+    def _cast(arr):
+        if pou_dtype is None:
+            return jnp.asarray(arr)
+        return jnp.asarray(arr, dtype=pou_dtype)
+
     return SingularPrecomp(
         patch_dim0=patch_dim0,
         hedgehog_order=hedgehog_order,
@@ -195,12 +207,12 @@ def precompute_singular(patch_dim0: int, rad_dim: int, hedgehog_order: int = 1):
         npolar=npolar,
         qx=jnp.asarray(qx),
         qw=jnp.asarray(qw),
-        Gpou=jnp.asarray(Gpou),
-        Ppou=jnp.asarray(Ppou),
+        Gpou=_cast(Gpou),
+        Ppou=_cast(Ppou),
         I_G2P=jnp.asarray(I_G2P),
-        M_G2P=jnp.asarray(M_G2P),
+        M_G2P=_cast(M_G2P),
         interp_idx=jnp.asarray(interp_idx),
-        hedgehog_wts=jnp.asarray(wts),
+        hedgehog_wts=_cast(wts),
     )
 
 

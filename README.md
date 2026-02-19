@@ -2,14 +2,16 @@
 
 JAX implementation of the virtual casing principle with high-order singular quadrature.
 
-Status: early development with validated surface geometry and kernel operators,
-plus baseline direct-sum boundary integrals and singular-corrected Laplace
-FxdU on-surface evaluation (off-surface supports adaptive refinement).
+Status: parity-validated B/GradB (on- and off-surface) against the C++
+reference for multiple datasets, including W7-X. The JAX port includes
+adaptive off-surface evaluation, internal/external variants, and
+autodiff-ready wrappers.
 
-Planned features:
-- On-surface and off-surface virtual casing evaluation.
-- High-order singular quadrature matching BIEST.
-- JAX autodiff support.
+Performance features:
+- Source/target tiling with auto-tuned chunk sizes.
+- Rematerialization hooks for GradB singular correction.
+- Mixed-precision POU/patch tables with float64 outputs.
+- Bundled Quas3/LHD/W7X geometry assets (converted from SCTL .mat).
 
 Docs
 ----

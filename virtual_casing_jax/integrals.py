@@ -18,6 +18,18 @@ def _flatten_soa(x, name: str):
     raise ValueError(f"{name} must have shape (dof, nt, np) or (dof, n)")
 
 
+def _pad_to_multiple(x, axis: int, chunk: int):
+    if chunk is None or chunk <= 0:
+        return x, 0
+    n = x.shape[axis]
+    pad = (-n) % chunk
+    if pad:
+        pad_width = [(0, 0)] * x.ndim
+        pad_width[axis] = (0, pad)
+        x = jnp.pad(x, pad_width)
+    return x, pad
+
+
 def field_period_target_coords(X_quad, trg_nt: int, trg_np: int, nfp: int):
     """Select target coordinates used by FieldPeriodBIOp.
 
@@ -37,7 +49,15 @@ def field_period_target_coords(X_quad, trg_nt: int, trg_np: int, nfp: int):
     return X_trg_full[:, :trg_nt, :]
 
 
-def laplace_fxd_u_eval(X_src, X_trg, density, area_elem, chunk_size: int = 1024):
+def laplace_fxd_u_eval(
+    X_src,
+    X_trg,
+    density,
+    area_elem,
+    *,
+    chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
+):
     """Evaluate Laplace FxdU (grad single-layer) by direct quadrature.
 
     X_src: (3, nt, np) or (3, nsrc)
@@ -64,34 +84,70 @@ def laplace_fxd_u_eval(X_src, X_trg, density, area_elem, chunk_size: int = 1024)
     Xt = jnp.transpose(X_trg, (1, 0))  # (ntrg, 3)
 
     if chunk_size is None or chunk_size <= 0:
-        dx = Xt[:, None, :] - Xs[None, :, :]
-        contrib = laplace_fxd_u(dx, weights)
-        out = jnp.sum(contrib, axis=1)
+        if target_chunk_size is None or target_chunk_size <= 0:
+            dx = Xt[:, None, :] - Xs[None, :, :]
+            contrib = laplace_fxd_u(dx, weights)
+            out = jnp.sum(contrib, axis=1)
+            return jnp.transpose(out, (1, 0))
+        chunk_size = 0
+
+    # Pad sources to chunk size
+    Xs, pad_src = _pad_to_multiple(Xs, 0, chunk_size if chunk_size > 0 else 1)
+    if pad_src:
+        weights = jnp.pad(weights, (0, pad_src))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = 1 if chunk_size <= 0 else nsrc_pad // chunk_size
+    if chunk_size <= 0:
+        X_chunks = Xs.reshape((1, nsrc_pad, 3))
+        w_chunks = weights.reshape((1, nsrc_pad))
+    else:
+        X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+        w_chunks = weights.reshape((n_chunks, chunk_size))
+
+    if target_chunk_size is None or target_chunk_size <= 0:
+        def scan_fn(acc, xs):
+            Xc, wc = xs
+            dx = Xt[:, None, :] - Xc[None, :, :]
+            contrib = laplace_fxd_u(dx, wc)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
+
+        init = jnp.zeros((ntrg, 3), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, w_chunks))
         return jnp.transpose(out, (1, 0))
 
-    pad = (-nsrc) % chunk_size
-    if pad:
-        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
-        weights = jnp.pad(weights, (0, pad))
-    nsrc_pad = Xs.shape[0]
-    n_chunks = nsrc_pad // chunk_size
+    # Target blocking
+    Xt, pad_trg = _pad_to_multiple(Xt, 0, target_chunk_size)
+    ntrg_pad = Xt.shape[0]
+    n_tchunks = ntrg_pad // target_chunk_size
+    Xt_chunks = Xt.reshape((n_tchunks, target_chunk_size, 3))
 
-    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
-    w_chunks = weights.reshape((n_chunks, chunk_size))
+    def eval_chunk(Xt_chunk):
+        def scan_fn(acc, xs):
+            Xc, wc = xs
+            dx = Xt_chunk[:, None, :] - Xc[None, :, :]
+            contrib = laplace_fxd_u(dx, wc)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
 
-    def scan_fn(acc, xs):
-        Xc, wc = xs
-        dx = Xt[:, None, :] - Xc[None, :, :]
-        contrib = laplace_fxd_u(dx, wc)
-        acc = acc + jnp.sum(contrib, axis=1)
-        return acc, None
+        init = jnp.zeros((target_chunk_size, 3), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, w_chunks))
+        return out
 
-    init = jnp.zeros((ntrg, 3), dtype=Xs.dtype)
-    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, w_chunks))
+    _, outs = jax.lax.scan(lambda c, x: (c, eval_chunk(x)), None, Xt_chunks)
+    out = outs.reshape((ntrg_pad, 3))[:ntrg]
     return jnp.transpose(out, (1, 0))
 
 
-def laplace_fxd2_u_eval(X_src, X_trg, density, area_elem, chunk_size: int = 1024):
+def laplace_fxd2_u_eval(
+    X_src,
+    X_trg,
+    density,
+    area_elem,
+    *,
+    chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
+):
     """Evaluate Laplace Fxd2U (second derivatives) by direct quadrature."""
     X_src = _flatten_soa(X_src, "X_src")
     X_trg = _flatten_soa(X_trg, "X_trg")
@@ -111,46 +167,96 @@ def laplace_fxd2_u_eval(X_src, X_trg, density, area_elem, chunk_size: int = 1024
     Xt = jnp.transpose(X_trg, (1, 0))
 
     if chunk_size is None or chunk_size <= 0:
-        dx = Xt[:, None, :] - Xs[None, :, :]
-        contrib = laplace_fxd2_u(dx, weights)
-        out = jnp.sum(contrib, axis=1)
+        if target_chunk_size is None or target_chunk_size <= 0:
+            dx = Xt[:, None, :] - Xs[None, :, :]
+            contrib = laplace_fxd2_u(dx, weights)
+            out = jnp.sum(contrib, axis=1)
+            out = out.reshape((ntrg, 9))
+            return jnp.transpose(out, (1, 0))
+        chunk_size = 0
+
+    Xs, pad_src = _pad_to_multiple(Xs, 0, chunk_size if chunk_size > 0 else 1)
+    if pad_src:
+        weights = jnp.pad(weights, (0, pad_src))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = 1 if chunk_size <= 0 else nsrc_pad // chunk_size
+    if chunk_size <= 0:
+        X_chunks = Xs.reshape((1, nsrc_pad, 3))
+        W_chunks = weights.reshape((1, nsrc_pad))
+    else:
+        X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+        W_chunks = weights.reshape((n_chunks, chunk_size))
+
+    if target_chunk_size is None or target_chunk_size <= 0:
+        def scan_fn(acc, xs):
+            Xc, Wc = xs
+            dx = Xt[:, None, :] - Xc[None, :, :]
+            contrib = laplace_fxd2_u(dx, Wc)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
+
+        init = jnp.zeros((ntrg, 3, 3), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
         out = out.reshape((ntrg, 9))
         return jnp.transpose(out, (1, 0))
 
-    pad = (-nsrc) % chunk_size
-    if pad:
-        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
-        weights = jnp.pad(weights, (0, pad))
-    nsrc_pad = Xs.shape[0]
-    n_chunks = nsrc_pad // chunk_size
+    Xt, pad_trg = _pad_to_multiple(Xt, 0, target_chunk_size)
+    ntrg_pad = Xt.shape[0]
+    n_tchunks = ntrg_pad // target_chunk_size
+    Xt_chunks = Xt.reshape((n_tchunks, target_chunk_size, 3))
 
-    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
-    W_chunks = weights.reshape((n_chunks, chunk_size))
+    def eval_chunk(Xt_chunk):
+        def scan_fn(acc, xs):
+            Xc, Wc = xs
+            dx = Xt_chunk[:, None, :] - Xc[None, :, :]
+            contrib = laplace_fxd2_u(dx, Wc)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
 
-    def scan_fn(acc, xs):
-        Xc, Wc = xs
-        dx = Xt[:, None, :] - Xc[None, :, :]
-        contrib = laplace_fxd2_u(dx, Wc)
-        acc = acc + jnp.sum(contrib, axis=1)
-        return acc, None
+        init = jnp.zeros((target_chunk_size, 3, 3), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
+        out = out.reshape((target_chunk_size, 9))
+        return out
 
-    init = jnp.zeros((ntrg, 3, 3), dtype=Xs.dtype)
-    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
-    out = out.reshape((ntrg, 9))
+    _, outs = jax.lax.scan(lambda c, x: (c, eval_chunk(x)), None, Xt_chunks)
+    out = outs.reshape((ntrg_pad, 9))[:ntrg]
     return jnp.transpose(out, (1, 0))
 
 
-def laplace_fxd2_u_eval_vec(X_src, X_trg, density_vec, area_elem, chunk_size: int = 1024):
+def laplace_fxd2_u_eval_vec(
+    X_src,
+    X_trg,
+    density_vec,
+    area_elem,
+    *,
+    chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
+):
     """Vector-density wrapper for Laplace Fxd2U."""
     density_vec = _flatten_soa(density_vec, "density_vec")
     return jax.vmap(
-        lambda dens: laplace_fxd2_u_eval(X_src, X_trg, dens, area_elem, chunk_size=chunk_size),
+        lambda dens: laplace_fxd2_u_eval(
+            X_src,
+            X_trg,
+            dens,
+            area_elem,
+            chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+        ),
         in_axes=0,
         out_axes=0,
     )(density_vec)
 
 
-def laplace_fxd_u_eval_vec(X_src, X_trg, density_vec, area_elem, chunk_size: int = 1024):
+def laplace_fxd_u_eval_vec(
+    X_src,
+    X_trg,
+    density_vec,
+    area_elem,
+    *,
+    chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
+):
     """Vector-density wrapper for Laplace FxdU.
 
     density_vec: (3, nt, np) or (3, nsrc)
@@ -158,13 +264,28 @@ def laplace_fxd_u_eval_vec(X_src, X_trg, density_vec, area_elem, chunk_size: int
     """
     density_vec = _flatten_soa(density_vec, "density_vec")
     return jax.vmap(
-        lambda dens: laplace_fxd_u_eval(X_src, X_trg, dens, area_elem, chunk_size=chunk_size),
+        lambda dens: laplace_fxd_u_eval(
+            X_src,
+            X_trg,
+            dens,
+            area_elem,
+            chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+        ),
         in_axes=0,
         out_axes=0,
     )(density_vec)
 
 
-def biotsavart_fx_u_eval(X_src, X_trg, density_vec, area_elem, chunk_size: int = 1024):
+def biotsavart_fx_u_eval(
+    X_src,
+    X_trg,
+    density_vec,
+    area_elem,
+    *,
+    chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
+):
     """Evaluate Biot-Savart FxU by direct quadrature.
 
     density_vec: (3, nt, np) or (3, nsrc)
@@ -188,36 +309,71 @@ def biotsavart_fx_u_eval(X_src, X_trg, density_vec, area_elem, chunk_size: int =
     Xt = jnp.transpose(X_trg, (1, 0))  # (ntrg, 3)
 
     if chunk_size is None or chunk_size <= 0:
-        dx = Xt[:, None, :] - Xs[None, :, :]
-        fvec = jnp.transpose(weights, (1, 0))[None, :, :]
-        contrib = biotsavart_fx_u(dx, fvec)
-        out = jnp.sum(contrib, axis=1)
+        if target_chunk_size is None or target_chunk_size <= 0:
+            dx = Xt[:, None, :] - Xs[None, :, :]
+            fvec = jnp.transpose(weights, (1, 0))[None, :, :]
+            contrib = biotsavart_fx_u(dx, fvec)
+            out = jnp.sum(contrib, axis=1)
+            return jnp.transpose(out, (1, 0))
+        chunk_size = 0
+
+    Xs, pad_src = _pad_to_multiple(Xs, 0, chunk_size if chunk_size > 0 else 1)
+    if pad_src:
+        weights = jnp.pad(weights, ((0, 0), (0, pad_src)))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = 1 if chunk_size <= 0 else nsrc_pad // chunk_size
+    if chunk_size <= 0:
+        X_chunks = Xs.reshape((1, nsrc_pad, 3))
+        W_chunks = weights.reshape((3, 1, nsrc_pad)).transpose(1, 2, 0)
+    else:
+        X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+        W_chunks = weights.reshape((3, n_chunks, chunk_size)).transpose(1, 2, 0)
+
+    if target_chunk_size is None or target_chunk_size <= 0:
+        def scan_fn(acc, xs):
+            Xc, Wc = xs
+            dx = Xt[:, None, :] - Xc[None, :, :]
+            fvec = Wc[None, :, :]
+            contrib = biotsavart_fx_u(dx, fvec)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
+
+        init = jnp.zeros((ntrg, 3), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
         return jnp.transpose(out, (1, 0))
 
-    pad = (-nsrc) % chunk_size
-    if pad:
-        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
-        weights = jnp.pad(weights, ((0, 0), (0, pad)))
-    nsrc_pad = Xs.shape[0]
-    n_chunks = nsrc_pad // chunk_size
+    Xt, pad_trg = _pad_to_multiple(Xt, 0, target_chunk_size)
+    ntrg_pad = Xt.shape[0]
+    n_tchunks = ntrg_pad // target_chunk_size
+    Xt_chunks = Xt.reshape((n_tchunks, target_chunk_size, 3))
 
-    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
-    W_chunks = weights.reshape((3, n_chunks, chunk_size)).transpose(1, 2, 0)
+    def eval_chunk(Xt_chunk):
+        def scan_fn(acc, xs):
+            Xc, Wc = xs
+            dx = Xt_chunk[:, None, :] - Xc[None, :, :]
+            fvec = Wc[None, :, :]
+            contrib = biotsavart_fx_u(dx, fvec)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
 
-    def scan_fn(acc, xs):
-        Xc, Wc = xs
-        dx = Xt[:, None, :] - Xc[None, :, :]
-        fvec = Wc[None, :, :]
-        contrib = biotsavart_fx_u(dx, fvec)
-        acc = acc + jnp.sum(contrib, axis=1)
-        return acc, None
+        init = jnp.zeros((target_chunk_size, 3), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
+        return out
 
-    init = jnp.zeros((ntrg, 3), dtype=Xs.dtype)
-    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
+    _, outs = jax.lax.scan(lambda c, x: (c, eval_chunk(x)), None, Xt_chunks)
+    out = outs.reshape((ntrg_pad, 3))[:ntrg]
     return jnp.transpose(out, (1, 0))
 
 
-def biotsavart_fxd_u_eval(X_src, X_trg, density_vec, area_elem, chunk_size: int = 512):
+def biotsavart_fxd_u_eval(
+    X_src,
+    X_trg,
+    density_vec,
+    area_elem,
+    *,
+    chunk_size: int = 512,
+    target_chunk_size: int | None = None,
+):
     """Evaluate Biot-Savart FxdU by direct quadrature.
 
     density_vec: (3, nt, np) or (3, nsrc)
@@ -241,36 +397,72 @@ def biotsavart_fxd_u_eval(X_src, X_trg, density_vec, area_elem, chunk_size: int 
     Xt = jnp.transpose(X_trg, (1, 0))  # (ntrg, 3)
 
     if chunk_size is None or chunk_size <= 0:
-        dx = Xt[:, None, :] - Xs[None, :, :]
-        fvec = jnp.transpose(weights, (1, 0))[None, :, :]
-        contrib = biotsavart_fxd_u(dx, fvec)
-        out = jnp.sum(contrib, axis=1)
+        if target_chunk_size is None or target_chunk_size <= 0:
+            dx = Xt[:, None, :] - Xs[None, :, :]
+            fvec = jnp.transpose(weights, (1, 0))[None, :, :]
+            contrib = biotsavart_fxd_u(dx, fvec)
+            out = jnp.sum(contrib, axis=1)
+            return jnp.transpose(out, (1, 2, 0))
+        chunk_size = 0
+
+    Xs, pad_src = _pad_to_multiple(Xs, 0, chunk_size if chunk_size > 0 else 1)
+    if pad_src:
+        weights = jnp.pad(weights, ((0, 0), (0, pad_src)))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = 1 if chunk_size <= 0 else nsrc_pad // chunk_size
+    if chunk_size <= 0:
+        X_chunks = Xs.reshape((1, nsrc_pad, 3))
+        W_chunks = weights.reshape((3, 1, nsrc_pad)).transpose(1, 2, 0)
+    else:
+        X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+        W_chunks = weights.reshape((3, n_chunks, chunk_size)).transpose(1, 2, 0)
+
+    if target_chunk_size is None or target_chunk_size <= 0:
+        def scan_fn(acc, xs):
+            Xc, Wc = xs
+            dx = Xt[:, None, :] - Xc[None, :, :]
+            fvec = Wc[None, :, :]
+            contrib = biotsavart_fxd_u(dx, fvec)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
+
+        init = jnp.zeros((ntrg, 3, 3), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
         return jnp.transpose(out, (1, 2, 0))
 
-    pad = (-nsrc) % chunk_size
-    if pad:
-        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
-        weights = jnp.pad(weights, ((0, 0), (0, pad)))
-    nsrc_pad = Xs.shape[0]
-    n_chunks = nsrc_pad // chunk_size
+    Xt, pad_trg = _pad_to_multiple(Xt, 0, target_chunk_size)
+    ntrg_pad = Xt.shape[0]
+    n_tchunks = ntrg_pad // target_chunk_size
+    Xt_chunks = Xt.reshape((n_tchunks, target_chunk_size, 3))
 
-    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
-    W_chunks = weights.reshape((3, n_chunks, chunk_size)).transpose(1, 2, 0)
+    def eval_chunk(Xt_chunk):
+        def scan_fn(acc, xs):
+            Xc, Wc = xs
+            dx = Xt_chunk[:, None, :] - Xc[None, :, :]
+            fvec = Wc[None, :, :]
+            contrib = biotsavart_fxd_u(dx, fvec)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
 
-    def scan_fn(acc, xs):
-        Xc, Wc = xs
-        dx = Xt[:, None, :] - Xc[None, :, :]
-        fvec = Wc[None, :, :]
-        contrib = biotsavart_fxd_u(dx, fvec)
-        acc = acc + jnp.sum(contrib, axis=1)
-        return acc, None
+        init = jnp.zeros((target_chunk_size, 3, 3), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
+        return out
 
-    init = jnp.zeros((ntrg, 3, 3), dtype=Xs.dtype)
-    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, W_chunks))
+    _, outs = jax.lax.scan(lambda c, x: (c, eval_chunk(x)), None, Xt_chunks)
+    out = outs.reshape((ntrg_pad, 3, 3))[:ntrg]
     return jnp.transpose(out, (1, 2, 0))
 
 
-def laplace_dx_u_eval(X_src, n_src, X_trg, density, area_elem, chunk_size: int = 1024):
+def laplace_dx_u_eval(
+    X_src,
+    n_src,
+    X_trg,
+    density,
+    area_elem,
+    *,
+    chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
+):
     """Evaluate Laplace DxU (double-layer) by direct quadrature."""
     X_src = _flatten_soa(X_src, "X_src")
     n_src = _flatten_soa(n_src, "n_src")
@@ -292,34 +484,62 @@ def laplace_dx_u_eval(X_src, n_src, X_trg, density, area_elem, chunk_size: int =
     Xt = jnp.transpose(X_trg, (1, 0))
 
     if chunk_size is None or chunk_size <= 0:
-        dx = Xt[:, None, :] - Xs[None, :, :]
-        n = Ns[None, :, :]
-        contrib = laplace_dx_u(dx, n, weights)
-        out = jnp.sum(contrib, axis=1)
+        if target_chunk_size is None or target_chunk_size <= 0:
+            dx = Xt[:, None, :] - Xs[None, :, :]
+            n = Ns[None, :, :]
+            contrib = laplace_dx_u(dx, n, weights)
+            out = jnp.sum(contrib, axis=1)
+            return out.reshape((1, ntrg))
+        chunk_size = 0
+
+    Xs, pad_src = _pad_to_multiple(Xs, 0, chunk_size if chunk_size > 0 else 1)
+    if pad_src:
+        Ns = jnp.pad(Ns, ((0, pad_src), (0, 0)))
+        weights = jnp.pad(weights, (0, pad_src))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = 1 if chunk_size <= 0 else nsrc_pad // chunk_size
+    if chunk_size <= 0:
+        X_chunks = Xs.reshape((1, nsrc_pad, 3))
+        N_chunks = Ns.reshape((1, nsrc_pad, 3))
+        W_chunks = weights.reshape((1, nsrc_pad))
+    else:
+        X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+        N_chunks = Ns.reshape((n_chunks, chunk_size, 3))
+        W_chunks = weights.reshape((n_chunks, chunk_size))
+
+    if target_chunk_size is None or target_chunk_size <= 0:
+        def scan_fn(acc, xs):
+            Xc, Nc, Wc = xs
+            dx = Xt[:, None, :] - Xc[None, :, :]
+            n = Nc[None, :, :]
+            contrib = laplace_dx_u(dx, n, Wc)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
+
+        init = jnp.zeros((ntrg,), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, N_chunks, W_chunks))
         return out.reshape((1, ntrg))
 
-    pad = (-nsrc) % chunk_size
-    if pad:
-        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
-        Ns = jnp.pad(Ns, ((0, pad), (0, 0)))
-        weights = jnp.pad(weights, (0, pad))
-    nsrc_pad = Xs.shape[0]
-    n_chunks = nsrc_pad // chunk_size
+    Xt, pad_trg = _pad_to_multiple(Xt, 0, target_chunk_size)
+    ntrg_pad = Xt.shape[0]
+    n_tchunks = ntrg_pad // target_chunk_size
+    Xt_chunks = Xt.reshape((n_tchunks, target_chunk_size, 3))
 
-    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
-    N_chunks = Ns.reshape((n_chunks, chunk_size, 3))
-    W_chunks = weights.reshape((n_chunks, chunk_size))
+    def eval_chunk(Xt_chunk):
+        def scan_fn(acc, xs):
+            Xc, Nc, Wc = xs
+            dx = Xt_chunk[:, None, :] - Xc[None, :, :]
+            n = Nc[None, :, :]
+            contrib = laplace_dx_u(dx, n, Wc)
+            acc = acc + jnp.sum(contrib, axis=1)
+            return acc, None
 
-    def scan_fn(acc, xs):
-        Xc, Nc, Wc = xs
-        dx = Xt[:, None, :] - Xc[None, :, :]
-        n = Nc[None, :, :]
-        contrib = laplace_dx_u(dx, n, Wc)
-        acc = acc + jnp.sum(contrib, axis=1)
-        return acc, None
+        init = jnp.zeros((target_chunk_size,), dtype=Xs.dtype)
+        out, _ = jax.lax.scan(scan_fn, init, (X_chunks, N_chunks, W_chunks))
+        return out
 
-    init = jnp.zeros((ntrg,), dtype=Xs.dtype)
-    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, N_chunks, W_chunks))
+    _, outs = jax.lax.scan(lambda c, x: (c, eval_chunk(x)), None, Xt_chunks)
+    out = outs.reshape((ntrg_pad,))[:ntrg]
     return out.reshape((1, ntrg))
 
 
@@ -330,6 +550,7 @@ def computeB_offsurface_baseline(
     Xt,
     upsample_factor: int = 1,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
     ext: bool = True,
 ):
     """Baseline off-surface evaluation using direct quadrature.
@@ -355,8 +576,22 @@ def computeB_offsurface_baseline(
     _, area_elem = surf_normal_area_elem(dX, X_src)
 
     sign = 1.0 if ext else -1.0
-    gradG = laplace_fxd_u_eval(X_src, Xt, BdotN, area_elem, chunk_size=chunk_size)
-    bs = biotsavart_fx_u_eval(X_src, Xt, J, area_elem, chunk_size=chunk_size)
+    gradG = laplace_fxd_u_eval(
+        X_src,
+        Xt,
+        BdotN,
+        area_elem,
+        chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+    )
+    bs = biotsavart_fx_u_eval(
+        X_src,
+        Xt,
+        J,
+        area_elem,
+        chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+    )
     return sign * (gradG - bs)
 
 
@@ -370,6 +605,7 @@ def computeB_offsurface_adaptive(
     max_Np: int = -1,
     ext: bool = True,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
 ):
     """Adaptive off-surface evaluation matching ExtVacuumField logic."""
     X_src, BdotN, J, area_elem = _offsurface_adapt_grid(
@@ -381,11 +617,26 @@ def computeB_offsurface_adaptive(
         max_Nt=max_Nt,
         max_Np=max_Np,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
     )
 
     sign = 1.0 if ext else -1.0
-    gradG = laplace_fxd_u_eval(X_src, Xt, BdotN, area_elem, chunk_size=chunk_size)
-    bs = biotsavart_fx_u_eval(X_src, Xt, J, area_elem, chunk_size=chunk_size)
+    gradG = laplace_fxd_u_eval(
+        X_src,
+        Xt,
+        BdotN,
+        area_elem,
+        chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+    )
+    bs = biotsavart_fx_u_eval(
+        X_src,
+        Xt,
+        J,
+        area_elem,
+        chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+    )
     return sign * (gradG - bs)
 
 
@@ -399,6 +650,7 @@ def computeB_offsurface_adaptive_schedule(
     digits: int = 5,
     ext: bool = True,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
 ):
     """JIT-friendly adaptive off-surface evaluation with fixed refinement schedule.
 
@@ -436,12 +688,27 @@ def computeB_offsurface_adaptive_schedule(
             ones,
             area_elem,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         U = jnp.asarray(U).reshape(-1)
         err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
 
-        gradG = laplace_fxd_u_eval(X_lvl, Xt, BdotN_lvl, area_elem, chunk_size=chunk_size)
-        bs = biotsavart_fx_u_eval(X_lvl, Xt, J_lvl, area_elem, chunk_size=chunk_size)
+        gradG = laplace_fxd_u_eval(
+            X_lvl,
+            Xt,
+            BdotN_lvl,
+            area_elem,
+            chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+        )
+        bs = biotsavart_fx_u_eval(
+            X_lvl,
+            Xt,
+            J_lvl,
+            area_elem,
+            chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+        )
         return sign * (gradG - bs), err
 
     nt_init, np_init = levels[0]
@@ -477,6 +744,7 @@ def computeGradB_offsurface_adaptive_schedule(
     digits: int = 5,
     ext: bool = True,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
 ):
     """JIT-friendly adaptive off-surface GradB evaluation with fixed schedule."""
     X_src = jnp.asarray(X_src)
@@ -508,6 +776,7 @@ def computeGradB_offsurface_adaptive_schedule(
             ones,
             area_elem,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         U = jnp.asarray(U).reshape(-1)
         err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
@@ -518,6 +787,7 @@ def computeGradB_offsurface_adaptive_schedule(
             J_lvl,
             area_elem,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, Xt.shape[1]))
 
@@ -527,6 +797,7 @@ def computeGradB_offsurface_adaptive_schedule(
             BdotN_lvl,
             area_elem,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, Xt.shape[1]))
 
@@ -572,6 +843,7 @@ def _offsurface_adapt_grid(
     max_Nt: int = -1,
     max_Np: int = -1,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
 ):
     """Upsample source grid until the double-layer self-test meets tolerance."""
     X_src = jnp.asarray(X_src)
@@ -595,6 +867,7 @@ def _offsurface_adapt_grid(
             ones,
             area_elem,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
         )
         U = jnp.asarray(U).reshape(-1)
         err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
@@ -665,8 +938,11 @@ def laplace_fxd_u_eval_singular(
     patch_dim0: int | None = None,
     rad_dim: int | None = None,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
     patch_idx=None,
     orient: float | None = None,
+    pou_dtype=None,
+    remat: bool = False,
 ):
     """Evaluate Laplace FxdU with singular correction on surface targets."""
     X_src = jnp.asarray(X_src)
@@ -680,7 +956,14 @@ def laplace_fxd_u_eval_singular(
         X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
     else:
         X_trg = jnp.asarray(X_trg)
-    base = laplace_fxd_u_eval(X_src, X_trg, density, surf_normal_area_elem(dX_src, X_src)[1], chunk_size=chunk_size)
+    base = laplace_fxd_u_eval(
+        X_src,
+        X_trg,
+        density,
+        surf_normal_area_elem(dX_src, X_src)[1],
+        chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+    )
 
     if patch_dim0 is None:
         cond = _surface_cond(dX_src, nt, npol)
@@ -689,7 +972,7 @@ def laplace_fxd_u_eval_singular(
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
 
-    precomp = precompute_singular(patch_dim0, rad_dim)
+    precomp = precompute_singular(patch_dim0, rad_dim, pou_dtype=pou_dtype)
     patch_dim = precomp.patch_dim
     ngrid = precomp.ngrid
 
@@ -762,7 +1045,8 @@ def laplace_fxd_u_eval_singular(
         return jnp.sum(GiF[:, None] * MGrid, axis=0)
 
     Trg_flat = X_trg.reshape((3, -1)).T
-    corr = jax.vmap(corr_one)(G, Gg, GF, Trg_flat)
+    corr_fn = jax.checkpoint(corr_one) if remat else corr_one
+    corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
     corr = corr.T.reshape((3, trg_nt, trg_np))
 
     base = base.reshape((3, trg_nt, trg_np))
@@ -781,8 +1065,11 @@ def laplace_fxd_u_eval_vec_singular(
     patch_dim0: int | None = None,
     rad_dim: int | None = None,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
     patch_idx=None,
     orient: float | None = None,
+    pou_dtype=None,
+    remat: bool = False,
 ):
     density_vec = jnp.asarray(density_vec)
     return jax.vmap(
@@ -798,8 +1085,11 @@ def laplace_fxd_u_eval_vec_singular(
             patch_dim0=patch_dim0,
             rad_dim=rad_dim,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
             patch_idx=patch_idx,
             orient=orient,
+            pou_dtype=pou_dtype,
+            remat=remat,
         ),
         in_axes=0,
         out_axes=0,
@@ -818,8 +1108,11 @@ def laplace_dx_u_eval_singular(
     patch_dim0: int | None = None,
     rad_dim: int | None = None,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
     patch_idx=None,
     orient: float | None = None,
+    pou_dtype=None,
+    remat: bool = False,
 ):
     """Evaluate Laplace DxU with singular correction on surface targets."""
     X_src = jnp.asarray(X_src)
@@ -841,6 +1134,7 @@ def laplace_dx_u_eval_singular(
         density,
         area_elem,
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
     )
 
     if patch_dim0 is None:
@@ -850,7 +1144,7 @@ def laplace_dx_u_eval_singular(
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
 
-    precomp = precompute_singular(patch_dim0, rad_dim)
+    precomp = precompute_singular(patch_dim0, rad_dim, pou_dtype=pou_dtype)
     patch_dim = precomp.patch_dim
     ngrid = precomp.ngrid
 
@@ -923,7 +1217,8 @@ def laplace_dx_u_eval_singular(
         return jnp.sum(GiF * MGrid)
 
     Trg_flat = X_trg.reshape((3, -1)).T
-    corr = jax.vmap(corr_one)(G, Gg, GF, Trg_flat)
+    corr_fn = jax.checkpoint(corr_one) if remat else corr_one
+    corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
     corr = corr.reshape((1, trg_nt, trg_np))
 
     base = base.reshape((1, trg_nt, trg_np))
@@ -943,8 +1238,11 @@ def laplace_fxd2_u_eval_singular(
     rad_dim: int | None = None,
     hedgehog_order: int = 8,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
     patch_idx=None,
     orient: float | None = None,
+    pou_dtype=None,
+    remat: bool = False,
 ):
     """Evaluate Laplace Fxd2U with singular correction (Hedgehog)."""
     X_src = jnp.asarray(X_src)
@@ -964,6 +1262,7 @@ def laplace_fxd2_u_eval_singular(
         density,
         surf_normal_area_elem(dX_src, X_src)[1],
         chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
     )
 
     if patch_dim0 is None:
@@ -973,7 +1272,7 @@ def laplace_fxd2_u_eval_singular(
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
 
-    precomp = precompute_singular(patch_dim0, rad_dim, hedgehog_order)
+    precomp = precompute_singular(patch_dim0, rad_dim, hedgehog_order, pou_dtype=pou_dtype)
     patch_dim = precomp.patch_dim
     ngrid = precomp.ngrid
 
@@ -1061,7 +1360,8 @@ def laplace_fxd2_u_eval_singular(
         return jnp.sum(GiF[:, None] * MGrid, axis=0)
 
     Trg_flat = X_trg.reshape((3, -1)).T
-    corr = jax.vmap(corr_one)(G, Gg, GF, Trg_flat)
+    corr_fn = jax.checkpoint(corr_one) if remat else corr_one
+    corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
     corr = corr.T.reshape((9, trg_nt, trg_np))
 
     base = base.reshape((9, trg_nt, trg_np))
@@ -1081,8 +1381,11 @@ def laplace_fxd2_u_eval_vec_singular(
     rad_dim: int | None = None,
     hedgehog_order: int = 8,
     chunk_size: int = 1024,
+    target_chunk_size: int | None = None,
     patch_idx=None,
     orient: float | None = None,
+    pou_dtype=None,
+    remat: bool = False,
 ):
     density_vec = jnp.asarray(density_vec)
     return jax.vmap(
@@ -1099,8 +1402,11 @@ def laplace_fxd2_u_eval_vec_singular(
             rad_dim=rad_dim,
             hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
             patch_idx=patch_idx,
             orient=orient,
+            pou_dtype=pou_dtype,
+            remat=remat,
         ),
         in_axes=0,
         out_axes=0,

@@ -4,10 +4,12 @@ Performance
 The virtual casing evaluation is dominated by surface integrals with
 singular kernels. Performance and memory efficiency are addressed via:
 
-- Source/target blocking (tiling).
+- 2D blocking over sources *and* targets (tiling).
 - JIT-compiled kernels with static shapes.
 - Precomputed quadrature tables and interpolation matrices.
+- Auto-tuned chunk sizes per operator (B vs GradB) and backend (CPU/GPU).
 - Optional rematerialization to reduce memory in the backward pass.
+- Mixed precision for POU/patch intermediates with float64 outputs.
 
 Baseline (Direct-Sum) Path
 --------------------------
@@ -18,6 +20,15 @@ the full ``N_trg x N_src`` kernel matrix and keeps memory use linear in
 the chunk size. The baseline is primarily for correctness and parity
 instrumentation; singular corrections will be layered on later.
 
+Target Blocking (2D Tiling)
+---------------------------
+
+The direct-sum kernels now support a second tiling dimension over targets.
+This avoids large broadcasted temporaries such as ``[ntrg, nsrc, 3]`` when
+``ntrg`` is large. The API exposes ``target_chunk_size`` to control the
+target tile size. When enabled, each tile performs a source scan using
+``jax.lax.scan`` so accumulation happens inside the kernel loop.
+
 Singular Correction
 -------------------
 
@@ -25,6 +36,13 @@ The singular correction introduces per-target patch work. For now it is
 implemented in Python with JAX primitives, which is adequate for parity
 tests but not yet optimized. The next step is to batch patches and use
 ``vmap``/``scan`` to reduce overhead and enable GPU acceleration.
+
+Rematerialization
+-----------------
+
+The GradB singular correction supports optional rematerialization via
+``jax.checkpoint`` to trade recomputation for memory. Use ``remat=True``
+in GradB paths to reduce the size of saved intermediates during autodiff.
 
 Adaptive Off-Surface
 --------------------
@@ -66,8 +84,17 @@ Chunk Size
 
 The ``chunk_size`` parameter controls the source tiling in direct
 quadrature. Larger chunks improve arithmetic intensity but increase
-peak memory. For parity tests, ``chunk_size=1024`` is a good balance.
-On GPUs, values in the 2k–8k range typically work well.
+peak memory. ``target_chunk_size`` provides a second tiling dimension
+over targets. For parity tests, ``chunk_size=1024`` and
+``target_chunk_size=auto`` is a good balance.
+
+Auto tuning is enabled by passing ``chunk_size="auto"`` and
+``target_chunk_size="auto"`` (default in the high-level API). The
+heuristics can be overridden via environment variables:
+
+- ``VCJAX_CHUNK_B`` / ``VCJAX_CHUNK_B_SRC`` / ``VCJAX_CHUNK_B_TRG``
+- ``VCJAX_CHUNK_BOFF`` / ``VCJAX_CHUNK_BOFF_SRC`` / ``VCJAX_CHUNK_BOFF_TRG``
+- ``VCJAX_CHUNK_GRADB`` / ``VCJAX_CHUNK_GRADB_SRC`` / ``VCJAX_CHUNK_GRADB_TRG``
 
 JIT Caching
 ~~~~~~~~~~~
@@ -93,6 +120,11 @@ with float32 inputs can provide significant speedups, but requires
 relaxed tolerances in validation. Keep ``jax_enable_x64`` enabled in CI
 to maintain reference accuracy.
 
+For singular correction, the POU/polar interpolation tables can be cast
+to float32 while keeping the final accumulation in float64. Use
+``pou_dtype="auto"`` or ``pou_dtype="float32"`` in high-level calls to
+enable this optimization.
+
 Precompute Reuse
 ~~~~~~~~~~~~~~~~
 
@@ -114,6 +146,7 @@ that can be opened in TensorBoard:
 
    JAX_ENABLE_X64=1 python tools/profile_vc.py \
      --case case_vc --op B --jit --repeat 5 \
+     --chunk-size auto --target-chunk-size auto \
      --trace-dir /tmp/vc_trace
 
    tensorboard --logdir /tmp/vc_trace
