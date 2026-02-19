@@ -228,14 +228,20 @@ def surf_normal_area_elem(dX, X=None):
     area_elem = area / float(n)
 
     if X is not None:
-        X = jnp.asarray(X)
-        X_flat = X.reshape(-1)
-        normal_flat = normal.reshape(-1)
-        idx = jnp.argmax(X_flat)
-        orient = jnp.where(normal_flat[idx] < 0, -1.0, 1.0)
+        orient = normal_orientation(X, normal)
         normal = normal * orient
 
     return normal, area_elem
+
+
+def normal_orientation(X, normal):
+    """Return +1 or -1 orientation used by BIEST for normals."""
+    X = jnp.asarray(X)
+    normal = jnp.asarray(normal)
+    X_flat = X.reshape(-1)
+    normal_flat = normal.reshape(-1)
+    idx = jnp.argmax(X_flat)
+    return jnp.where(normal_flat[idx] < 0, -1.0, 1.0)
 
 
 def dot_prod(A, B):

@@ -97,6 +97,21 @@ The scheme is described in detail in Malhotra et al. (2020), and the
 implementation in this repository mirrors the reference code in
 ``biest/singular_correction.hpp``.
 
+Implementation Notes
+--------------------
+
+The JAX port currently implements the partition-of-unity correction for
+the Laplace FxdU kernel with Hedgehog order 1. The patch size is chosen
+using the same thresholding rules as BIEST:
+
+.. math::
+
+   \\text{PDIM} = \\lfloor 1.6\\,\\text{digits}\\,\\text{cond} \\rfloor
+
+and then rounded up to the nearest supported template value
+``{6, 8, 12, 16, ..., 64}``. The polar quadrature order is
+``RAD_DIM = \\lfloor 1.6\\,\\text{PDIM} \\rfloor``.
+
 Adaptive Quadrature Resolution
 ------------------------------
 

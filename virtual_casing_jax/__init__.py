@@ -10,6 +10,7 @@ from .surface_ops import (
     surf_normal_area_elem,
     dot_prod,
     cross_prod,
+    normal_orientation,
 )
 from .kernels import (
     laplace_fx_u,
@@ -21,10 +22,13 @@ from .kernels import (
 from .integrals import (
     laplace_fxd_u_eval,
     laplace_fxd_u_eval_vec,
+    laplace_fxd_u_eval_singular,
+    laplace_fxd_u_eval_vec_singular,
     field_period_target_coords,
     biotsavart_fx_u_eval,
     computeB_offsurface_baseline,
 )
+from . import singular_quadrature
 
 __all__ = [
     "surface_ops",
@@ -36,6 +40,7 @@ __all__ = [
     "surf_normal_area_elem",
     "dot_prod",
     "cross_prod",
+    "normal_orientation",
     "laplace_fx_u",
     "laplace_fxd_u",
     "laplace_fxd2_u",
@@ -43,7 +48,10 @@ __all__ = [
     "biotsavart_fxd_u",
     "laplace_fxd_u_eval",
     "laplace_fxd_u_eval_vec",
+    "laplace_fxd_u_eval_singular",
+    "laplace_fxd_u_eval_vec_singular",
     "field_period_target_coords",
     "biotsavart_fx_u_eval",
     "computeB_offsurface_baseline",
+    "singular_quadrature",
 ]

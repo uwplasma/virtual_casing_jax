@@ -18,6 +18,14 @@ the full ``N_trg x N_src`` kernel matrix and keeps memory use linear in
 the chunk size. The baseline is primarily for correctness and parity
 instrumentation; singular corrections will be layered on later.
 
+Singular Correction
+-------------------
+
+The singular correction introduces per-target patch work. For now it is
+implemented in Python with JAX primitives, which is adequate for parity
+tests but not yet optimized. The next step is to batch patches and use
+``vmap``/``scan`` to reduce overhead and enable GPU acceleration.
+
 CPU and GPU
 -----------
 

@@ -64,6 +64,22 @@ and profiling instrumentation before introducing the full correction.
 The direct-sum implementation is chunked to limit memory use and is
 JIT-compatible using ``jax.lax.scan``.
 
+Singular Correction (Laplace FxdU)
+----------------------------------
+
+We now implement the BIEST partition-of-unity correction for the
+Laplace FxdU kernel (``grad G``):
+
+- A local patch is extracted around each target point.
+- A grid POU term subtracts the singular contribution from the
+  trapezoidal rule.
+- A polar quadrature term adds back the singular part using Lagrange
+  interpolation from the patch to polar nodes.
+
+This is currently implemented for Hedgehog order 1 and is sufficient
+for ``ComputeB`` parity tests. The hyper-singular corrections used by
+``ComputeGradB`` are not yet implemented.
+
 Off-Surface Baseline
 --------------------
 

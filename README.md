@@ -3,8 +3,8 @@
 JAX implementation of the virtual casing principle with high-order singular quadrature.
 
 Status: early development with validated surface geometry and kernel operators,
-plus baseline direct-sum boundary integrals (including off-surface evaluation
-via upsampled quadrature).
+plus baseline direct-sum boundary integrals and singular-corrected Laplace
+FxdU on-surface evaluation (off-surface uses upsampled quadrature).
 
 Planned features:
 - On-surface and off-surface virtual casing evaluation.

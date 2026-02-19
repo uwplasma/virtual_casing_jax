@@ -15,3 +15,8 @@ API
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: virtual_casing_jax.singular_quadrature
+   :members:
+   :undoc-members:
+   :show-inheritance:
