@@ -4,7 +4,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .kernels import laplace_fxd_u, biotsavart_fx_u
+from .kernels import laplace_fxd_u, biotsavart_fx_u, laplace_dx_u
 from .surface_ops import upsample, grad2d, surf_normal_area_elem, normal_orientation
 from .singular_quadrature import precompute_singular, select_patch_dim, INTERP_ORDER
 
@@ -158,6 +158,59 @@ def biotsavart_fx_u_eval(X_src, X_trg, density_vec, area_elem, chunk_size: int =
     return jnp.transpose(out, (1, 0))
 
 
+def laplace_dx_u_eval(X_src, n_src, X_trg, density, area_elem, chunk_size: int = 1024):
+    """Evaluate Laplace DxU (double-layer) by direct quadrature."""
+    X_src = _flatten_soa(X_src, "X_src")
+    n_src = _flatten_soa(n_src, "n_src")
+    X_trg = _flatten_soa(X_trg, "X_trg")
+    density = jnp.asarray(density).reshape(-1)
+    area_elem = jnp.asarray(area_elem).reshape(-1)
+
+    if X_src.shape[0] != 3 or X_trg.shape[0] != 3 or n_src.shape[0] != 3:
+        raise ValueError("X_src, X_trg, n_src must be 3D in SoA layout")
+
+    nsrc = X_src.shape[1]
+    ntrg = X_trg.shape[1]
+    if density.shape[0] != nsrc or area_elem.shape[0] != nsrc:
+        raise ValueError("density/area_elem must match source grid size")
+
+    weights = density * area_elem
+    Xs = jnp.transpose(X_src, (1, 0))
+    Ns = jnp.transpose(n_src, (1, 0))
+    Xt = jnp.transpose(X_trg, (1, 0))
+
+    if chunk_size is None or chunk_size <= 0:
+        dx = Xt[:, None, :] - Xs[None, :, :]
+        n = Ns[None, :, :]
+        contrib = laplace_dx_u(dx, n, weights)
+        out = jnp.sum(contrib, axis=1)
+        return out.reshape((1, ntrg))
+
+    pad = (-nsrc) % chunk_size
+    if pad:
+        Xs = jnp.pad(Xs, ((0, pad), (0, 0)))
+        Ns = jnp.pad(Ns, ((0, pad), (0, 0)))
+        weights = jnp.pad(weights, (0, pad))
+    nsrc_pad = Xs.shape[0]
+    n_chunks = nsrc_pad // chunk_size
+
+    X_chunks = Xs.reshape((n_chunks, chunk_size, 3))
+    N_chunks = Ns.reshape((n_chunks, chunk_size, 3))
+    W_chunks = weights.reshape((n_chunks, chunk_size))
+
+    def scan_fn(acc, xs):
+        Xc, Nc, Wc = xs
+        dx = Xt[:, None, :] - Xc[None, :, :]
+        n = Nc[None, :, :]
+        contrib = laplace_dx_u(dx, n, Wc)
+        acc = acc + jnp.sum(contrib, axis=1)
+        return acc, None
+
+    init = jnp.zeros((ntrg,), dtype=Xs.dtype)
+    out, _ = jax.lax.scan(scan_fn, init, (X_chunks, N_chunks, W_chunks))
+    return out.reshape((1, ntrg))
+
+
 def computeB_offsurface_baseline(
     X_src,
     BdotN,
@@ -197,6 +250,71 @@ def computeB_offsurface_baseline(
     if ext:
         return gradG - bs
     return gradG + bs
+
+
+def computeB_offsurface_adaptive(
+    X_src,
+    BdotN,
+    J,
+    Xt,
+    digits: int = 5,
+    max_Nt: int = -1,
+    max_Np: int = -1,
+    ext: bool = True,
+    chunk_size: int = 1024,
+):
+    """Adaptive off-surface evaluation matching ExtVacuumField logic."""
+    X_src = jnp.asarray(X_src)
+    BdotN = jnp.asarray(BdotN)
+    J = jnp.asarray(J)
+    Xt = jnp.asarray(Xt)
+
+    nt = X_src.shape[1]
+    npol = X_src.shape[2]
+    tol = 10.0 ** (-digits)
+
+    while True:
+        dX = grad2d(X_src, nt, npol)
+        normal, area_elem = surf_normal_area_elem(dX, X_src)
+
+        ones = jnp.ones((nt, npol), dtype=X_src.dtype)
+        U = laplace_dx_u_eval(
+            X_src,
+            normal,
+            Xt,
+            ones,
+            area_elem,
+            chunk_size=chunk_size,
+        )
+        U = jnp.asarray(U).reshape(-1)
+        err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
+
+        if err <= tol:
+            break
+
+        nt2 = nt * 2
+        np2 = npol * 2
+        if max_Nt > 0:
+            nt2 = min(nt2, max_Nt)
+        if max_Np > 0:
+            np2 = min(np2, max_Np)
+        if nt2 == nt and np2 == npol:
+            break
+
+        X_src = upsample(X_src, nt, npol, nt2, np2)
+        BdotN = upsample(BdotN[None, ...], nt, npol, nt2, np2)[0]
+        J = upsample(J, nt, npol, nt2, np2)
+        nt, npol = nt2, np2
+
+    return computeB_offsurface_baseline(
+        X_src,
+        BdotN,
+        J,
+        Xt,
+        upsample_factor=1,
+        chunk_size=chunk_size,
+        ext=ext,
+    )
 
 
 def _surface_cond(dX, nt: int, npol: int):

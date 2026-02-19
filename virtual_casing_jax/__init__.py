@@ -27,7 +27,9 @@ from .integrals import (
     laplace_fxd_u_eval_vec_singular,
     field_period_target_coords,
     biotsavart_fx_u_eval,
+    laplace_dx_u_eval,
     computeB_offsurface_baseline,
+    computeB_offsurface_adaptive,
 )
 from . import singular_quadrature
 
@@ -54,6 +56,8 @@ __all__ = [
     "laplace_fxd_u_eval_vec_singular",
     "field_period_target_coords",
     "biotsavart_fx_u_eval",
+    "laplace_dx_u_eval",
     "computeB_offsurface_baseline",
+    "computeB_offsurface_adaptive",
     "singular_quadrature",
 ]

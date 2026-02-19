@@ -33,6 +33,8 @@ Test Categories
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.
    - Off-surface ``ComputeBOffSurf`` baseline is validated using
      upsampled direct-sum quadrature.
+   - Off-surface adaptive refinement is validated against the reference
+     for small target sets.
 
 Tolerance Policy
 ----------------

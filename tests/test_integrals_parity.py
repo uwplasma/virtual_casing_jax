@@ -11,6 +11,7 @@ from virtual_casing_jax.integrals import (
     laplace_fxd_u_eval_vec_singular,
     field_period_target_coords,
     computeB_offsurface_baseline,
+    computeB_offsurface_adaptive,
 )
 from virtual_casing_jax.surface_ops import surf_normal_area_elem
 
@@ -274,3 +275,28 @@ def test_baseline_computeBOff_parity_case_vc():
 
     rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
     assert rel < 0.15
+
+
+def test_adaptive_computeBOff_parity_case_vc():
+    prefix = "case_vc"
+    if not _dump_exists(prefix, "computeBOff_Bvc"):
+        pytest.skip("parity dump not available")
+
+    X, BdotN, J, Xt, Bvc_ref = _load_offsurf_case(prefix)
+
+    Bvc = np.asarray(
+        computeB_offsurface_adaptive(
+            jnp.asarray(X),
+            jnp.asarray(BdotN),
+            jnp.asarray(J),
+            jnp.asarray(Xt),
+            digits=5,
+            max_Nt=-1,
+            max_Np=-1,
+            ext=True,
+            chunk_size=2048,
+        )
+    )
+
+    rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
+    assert rel < 1e-2

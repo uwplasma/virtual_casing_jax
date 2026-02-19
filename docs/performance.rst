@@ -26,6 +26,13 @@ implemented in Python with JAX primitives, which is adequate for parity
 tests but not yet optimized. The next step is to batch patches and use
 ``vmap``/``scan`` to reduce overhead and enable GPU acceleration.
 
+Adaptive Off-Surface
+--------------------
+
+Adaptive refinement requires repeated evaluations of a double-layer
+test. This is currently a Python loop; performance will improve once
+the refinement is JIT-compiled with static shape schedules.
+
 CPU and GPU
 -----------
 

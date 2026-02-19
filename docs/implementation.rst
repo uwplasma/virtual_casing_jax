@@ -93,3 +93,12 @@ implementation evaluates:
 with optional Fourier upsampling of the source grid to improve
 accuracy. This provides a drop-in baseline for ``ComputeBOffSurf`` and
 serves as the reference for future adaptive refinement.
+
+Off-Surface Adaptive Refinement
+-------------------------------
+
+The off-surface evaluator now mirrors BIEST's adaptive strategy: a
+double-layer test with constant density is used to refine the source
+grid until the potential is within ``10^{-digits}`` of either 0 or 1.
+The final grid is then used to evaluate ``grad G`` and Biot-Savart
+contributions.
