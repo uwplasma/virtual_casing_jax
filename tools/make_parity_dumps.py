@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Generate small parity dumps from the reference virtual-casing implementation."""
+"""Generate parity dumps from the reference virtual-casing implementation."""
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -295,47 +298,90 @@ def make_simsopt_vmec_case_large(dst_dir: Path, mode: str):
     )
 
 
-def main():
-    dst_dir = Path(__file__).resolve().parents[1] / "tests" / "data"
-    dst_dir.mkdir(parents=True, exist_ok=True)
-
+def run_case(case: str, dst_dir: Path):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         os.environ["VC_DUMP_DIR"] = str(tmpdir)
 
-        os.environ["VC_DUMP_PREFIX"] = "case_vc"
-        make_virtual_casing_testdata(dst_dir, mode="ext")
-        _copy_prefix(tmpdir, dst_dir, "case_vc")
+        if case == "case_vc":
+            os.environ["VC_DUMP_PREFIX"] = case
+            make_virtual_casing_testdata(dst_dir, mode="ext")
+            _copy_prefix(tmpdir, dst_dir, case)
+        elif case == "case_vc_int":
+            os.environ["VC_DUMP_PREFIX"] = case
+            make_virtual_casing_testdata(dst_dir, mode="int")
+            _copy_prefix(tmpdir, dst_dir, case)
+        elif case == "case_vc_large":
+            os.environ["VC_DUMP_PREFIX"] = case
+            make_virtual_casing_testdata_large(dst_dir, mode="ext")
+            _copy_prefix(tmpdir, dst_dir, case)
+        elif case == "case_vc_w7x":
+            os.environ["VC_DUMP_PREFIX"] = case
+            make_virtual_casing_testdata_w7x(dst_dir, mode="ext")
+            _copy_prefix(tmpdir, dst_dir, case)
+        elif case == "case_vc_w7x_large":
+            os.environ["VC_DUMP_PREFIX"] = case
+            make_virtual_casing_testdata_w7x_large(dst_dir, mode="ext")
+            _copy_prefix(tmpdir, dst_dir, case)
+        elif case == "case_simsopt":
+            os.environ["VC_DUMP_PREFIX"] = case
+            make_simsopt_vmec_case(dst_dir, mode="ext")
+            _copy_prefix(tmpdir, dst_dir, case)
+        elif case == "case_simsopt_int":
+            os.environ["VC_DUMP_PREFIX"] = case
+            make_simsopt_vmec_case(dst_dir, mode="int")
+            _copy_prefix(tmpdir, dst_dir, case)
+        elif case == "case_simsopt_large":
+            os.environ["VC_DUMP_PREFIX"] = case
+            make_simsopt_vmec_case_large(dst_dir, mode="ext")
+            _copy_prefix(tmpdir, dst_dir, case)
+        elif case == "case_testdata_axisym":
+            make_virtual_casing_testdata_dumps(dst_dir)
+        else:
+            raise ValueError(f"Unknown case: {case}")
 
-        os.environ["VC_DUMP_PREFIX"] = "case_vc_int"
-        make_virtual_casing_testdata(dst_dir, mode="int")
-        _copy_prefix(tmpdir, dst_dir, "case_vc_int")
 
-        os.environ["VC_DUMP_PREFIX"] = "case_vc_large"
-        make_virtual_casing_testdata_large(dst_dir, mode="ext")
-        _copy_prefix(tmpdir, dst_dir, "case_vc_large")
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--case", default="", help="Run a single case (by prefix)")
+    parser.add_argument(
+        "--subprocess",
+        action="store_true",
+        help="Run each case in a separate subprocess to avoid VC_DUMP_PREFIX caching",
+    )
+    args = parser.parse_args()
 
-        os.environ["VC_DUMP_PREFIX"] = "case_simsopt"
-        make_simsopt_vmec_case(dst_dir, mode="ext")
-        _copy_prefix(tmpdir, dst_dir, "case_simsopt")
+    dst_dir = Path(__file__).resolve().parents[1] / "tests" / "data"
+    dst_dir.mkdir(parents=True, exist_ok=True)
 
-        os.environ["VC_DUMP_PREFIX"] = "case_simsopt_int"
-        make_simsopt_vmec_case(dst_dir, mode="int")
-        _copy_prefix(tmpdir, dst_dir, "case_simsopt_int")
+    cases = [
+        "case_vc",
+        "case_vc_int",
+        "case_vc_large",
+        "case_simsopt",
+        "case_simsopt_int",
+        "case_simsopt_large",
+        "case_vc_w7x",
+        "case_vc_w7x_large",
+        "case_testdata_axisym",
+    ]
 
-        os.environ["VC_DUMP_PREFIX"] = "case_simsopt_large"
-        make_simsopt_vmec_case_large(dst_dir, mode="ext")
-        _copy_prefix(tmpdir, dst_dir, "case_simsopt_large")
+    if args.case:
+        run_case(args.case, dst_dir)
+        print(f"Parity dumps written to {dst_dir}")
+        return
 
-        os.environ["VC_DUMP_PREFIX"] = "case_vc_w7x"
-        make_virtual_casing_testdata_w7x(dst_dir, mode="ext")
-        _copy_prefix(tmpdir, dst_dir, "case_vc_w7x")
+    if args.subprocess:
+        for case in cases:
+            subprocess.run(
+                [sys.executable, __file__, "--case", case],
+                check=True,
+            )
+        print(f"Parity dumps written to {dst_dir}")
+        return
 
-        os.environ["VC_DUMP_PREFIX"] = "case_vc_w7x_large"
-        make_virtual_casing_testdata_w7x_large(dst_dir, mode="ext")
-        _copy_prefix(tmpdir, dst_dir, "case_vc_w7x_large")
-
-        make_virtual_casing_testdata_dumps(dst_dir)
+    for case in cases:
+        run_case(case, dst_dir)
 
     print(f"Parity dumps written to {dst_dir}")
 

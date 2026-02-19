@@ -45,3 +45,15 @@ Parity datasets are generated with:
 
 The datasets are intentionally small to keep the repository size
 reasonable.
+
+Subprocess Mode
+---------------
+
+Some builds cache ``VC_DUMP_PREFIX`` inside the C++ library on first use.
+To ensure each prefix is honored, run:
+
+.. code-block:: bash
+
+   python tools/make_parity_dumps.py --subprocess
+
+This spawns a fresh process per case and avoids prefix caching issues.
