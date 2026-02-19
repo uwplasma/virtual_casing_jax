@@ -44,6 +44,10 @@ Test Categories
      internal test case and SIMSOPT VMEC case.
    - ``VirtualCasingJAX.compute_internal_B`` matches reference on the
      internal test case and SIMSOPT VMEC case.
+   - ``VirtualCasingJAX.compute_external_B`` matches the W7-X parity case
+     (``case_vc_w7x``) to ~1e-3 relative error.
+   - ``VirtualCasingJAX.compute_external_gradB`` matches the W7-X parity
+     case (``case_vc_w7x``) to ~2e-2 relative error.
    - Autodiff of ``compute_external_B_autodiff`` matches the C++
      ``ComputeGradB`` outputs on both parity cases.
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.

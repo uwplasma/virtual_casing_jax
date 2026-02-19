@@ -15,7 +15,6 @@ from .surface_ops import (
     surf_normal_area_elem,
     dot_prod,
     cross_prod,
-    normal_orientation,
 )
 from .integrals import (
     laplace_fxd_u_eval_singular,
@@ -87,10 +86,13 @@ def build_quad_setup(surface_coord, quad_nt: int, quad_np: int, *, orient: float
     surf_np_full = int(surface_coord.shape[2])
     quad_coord = resample(surface_coord, surf_nt_full, surf_np_full, quad_nt, quad_np)
     dX = grad2d(quad_coord, quad_nt, quad_np)
-    normal, area_elem = surf_normal_area_elem(dX, quad_coord)
+    normal, area_elem, orient0 = surf_normal_area_elem(
+        dX, quad_coord, return_orientation=True
+    )
     if orient is None:
-        orient = jax.lax.stop_gradient(normal_orientation(quad_coord, normal))
-    normal = normal * orient
+        orient = jax.lax.stop_gradient(orient0)
+    else:
+        normal = normal * (orient / orient0)
     return quad_coord, dX, normal, area_elem, orient
 
 

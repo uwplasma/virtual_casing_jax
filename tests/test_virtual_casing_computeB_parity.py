@@ -29,7 +29,17 @@ def _infer_setup(prefix: str):
     return X, src_nt, src_np, nfp, nfp_eff, half_period
 
 
-def _reconstruct_B0(prefix: str, src_nt: int, src_np: int, nfp: int, nfp_eff: int, half_period: bool, trg_nt: int):
+def _reconstruct_B0(
+    prefix: str,
+    src_nt: int,
+    src_np: int,
+    nfp: int,
+    nfp_eff: int,
+    half_period: bool,
+    trg_nt: int,
+    *,
+    tol: float = 1e-4,
+):
     B0_complete_ref = load_dump(DATA_DIR / f"{prefix}_computeB_B0_complete")
     B0_complete_ref = jnp.asarray(B0_complete_ref)
     B0_complete = B0_complete_ref
@@ -44,12 +54,12 @@ def _reconstruct_B0(prefix: str, src_nt: int, src_np: int, nfp: int, nfp_eff: in
     B0_re = complete_vec_field(B0, False, half_period, nfp, src_nt, src_np, dtheta)
     num = np.linalg.norm(np.asarray(B0_re) - np.asarray(B0_complete_ref))
     den = np.linalg.norm(np.asarray(B0_complete_ref)) + 1e-14
-    assert num / den < 1e-4
+    assert num / den < tol
 
     return np.asarray(B0)
 
 
-@pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt"])
+@pytest.mark.parametrize("prefix", ["case_vc", "case_simsopt", "case_vc_w7x"])
 def test_virtual_casing_computeB_parity(prefix):
     if not (DATA_DIR / f"{prefix}_computeB_Bvc.bin").exists():
         pytest.skip("parity dump not available")
@@ -63,9 +73,28 @@ def test_virtual_casing_computeB_parity(prefix):
     quad_nt = quad_coord.shape[1]
     quad_np = quad_coord.shape[2]
 
-    B0 = _reconstruct_B0(prefix, src_nt, src_np, nfp, nfp_eff, half_period, trg_nt)
+    tol_map = {
+        "case_vc": 1e-4,
+        "case_simsopt": 1e-4,
+        "case_vc_w7x": 1e-3,
+    }
+    B0 = _reconstruct_B0(
+        prefix,
+        src_nt,
+        src_np,
+        nfp,
+        nfp_eff,
+        half_period,
+        trg_nt,
+        tol=tol_map[prefix],
+    )
 
-    digits = 5
+    digits_map = {
+        "case_vc": 5,
+        "case_simsopt": 6,
+        "case_vc_w7x": 6,
+    }
+    digits = digits_map[prefix]
     vc = VirtualCasingJAX()
     vc.setup(
         digits,
@@ -90,5 +119,10 @@ def test_virtual_casing_computeB_parity(prefix):
     Bvc = np.asarray(Bvc)
 
     rel = np.linalg.norm(Bvc - Bvc_ref) / (np.linalg.norm(Bvc_ref) + 1e-14)
-    tol = 3e-4 if prefix == "case_vc" else 6e-4
+    tol_map = {
+        "case_vc": 3e-4,
+        "case_simsopt": 6e-4,
+        "case_vc_w7x": 8e-4,
+    }
+    tol = tol_map[prefix]
     assert rel < tol

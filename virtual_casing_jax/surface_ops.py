@@ -202,12 +202,13 @@ def grad2d(X, nt: int, npol: int):
     return dX
 
 
-def surf_normal_area_elem(dX, X=None):
+def surf_normal_area_elem(dX, X=None, *, return_orientation: bool = False):
     """Compute unit normal and area element (BIEST SurfNormalAreaElem).
 
     dX: (6, nt, npol) for 3D surfaces (dX_t, dX_p per component).
     X: optional (3, nt, npol) coordinates for orientation.
-    Returns (normal, area_elem) with shapes (3, nt, npol) and (nt, npol).
+    Returns (normal, area_elem) or (normal, area_elem, orient) when
+    ``return_orientation=True``.
     """
     dX = jnp.asarray(dX)
     nt = dX.shape[1]
@@ -229,10 +230,13 @@ def surf_normal_area_elem(dX, X=None):
     normal = cross / area
     area_elem = area / float(n)
 
+    orient = 1.0
     if X is not None:
         orient = normal_orientation(X, normal)
         normal = normal * orient
 
+    if return_orientation:
+        return normal, area_elem, orient
     return normal, area_elem
 
 
@@ -240,10 +244,11 @@ def normal_orientation(X, normal):
     """Return +1 or -1 orientation used by BIEST for normals."""
     X = jnp.asarray(X)
     normal = jnp.asarray(normal)
-    X_flat = X.reshape(-1)
-    normal_flat = normal.reshape(-1)
-    idx = jnp.argmax(X_flat)
-    return jnp.where(normal_flat[idx] < 0, -1.0, 1.0)
+    # Match BIEST: pick the maximum x-coordinate and compare the x-normal.
+    x_flat = X[0].reshape(-1)
+    n_flat = normal[0].reshape(-1)
+    idx = jnp.argmax(x_flat)
+    return jnp.where(n_flat[idx] < 0, -1.0, 1.0)
 
 
 def dot_prod(A, B):

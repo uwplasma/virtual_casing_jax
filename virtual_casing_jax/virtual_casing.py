@@ -15,7 +15,6 @@ from .surface_ops import (
     surf_normal_area_elem,
     dot_prod,
     cross_prod,
-    normal_orientation,
 )
 from .integrals import (
     laplace_fxd_u_eval,
@@ -201,8 +200,8 @@ class VirtualCasingJAX:
             quad_np,
         )
         dX = grad2d(quad_coord, quad_nt, quad_np)
-        normal, _ = surf_normal_area_elem(dX, quad_coord)
-        orient = float(normal_orientation(quad_coord, normal))
+        normal, _, orient = surf_normal_area_elem(dX, quad_coord, return_orientation=True)
+        orient = float(orient)
         return QuadSetup(
             quad_nt=quad_nt,
             quad_np=quad_np,

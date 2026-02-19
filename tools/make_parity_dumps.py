@@ -55,6 +55,36 @@ def make_virtual_casing_testdata(dst_dir: Path, mode: str):
         raise ValueError(f"Unknown mode: {mode}")
 
 
+def make_virtual_casing_testdata_w7x(dst_dir: Path, mode: str):
+    import virtual_casing as vc
+
+    nfp = 5
+    half_period = True
+    nt = 8
+    npol = 6
+    src_nt = 8
+    src_np = 6
+    trg_nt = 6
+    trg_np = 5
+    digits = 6
+
+    X = vc.VirtualCasingTestData.surface_coordinates(nfp, half_period, nt, npol, vc.SurfType.W7X_)
+    Bext, Bint = vc.VirtualCasingTestData.magnetic_field_data(nfp, half_period, nt, npol, X, src_nt, src_np)
+    Btotal = (np.array(Bext) + np.array(Bint)).tolist()
+
+    vcasing = vc.VirtualCasing()
+    vcasing.setup(digits, nfp, half_period, nt, npol, X, src_nt, src_np, trg_nt, trg_np)
+
+    if mode == "ext":
+        _ = vcasing.compute_external_B(Btotal)
+        _ = vcasing.compute_external_gradB(Btotal)
+    elif mode == "int":
+        _ = vcasing.compute_internal_B(Btotal)
+        _ = vcasing.compute_internal_gradB(Btotal)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+
 def make_simsopt_vmec_case(dst_dir: Path, mode: str):
     try:
         from simsopt.mhd import VirtualCasing, Vmec
@@ -141,6 +171,10 @@ def main():
         os.environ["VC_DUMP_PREFIX"] = "case_simsopt_int"
         make_simsopt_vmec_case(dst_dir, mode="int")
         _copy_prefix(tmpdir, dst_dir, "case_simsopt_int")
+
+        os.environ["VC_DUMP_PREFIX"] = "case_vc_w7x"
+        make_virtual_casing_testdata_w7x(dst_dir, mode="ext")
+        _copy_prefix(tmpdir, dst_dir, "case_vc_w7x")
 
     print(f"Parity dumps written to {dst_dir}")
 
