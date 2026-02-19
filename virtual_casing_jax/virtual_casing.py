@@ -509,6 +509,7 @@ class VirtualCasingJAX:
         """JIT-compiled version of compute_external_gradB."""
         if "X_trg" in kwargs and kwargs["X_trg"] is not None:
             raise ValueError("compute_external_gradB_jit does not support X_trg")
+        donate = bool(kwargs.pop("donate", False))
         digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
         quad_nt = kwargs.get("quad_nt")
         quad_np = kwargs.get("quad_np")
@@ -541,6 +542,7 @@ class VirtualCasingJAX:
             pou_dtype,
             patch_dtype,
             interp_block_size,
+            donate,
         )
         fn = self._jit_cache.get(key)
         if fn is None:
@@ -557,7 +559,8 @@ class VirtualCasingJAX:
                     patch_dim0=patch_dim0,
                     patch_idx=patch_idx,
                     **call_kwargs,
-                )
+                ),
+                donate_argnums=(0,) if donate else (),
             )
             self._jit_cache[key] = fn
         return fn(B0)
@@ -772,6 +775,7 @@ class VirtualCasingJAX:
         """JIT-compiled version of compute_external_B."""
         if "X_trg" in kwargs and kwargs["X_trg"] is not None:
             raise ValueError("compute_external_B_jit does not support X_trg; jit externally if needed")
+        donate = bool(kwargs.pop("donate", False))
         digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
         quad_nt = kwargs.get("quad_nt")
         quad_np = kwargs.get("quad_np")
@@ -803,6 +807,7 @@ class VirtualCasingJAX:
             pou_dtype,
             patch_dtype,
             interp_block_size,
+            donate,
         )
         fn = self._jit_cache.get(key)
         if fn is None:
@@ -819,7 +824,8 @@ class VirtualCasingJAX:
                     patch_dim0=patch_dim0,
                     patch_idx=patch_idx,
                     **call_kwargs,
-                )
+                ),
+                donate_argnums=(0,) if donate else (),
             )
             self._jit_cache[key] = fn
         return fn(B0)
@@ -828,6 +834,7 @@ class VirtualCasingJAX:
         """JIT-compiled version of compute_internal_B."""
         if "X_trg" in kwargs and kwargs["X_trg"] is not None:
             raise ValueError("compute_internal_B_jit does not support X_trg; jit externally if needed")
+        donate = bool(kwargs.pop("donate", False))
         digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
         quad_nt = kwargs.get("quad_nt")
         quad_np = kwargs.get("quad_np")
@@ -859,6 +866,7 @@ class VirtualCasingJAX:
             pou_dtype,
             patch_dtype,
             interp_block_size,
+            donate,
         )
         fn = self._jit_cache.get(key)
         if fn is None:
@@ -875,7 +883,8 @@ class VirtualCasingJAX:
                     patch_dim0=patch_dim0,
                     patch_idx=patch_idx,
                     **call_kwargs,
-                )
+                ),
+                donate_argnums=(0,) if donate else (),
             )
             self._jit_cache[key] = fn
         return fn(B0)
@@ -904,6 +913,7 @@ class VirtualCasingJAX:
         """JIT-compiled version of compute_internal_gradB."""
         if "X_trg" in kwargs and kwargs["X_trg"] is not None:
             raise ValueError("compute_internal_gradB_jit does not support X_trg")
+        donate = bool(kwargs.pop("donate", False))
         digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
         quad_nt = kwargs.get("quad_nt")
         quad_np = kwargs.get("quad_np")
@@ -936,6 +946,7 @@ class VirtualCasingJAX:
             pou_dtype,
             patch_dtype,
             interp_block_size,
+            donate,
         )
         fn = self._jit_cache.get(key)
         if fn is None:
@@ -952,7 +963,8 @@ class VirtualCasingJAX:
                     patch_dim0=patch_dim0,
                     patch_idx=patch_idx,
                     **call_kwargs,
-                )
+                ),
+                donate_argnums=(0,) if donate else (),
             )
             self._jit_cache[key] = fn
         return fn(B0)

@@ -119,6 +119,9 @@ These cache compiled functions keyed by argument settings. For repeated
 evaluations with fixed grid sizes, prefer the JIT variants to amortize
 compilation cost.
 
+For long-running loops, pass ``donate=True`` to the JIT wrappers to
+allow XLA to reuse the input buffers and reduce peak memory.
+
 Batching
 ~~~~~~~~
 

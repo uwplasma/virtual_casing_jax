@@ -136,6 +136,7 @@ def profile(args: argparse.Namespace):
             pou_dtype=args.pou_dtype,
             patch_dtype=args.patch_dtype,
             interp_block_size=args.interp_block_size,
+            donate=args.donate if args.jit else False,
             remat=args.remat,
         )
     elif args.op == "GradB":
@@ -152,6 +153,7 @@ def profile(args: argparse.Namespace):
             pou_dtype=args.pou_dtype,
             patch_dtype=args.patch_dtype,
             interp_block_size=args.interp_block_size,
+            donate=args.donate if args.jit else False,
             remat=args.remat,
         )
     elif args.op == "Boff":
@@ -207,6 +209,7 @@ def main():
     parser.add_argument("--pou-dtype", type=str, default=None)
     parser.add_argument("--patch-dtype", type=str, default=None)
     parser.add_argument("--interp-block-size", type=str, default="auto")
+    parser.add_argument("--donate", action="store_true", help="Enable donate_argnums for JIT wrappers")
     parser.add_argument("--remat", dest="remat", action="store_true")
     parser.add_argument("--no-remat", dest="remat", action="store_false")
     parser.add_argument("--max-nt", type=int, default=-1)
