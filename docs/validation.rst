@@ -32,11 +32,17 @@ Test Categories
      within coarse tolerances.
    - Singular-corrected ``ComputeB`` achieves ~1e-4 relative error on
      small grids.
+   - Internal ``ComputeB`` and ``ComputeGradB`` match reference on the
+     internal parity cases (``case_vc_int`` and ``case_simsopt_int``).
    - ``ComputeGradB`` matches reference within ~5e-3 on the GradB parity
      case.
    - ``VirtualCasingJAX.compute_external_gradB`` matches reference on
      the internal test case and SIMSOPT VMEC case.
+   - ``VirtualCasingJAX.compute_internal_gradB`` matches reference on
+     the internal test case and SIMSOPT VMEC case.
    - ``VirtualCasingJAX.compute_external_B`` matches reference on the
+     internal test case and SIMSOPT VMEC case.
+   - ``VirtualCasingJAX.compute_internal_B`` matches reference on the
      internal test case and SIMSOPT VMEC case.
    - Autodiff of ``compute_external_B_autodiff`` matches the C++
      ``ComputeGradB`` outputs on both parity cases.
@@ -45,6 +51,8 @@ Test Categories
      upsampled direct-sum quadrature.
    - Off-surface adaptive refinement is validated against the reference
      for small target sets.
+   - Off-surface ``ComputeGradBOffSurf`` matches reference on the
+     internal virtual-casing test case.
 
 Tolerance Policy
 ----------------

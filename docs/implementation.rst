@@ -64,35 +64,44 @@ and profiling instrumentation before introducing the full correction.
 The direct-sum implementation is chunked to limit memory use and is
 JIT-compatible using ``jax.lax.scan``.
 
-Singular Correction (Laplace FxdU)
-----------------------------------
+Singular Correction (Laplace FxdU / Fxd2U)
+------------------------------------------
 
-We now implement the BIEST partition-of-unity correction for the
-Laplace FxdU kernel (``grad G``):
+We implement the BIEST partition-of-unity correction for both
+``LaplaceFxdU`` (``grad G``) and ``LaplaceFxd2U`` (hyper-singular second
+derivatives):
 
 - A local patch is extracted around each target point.
 - A grid POU term subtracts the singular contribution from the
   trapezoidal rule.
 - A polar quadrature term adds back the singular part using Lagrange
   interpolation from the patch to polar nodes.
+- Hedgehog quadrature (order 8) is used for the ``Fxd2U`` corrections.
 
-This is currently implemented for Hedgehog order 1 and is sufficient
-for ``ComputeB`` parity tests. The hyper-singular corrections used by
-``ComputeGradB`` are not yet implemented.
+This supports parity for both ``ComputeB`` and ``ComputeGradB`` on
+on-surface targets.
 
 Off-Surface Baseline
 --------------------
 
-For off-surface targets the kernels are non-singular. The current
-implementation evaluates:
+For off-surface targets the kernels are non-singular. The implementation
+evaluates:
 
 .. math::
 
-   B(x) = \\nabla G[B\\cdot n](x) - \\text{BiotSavart}[J](x)
+   \mathbf{B}_{\mathrm{ext}}(x) = \\nabla G[B\\cdot n](x) - \\text{BiotSavart}[J](x)
 
-with optional Fourier upsampling of the source grid to improve
-accuracy. This provides a drop-in baseline for ``ComputeBOffSurf`` and
-serves as the reference for future adaptive refinement.
+and the corresponding field gradient:
+
+.. math::
+
+   (\nabla \mathbf{B}_{\mathrm{ext}})_{k i}
+   = \varepsilon_{k \ell m}\,\partial_i\partial_\ell G[K_m]
+   + \partial_i\partial_k G[\sigma].
+
+Optional Fourier upsampling improves accuracy. For off-surface ``GradB``,
+the current parity path uses the base resampled grid (matching the
+reference C++ implementation).
 
 Off-Surface Adaptive Refinement
 -------------------------------

@@ -138,6 +138,38 @@ This provides **exact on-surface derivatives** consistent with the C++
 ``ComputeGradB`` operator, and it avoids differentiating through the
 singular correction machinery.
 
+Internal and Off-Surface GradB
+------------------------------
+
+The internal gradient uses the same on-surface hypersingular operators,
+but with the **sign flipped**:
+
+.. math::
+
+   \nabla \mathbf{B}_{\mathrm{int}} = -\nabla \mathbf{B}_{\mathrm{ext}}.
+
+This matches the reference implementation in ``virtual-casing`` and is
+validated in parity tests. Note that the on-surface hypersingular evaluation
+uses the same quadrature orientation for internal and external limits, which
+is consistent with the C++ behavior.
+
+For **off-surface targets**, the jump term is absent and the gradient is
+evaluated using direct quadrature (no singular correction):
+
+.. math::
+
+   (\nabla \mathbf{B}_{\mathrm{ext}})_{k i}
+   = \varepsilon_{k \ell m}\,\partial_i\partial_\ell G[K_m]
+   + \partial_i\partial_k G[\sigma],
+
+with ``\mathbf{K} = \mathbf{n}\times\mathbf{B}`` and
+``\sigma = \mathbf{B}\cdot\mathbf{n}`` defined on the source surface.
+The JAX implementation optionally upsamples the source grid using the
+same ``LaplaceDxU`` self-test used by the adaptive off-surface field
+evaluation. The current parity path mirrors the reference C++ off-surface
+GradB implementation, which uses the base resampled grid (no adaptive
+refinement).
+
 Parity and Validation
 ---------------------
 
@@ -154,6 +186,8 @@ The parity suite includes:
 
 - ``tests/test_virtual_casing_gradb_parity.py`` (ComputeGradB parity)
 - ``tests/test_autodiff_gradb_parity.py`` (autodiff JVP parity)
+- ``tests/test_virtual_casing_gradbint_parity.py`` (internal GradB parity)
+- ``tests/test_virtual_casing_offsurf_parity.py`` (off-surface B/GradB parity)
 
 The following figures show parity on the SIMSOPT VMEC case.
 

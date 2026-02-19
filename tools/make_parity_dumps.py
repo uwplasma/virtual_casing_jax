@@ -19,7 +19,7 @@ def _copy_prefix(src_dir: Path, dst_dir: Path, prefix: str):
             shutil.copy2(meta, dst_dir / meta.name)
 
 
-def make_virtual_casing_testdata(dst_dir: Path):
+def make_virtual_casing_testdata(dst_dir: Path, mode: str):
     import virtual_casing as vc
 
     nfp = 1
@@ -39,18 +39,23 @@ def make_virtual_casing_testdata(dst_dir: Path):
     vcasing = vc.VirtualCasing()
     vcasing.setup(digits, nfp, half_period, nt, npol, X, src_nt, src_np, trg_nt, trg_np)
 
-    # On-surface
-    _ = vcasing.compute_external_B(Btotal)
-
     # Off-surface, 3 target points
     Xt = [2.0, 2.1, 2.2, 0.0, 0.1, 0.2, 0.0, 0.0, 0.0]
-    _ = vcasing.compute_external_B_offsurf(Btotal, Xt, -1, -1)
 
-    # GradB
-    _ = vcasing.compute_external_gradB(Btotal)
+    if mode == "ext":
+        _ = vcasing.compute_external_B(Btotal)
+        _ = vcasing.compute_external_gradB(Btotal)
+        _ = vcasing.compute_external_B_offsurf(Btotal, Xt, -1, -1)
+        _ = vcasing.compute_external_gradB_offsurf(Btotal, Xt, -1, -1)
+    elif mode == "int":
+        _ = vcasing.compute_internal_B(Btotal)
+        _ = vcasing.compute_internal_gradB(Btotal)
+        _ = vcasing.compute_internal_B_offsurf(Btotal, Xt, -1, -1)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
 
 
-def make_simsopt_vmec_case(dst_dir: Path):
+def make_simsopt_vmec_case(dst_dir: Path, mode: str):
     try:
         from simsopt.mhd import VirtualCasing, Vmec
     except Exception:
@@ -103,8 +108,14 @@ def make_simsopt_vmec_case(dst_dir: Path):
         trgt_nphi,
         trgt_ntheta,
     )
-    _ = vcasing.compute_external_B(B1d)
-    _ = vcasing.compute_external_gradB(B1d)
+    if mode == "ext":
+        _ = vcasing.compute_external_B(B1d)
+        _ = vcasing.compute_external_gradB(B1d)
+    elif mode == "int":
+        _ = vcasing.compute_internal_B(B1d)
+        _ = vcasing.compute_internal_gradB(B1d)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
 
 
 def main():
@@ -116,12 +127,20 @@ def main():
         os.environ["VC_DUMP_DIR"] = str(tmpdir)
 
         os.environ["VC_DUMP_PREFIX"] = "case_vc"
-        make_virtual_casing_testdata(dst_dir)
+        make_virtual_casing_testdata(dst_dir, mode="ext")
         _copy_prefix(tmpdir, dst_dir, "case_vc")
 
+        os.environ["VC_DUMP_PREFIX"] = "case_vc_int"
+        make_virtual_casing_testdata(dst_dir, mode="int")
+        _copy_prefix(tmpdir, dst_dir, "case_vc_int")
+
         os.environ["VC_DUMP_PREFIX"] = "case_simsopt"
-        make_simsopt_vmec_case(dst_dir)
+        make_simsopt_vmec_case(dst_dir, mode="ext")
         _copy_prefix(tmpdir, dst_dir, "case_simsopt")
+
+        os.environ["VC_DUMP_PREFIX"] = "case_simsopt_int"
+        make_simsopt_vmec_case(dst_dir, mode="int")
+        _copy_prefix(tmpdir, dst_dir, "case_simsopt_int")
 
     print(f"Parity dumps written to {dst_dir}")
 

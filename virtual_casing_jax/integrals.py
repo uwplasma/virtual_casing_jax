@@ -302,13 +302,9 @@ def computeB_offsurface_baseline(
     _, area_elem = surf_normal_area_elem(dX, X_src)
 
     sign = 1.0 if ext else -1.0
-    gradG = laplace_fxd_u_eval(X_src, Xt, BdotN * sign, area_elem, chunk_size=chunk_size)
-    bs = biotsavart_fx_u_eval(X_src, Xt, J * sign, area_elem, chunk_size=chunk_size)
-
-    # For external fields, B = gradG[BdotN] - BiotSavart[J]
-    if ext:
-        return gradG - bs
-    return gradG + bs
+    gradG = laplace_fxd_u_eval(X_src, Xt, BdotN, area_elem, chunk_size=chunk_size)
+    bs = biotsavart_fx_u_eval(X_src, Xt, J, area_elem, chunk_size=chunk_size)
+    return sign * (gradG - bs)
 
 
 def computeB_offsurface_adaptive(
@@ -323,6 +319,35 @@ def computeB_offsurface_adaptive(
     chunk_size: int = 1024,
 ):
     """Adaptive off-surface evaluation matching ExtVacuumField logic."""
+    X_src, BdotN, J, area_elem = _offsurface_adapt_grid(
+        X_src,
+        BdotN,
+        J,
+        Xt,
+        digits=digits,
+        max_Nt=max_Nt,
+        max_Np=max_Np,
+        chunk_size=chunk_size,
+    )
+
+    sign = 1.0 if ext else -1.0
+    gradG = laplace_fxd_u_eval(X_src, Xt, BdotN, area_elem, chunk_size=chunk_size)
+    bs = biotsavart_fx_u_eval(X_src, Xt, J, area_elem, chunk_size=chunk_size)
+    return sign * (gradG - bs)
+
+
+def _offsurface_adapt_grid(
+    X_src,
+    BdotN,
+    J,
+    Xt,
+    *,
+    digits: int = 5,
+    max_Nt: int = -1,
+    max_Np: int = -1,
+    chunk_size: int = 1024,
+):
+    """Upsample source grid until the double-layer self-test meets tolerance."""
     X_src = jnp.asarray(X_src)
     BdotN = jnp.asarray(BdotN)
     J = jnp.asarray(J)
@@ -349,7 +374,7 @@ def computeB_offsurface_adaptive(
         err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
 
         if err <= tol:
-            break
+            return X_src, BdotN, J, area_elem
 
         nt2 = nt * 2
         np2 = npol * 2
@@ -358,22 +383,12 @@ def computeB_offsurface_adaptive(
         if max_Np > 0:
             np2 = min(np2, max_Np)
         if nt2 == nt and np2 == npol:
-            break
+            return X_src, BdotN, J, area_elem
 
         X_src = upsample(X_src, nt, npol, nt2, np2)
         BdotN = upsample(BdotN[None, ...], nt, npol, nt2, np2)[0]
         J = upsample(J, nt, npol, nt2, np2)
         nt, npol = nt2, np2
-
-    return computeB_offsurface_baseline(
-        X_src,
-        BdotN,
-        J,
-        Xt,
-        upsample_factor=1,
-        chunk_size=chunk_size,
-        ext=ext,
-    )
 
 
 def _surface_cond(dX, nt: int, npol: int):
