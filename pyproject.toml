@@ -24,3 +24,8 @@ packages = ["virtual_casing_jax"]
 
 [tool.setuptools.package-data]
 virtual_casing_jax = ["geom/*.npz"]
+
+[tool.pytest.ini_options]
+markers = [
+  "large: large parity datasets (longer runtime)",
+]

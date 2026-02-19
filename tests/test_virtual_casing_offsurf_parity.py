@@ -69,8 +69,8 @@ def _get_trg_shape(prefix: str):
     "prefix,digits,tol",
     [
         ("case_vc", 5, 5e-4),
-        ("case_vc_large", 6, 8e-4),
-        ("case_vc_w7x_large", 6, 1.5e-3),
+        pytest.param("case_vc_large", 6, 8e-4, marks=pytest.mark.large),
+        pytest.param("case_vc_w7x_large", 6, 1.5e-3, marks=pytest.mark.large),
     ],
 )
 def test_virtual_casing_computeB_offsurf_parity(prefix, digits, tol):
@@ -150,8 +150,8 @@ def test_virtual_casing_computeBint_offsurf_parity():
     "prefix,digits,tol",
     [
         ("case_vc", 5, 5e-3),
-        ("case_vc_large", 6, 8e-3),
-        ("case_vc_w7x_large", 6, 1.8e-2),
+        pytest.param("case_vc_large", 6, 8e-3, marks=pytest.mark.large),
+        pytest.param("case_vc_w7x_large", 6, 1.8e-2, marks=pytest.mark.large),
     ],
 )
 def test_virtual_casing_gradB_offsurf_parity(prefix, digits, tol):

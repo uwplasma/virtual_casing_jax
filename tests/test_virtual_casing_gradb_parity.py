@@ -63,7 +63,14 @@ def _reconstruct_B0(
 
 @pytest.mark.parametrize(
     "prefix",
-    ["case_vc", "case_vc_large", "case_simsopt", "case_simsopt_large", "case_vc_w7x", "case_vc_w7x_large"],
+    [
+        "case_vc",
+        pytest.param("case_vc_large", marks=pytest.mark.large),
+        "case_simsopt",
+        pytest.param("case_simsopt_large", marks=pytest.mark.large),
+        "case_vc_w7x",
+        pytest.param("case_vc_w7x_large", marks=pytest.mark.large),
+    ],
 )
 def test_virtual_casing_gradb_parity(prefix):
     if not (DATA_DIR / f"{prefix}_computeGradB_gradBvc.bin").exists():

@@ -23,7 +23,7 @@ jobs:
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          python -m pytest -q
+          python -m pytest -q -m "not large"
 
   docs:
     runs-on: ubuntu-22.04

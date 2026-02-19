@@ -990,12 +990,8 @@ def laplace_fxd_u_eval_singular(
     dX_flat = dX_src.reshape((6, -1))
     dens_flat = density.reshape(-1)
 
-    def gather(values):
-        return jax.vmap(lambda idx: values[:, idx])(patch_idx)
-
-    G = gather(X_flat)  # (Ntrg, 3, Ngrid)
-    Gg = gather(dX_flat)  # (Ntrg, 6, Ngrid)
-    GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
+    def gather(values, idx):
+        return jax.vmap(lambda ii: values[:, ii])(idx)
 
     if orient is None:
         orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
@@ -1046,7 +1042,34 @@ def laplace_fxd_u_eval_singular(
 
     Trg_flat = X_trg.reshape((3, -1)).T
     corr_fn = jax.checkpoint(corr_one) if remat else corr_one
-    corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
+
+    if target_chunk_size is None or target_chunk_size <= 0:
+        G = gather(X_flat, patch_idx)  # (Ntrg, 3, Ngrid)
+        Gg = gather(dX_flat, patch_idx)  # (Ntrg, 6, Ngrid)
+        GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
+        corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
+    else:
+        ntrg = Trg_flat.shape[0]
+        pad = (-ntrg) % target_chunk_size
+        if pad:
+            patch_idx = jnp.pad(patch_idx, ((0, pad), (0, 0)))
+            Trg_flat = jnp.pad(Trg_flat, ((0, pad), (0, 0)))
+        ntrg_pad = Trg_flat.shape[0]
+        n_chunks = ntrg_pad // target_chunk_size
+        patch_chunks = patch_idx.reshape((n_chunks, target_chunk_size, -1))
+        trg_chunks = Trg_flat.reshape((n_chunks, target_chunk_size, 3))
+
+        def scan_fn(carry, xs):
+            pidx_chunk, trg_chunk = xs
+            G = gather(X_flat, pidx_chunk)
+            Gg = gather(dX_flat, pidx_chunk)
+            GF = jax.vmap(lambda idx: dens_flat[idx])(pidx_chunk)
+            corr_chunk = jax.vmap(corr_fn)(G, Gg, GF, trg_chunk)
+            return carry, corr_chunk
+
+        _, corr_chunks = jax.lax.scan(scan_fn, None, (patch_chunks, trg_chunks))
+        corr = corr_chunks.reshape((ntrg_pad, -1))[:ntrg]
+
     corr = corr.T.reshape((3, trg_nt, trg_np))
 
     base = base.reshape((3, trg_nt, trg_np))
@@ -1162,12 +1185,8 @@ def laplace_dx_u_eval_singular(
     dX_flat = dX_src.reshape((6, -1))
     dens_flat = density.reshape(-1)
 
-    def gather(values):
-        return jax.vmap(lambda idx: values[:, idx])(patch_idx)
-
-    G = gather(X_flat)  # (Ntrg, 3, Ngrid)
-    Gg = gather(dX_flat)  # (Ntrg, 6, Ngrid)
-    GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
+    def gather(values, idx):
+        return jax.vmap(lambda ii: values[:, ii])(idx)
 
     if orient is None:
         orient = float(normal_orientation(X_src, normal))
@@ -1218,7 +1237,34 @@ def laplace_dx_u_eval_singular(
 
     Trg_flat = X_trg.reshape((3, -1)).T
     corr_fn = jax.checkpoint(corr_one) if remat else corr_one
-    corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
+
+    if target_chunk_size is None or target_chunk_size <= 0:
+        G = gather(X_flat, patch_idx)
+        Gg = gather(dX_flat, patch_idx)
+        GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)
+        corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
+    else:
+        ntrg = Trg_flat.shape[0]
+        pad = (-ntrg) % target_chunk_size
+        if pad:
+            patch_idx = jnp.pad(patch_idx, ((0, pad), (0, 0)))
+            Trg_flat = jnp.pad(Trg_flat, ((0, pad), (0, 0)))
+        ntrg_pad = Trg_flat.shape[0]
+        n_chunks = ntrg_pad // target_chunk_size
+        patch_chunks = patch_idx.reshape((n_chunks, target_chunk_size, -1))
+        trg_chunks = Trg_flat.reshape((n_chunks, target_chunk_size, 3))
+
+        def scan_fn(carry, xs):
+            pidx_chunk, trg_chunk = xs
+            G = gather(X_flat, pidx_chunk)
+            Gg = gather(dX_flat, pidx_chunk)
+            GF = jax.vmap(lambda idx: dens_flat[idx])(pidx_chunk)
+            corr_chunk = jax.vmap(corr_fn)(G, Gg, GF, trg_chunk)
+            return carry, corr_chunk
+
+        _, corr_chunks = jax.lax.scan(scan_fn, None, (patch_chunks, trg_chunks))
+        corr = corr_chunks.reshape((ntrg_pad,))[:ntrg]
+
     corr = corr.reshape((1, trg_nt, trg_np))
 
     base = base.reshape((1, trg_nt, trg_np))
@@ -1290,12 +1336,8 @@ def laplace_fxd2_u_eval_singular(
     dX_flat = dX_src.reshape((6, -1))
     dens_flat = density.reshape(-1)
 
-    def gather(values):
-        return jax.vmap(lambda idx: values[:, idx])(patch_idx)
-
-    G = gather(X_flat)  # (Ntrg, 3, Ngrid)
-    Gg = gather(dX_flat)  # (Ntrg, 6, Ngrid)
-    GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
+    def gather(values, idx):
+        return jax.vmap(lambda ii: values[:, ii])(idx)
 
     if orient is None:
         orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
@@ -1361,7 +1403,34 @@ def laplace_fxd2_u_eval_singular(
 
     Trg_flat = X_trg.reshape((3, -1)).T
     corr_fn = jax.checkpoint(corr_one) if remat else corr_one
-    corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
+
+    if target_chunk_size is None or target_chunk_size <= 0:
+        G = gather(X_flat, patch_idx)
+        Gg = gather(dX_flat, patch_idx)
+        GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)
+        corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
+    else:
+        ntrg = Trg_flat.shape[0]
+        pad = (-ntrg) % target_chunk_size
+        if pad:
+            patch_idx = jnp.pad(patch_idx, ((0, pad), (0, 0)))
+            Trg_flat = jnp.pad(Trg_flat, ((0, pad), (0, 0)))
+        ntrg_pad = Trg_flat.shape[0]
+        n_chunks = ntrg_pad // target_chunk_size
+        patch_chunks = patch_idx.reshape((n_chunks, target_chunk_size, -1))
+        trg_chunks = Trg_flat.reshape((n_chunks, target_chunk_size, 3))
+
+        def scan_fn(carry, xs):
+            pidx_chunk, trg_chunk = xs
+            G = gather(X_flat, pidx_chunk)
+            Gg = gather(dX_flat, pidx_chunk)
+            GF = jax.vmap(lambda idx: dens_flat[idx])(pidx_chunk)
+            corr_chunk = jax.vmap(corr_fn)(G, Gg, GF, trg_chunk)
+            return carry, corr_chunk
+
+        _, corr_chunks = jax.lax.scan(scan_fn, None, (patch_chunks, trg_chunks))
+        corr = corr_chunks.reshape((ntrg_pad, -1))[:ntrg]
+
     corr = corr.T.reshape((9, trg_nt, trg_np))
 
     base = base.reshape((9, trg_nt, trg_np))
