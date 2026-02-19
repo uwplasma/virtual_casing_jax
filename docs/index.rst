@@ -12,6 +12,7 @@ JAX implementation of the virtual casing principle with high-order singular quad
    numerics
    implementation
    performance
+   using_simsopt
    validation
    parity_datasets
    api

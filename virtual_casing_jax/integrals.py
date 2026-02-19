@@ -419,10 +419,13 @@ def laplace_fxd_u_eval_singular(
     trg_nt: int,
     trg_np: int,
     nfp: int,
+    X_trg=None,
     digits: int = 5,
     patch_dim0: int | None = None,
     rad_dim: int | None = None,
     chunk_size: int = 1024,
+    patch_idx=None,
+    orient: float | None = None,
 ):
     """Evaluate Laplace FxdU with singular correction on surface targets."""
     X_src = jnp.asarray(X_src)
@@ -432,12 +435,15 @@ def laplace_fxd_u_eval_singular(
     nt = X_src.shape[1]
     npol = X_src.shape[2]
 
-    X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
+    if X_trg is None:
+        X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
+    else:
+        X_trg = jnp.asarray(X_trg)
     base = laplace_fxd_u_eval(X_src, X_trg, density, surf_normal_area_elem(dX_src, X_src)[1], chunk_size=chunk_size)
 
-    cond = _surface_cond(dX_src, nt, npol)
-    cond_val = float(cond)
     if patch_dim0 is None:
+        cond = _surface_cond(dX_src, nt, npol)
+        cond_val = float(cond)
         patch_dim0 = select_patch_dim(digits, cond_val)
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
@@ -454,7 +460,8 @@ def laplace_fxd_u_eval_singular(
     t_flat = tt.reshape(-1)
     p_flat = pp.reshape(-1)
 
-    patch_idx = _build_patch_indices(t_flat, p_flat, nt, npol, patch_dim0)
+    if patch_idx is None:
+        patch_idx = _build_patch_indices(t_flat, p_flat, nt, npol, patch_dim0)
     X_flat = X_src.reshape((3, -1))
     dX_flat = dX_src.reshape((6, -1))
     dens_flat = density.reshape(-1)
@@ -466,7 +473,8 @@ def laplace_fxd_u_eval_singular(
     Gg = gather(dX_flat)  # (Ntrg, 6, Ngrid)
     GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
 
-    orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
+    if orient is None:
+        orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
     invNt = 1.0 / nt
     invNp = 1.0 / npol
 
@@ -527,10 +535,13 @@ def laplace_fxd_u_eval_vec_singular(
     trg_nt: int,
     trg_np: int,
     nfp: int,
+    X_trg=None,
     digits: int = 5,
     patch_dim0: int | None = None,
     rad_dim: int | None = None,
     chunk_size: int = 1024,
+    patch_idx=None,
+    orient: float | None = None,
 ):
     density_vec = jnp.asarray(density_vec)
     return jax.vmap(
@@ -541,10 +552,13 @@ def laplace_fxd_u_eval_vec_singular(
             trg_nt,
             trg_np,
             nfp,
+            X_trg=X_trg,
             digits=digits,
             patch_dim0=patch_dim0,
             rad_dim=rad_dim,
             chunk_size=chunk_size,
+            patch_idx=patch_idx,
+            orient=orient,
         ),
         in_axes=0,
         out_axes=0,
@@ -558,10 +572,13 @@ def laplace_dx_u_eval_singular(
     trg_nt: int,
     trg_np: int,
     nfp: int,
+    X_trg=None,
     digits: int = 5,
     patch_dim0: int | None = None,
     rad_dim: int | None = None,
     chunk_size: int = 1024,
+    patch_idx=None,
+    orient: float | None = None,
 ):
     """Evaluate Laplace DxU with singular correction on surface targets."""
     X_src = jnp.asarray(X_src)
@@ -572,7 +589,10 @@ def laplace_dx_u_eval_singular(
     npol = X_src.shape[2]
 
     normal, area_elem = surf_normal_area_elem(dX_src, X_src)
-    X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
+    if X_trg is None:
+        X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
+    else:
+        X_trg = jnp.asarray(X_trg)
     base = laplace_dx_u_eval(
         X_src,
         normal,
@@ -582,9 +602,9 @@ def laplace_dx_u_eval_singular(
         chunk_size=chunk_size,
     )
 
-    cond = _surface_cond(dX_src, nt, npol)
-    cond_val = float(cond)
     if patch_dim0 is None:
+        cond = _surface_cond(dX_src, nt, npol)
+        cond_val = float(cond)
         patch_dim0 = select_patch_dim(digits, cond_val)
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
@@ -601,7 +621,8 @@ def laplace_dx_u_eval_singular(
     t_flat = tt.reshape(-1)
     p_flat = pp.reshape(-1)
 
-    patch_idx = _build_patch_indices(t_flat, p_flat, nt, npol, patch_dim0)
+    if patch_idx is None:
+        patch_idx = _build_patch_indices(t_flat, p_flat, nt, npol, patch_dim0)
     X_flat = X_src.reshape((3, -1))
     dX_flat = dX_src.reshape((6, -1))
     dens_flat = density.reshape(-1)
@@ -613,7 +634,8 @@ def laplace_dx_u_eval_singular(
     Gg = gather(dX_flat)  # (Ntrg, 6, Ngrid)
     GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
 
-    orient = float(normal_orientation(X_src, normal))
+    if orient is None:
+        orient = float(normal_orientation(X_src, normal))
     invNt = 1.0 / nt
     invNp = 1.0 / npol
 
@@ -674,11 +696,14 @@ def laplace_fxd2_u_eval_singular(
     trg_nt: int,
     trg_np: int,
     nfp: int,
+    X_trg=None,
     digits: int = 5,
     patch_dim0: int | None = None,
     rad_dim: int | None = None,
     hedgehog_order: int = 8,
     chunk_size: int = 1024,
+    patch_idx=None,
+    orient: float | None = None,
 ):
     """Evaluate Laplace Fxd2U with singular correction (Hedgehog)."""
     X_src = jnp.asarray(X_src)
@@ -688,7 +713,10 @@ def laplace_fxd2_u_eval_singular(
     nt = X_src.shape[1]
     npol = X_src.shape[2]
 
-    X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
+    if X_trg is None:
+        X_trg = field_period_target_coords(X_src, trg_nt, trg_np, nfp)
+    else:
+        X_trg = jnp.asarray(X_trg)
     base = laplace_fxd2_u_eval(
         X_src,
         X_trg,
@@ -697,9 +725,9 @@ def laplace_fxd2_u_eval_singular(
         chunk_size=chunk_size,
     )
 
-    cond = _surface_cond(dX_src, nt, npol)
-    cond_val = float(cond)
     if patch_dim0 is None:
+        cond = _surface_cond(dX_src, nt, npol)
+        cond_val = float(cond)
         patch_dim0 = select_patch_dim(digits, cond_val)
     if rad_dim is None:
         rad_dim = int(patch_dim0 * 1.6)
@@ -716,7 +744,8 @@ def laplace_fxd2_u_eval_singular(
     t_flat = tt.reshape(-1)
     p_flat = pp.reshape(-1)
 
-    patch_idx = _build_patch_indices(t_flat, p_flat, nt, npol, patch_dim0)
+    if patch_idx is None:
+        patch_idx = _build_patch_indices(t_flat, p_flat, nt, npol, patch_dim0)
     X_flat = X_src.reshape((3, -1))
     dX_flat = dX_src.reshape((6, -1))
     dens_flat = density.reshape(-1)
@@ -728,7 +757,8 @@ def laplace_fxd2_u_eval_singular(
     Gg = gather(dX_flat)  # (Ntrg, 6, Ngrid)
     GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)  # (Ntrg, Ngrid)
 
-    orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
+    if orient is None:
+        orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
     invNt = 1.0 / nt
     invNp = 1.0 / npol
 
@@ -804,11 +834,14 @@ def laplace_fxd2_u_eval_vec_singular(
     trg_nt: int,
     trg_np: int,
     nfp: int,
+    X_trg=None,
     digits: int = 5,
     patch_dim0: int | None = None,
     rad_dim: int | None = None,
     hedgehog_order: int = 8,
     chunk_size: int = 1024,
+    patch_idx=None,
+    orient: float | None = None,
 ):
     density_vec = jnp.asarray(density_vec)
     return jax.vmap(
@@ -819,11 +852,14 @@ def laplace_fxd2_u_eval_vec_singular(
             trg_nt,
             trg_np,
             nfp,
+            X_trg=X_trg,
             digits=digits,
             patch_dim0=patch_dim0,
             rad_dim=rad_dim,
             hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
+            patch_idx=patch_idx,
+            orient=orient,
         ),
         in_axes=0,
         out_axes=0,

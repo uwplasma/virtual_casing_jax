@@ -38,6 +38,8 @@ Test Categories
      the internal test case and SIMSOPT VMEC case.
    - ``VirtualCasingJAX.compute_external_B`` matches reference on the
      internal test case and SIMSOPT VMEC case.
+   - Autodiff of ``compute_external_B_autodiff`` matches the C++
+     ``ComputeGradB`` outputs on both parity cases.
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.
    - Off-surface ``ComputeBOffSurf`` baseline is validated using
      upsampled direct-sum quadrature.

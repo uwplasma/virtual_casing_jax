@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+import jax
 import jax.numpy as jnp
 
 from .surface_ops import (
@@ -14,6 +15,7 @@ from .surface_ops import (
     surf_normal_area_elem,
     dot_prod,
     cross_prod,
+    normal_orientation,
 )
 from .integrals import (
     laplace_fxd_u_eval_singular,
@@ -21,6 +23,9 @@ from .integrals import (
     laplace_fxd2_u_eval_singular,
     laplace_fxd2_u_eval_vec_singular,
     laplace_dx_u_eval_singular,
+    _build_patch_indices,
+    _surface_cond,
+    select_patch_dim,
 )
 
 
@@ -31,6 +36,8 @@ class QuadSetup:
     quad_coord: jnp.ndarray
     dX: jnp.ndarray
     normal: jnp.ndarray
+    orient: float
+    patch_idx_cache: dict[int, jnp.ndarray] = field(default_factory=dict)
 
 
 class VirtualCasingJAX:
@@ -40,6 +47,7 @@ class VirtualCasingJAX:
         self._setup = False
         self._grad_setup: QuadSetup | None = None
         self._b_setup: QuadSetup | None = None
+        self._jit_cache: dict[tuple, callable] = {}
 
     def setup(
         self,
@@ -187,13 +195,35 @@ class VirtualCasingJAX:
         )
         dX = grad2d(quad_coord, quad_nt, quad_np)
         normal, _ = surf_normal_area_elem(dX, quad_coord)
+        orient = float(normal_orientation(quad_coord, normal))
         return QuadSetup(
             quad_nt=quad_nt,
             quad_np=quad_np,
             quad_coord=quad_coord,
             dX=dX,
             normal=normal,
+            orient=orient,
         )
+
+    def _get_patch_idx(self, setup: QuadSetup, digits: int):
+        cond = float(_surface_cond(setup.dX, setup.quad_nt, setup.quad_np))
+        patch_dim0 = select_patch_dim(digits, cond)
+        patch_idx = setup.patch_idx_cache.get(patch_dim0)
+        if patch_idx is None:
+            skip_nt = setup.quad_nt // (self.nfp_eff * self.trg_nt)
+            skip_np = setup.quad_np // self.trg_np
+            t_idx = jnp.arange(self.trg_nt) * skip_nt
+            p_idx = jnp.arange(self.trg_np) * skip_np
+            tt, pp = jnp.meshgrid(t_idx, p_idx, indexing="ij")
+            patch_idx = _build_patch_indices(
+                tt.reshape(-1),
+                pp.reshape(-1),
+                setup.quad_nt,
+                setup.quad_np,
+                patch_dim0,
+            )
+            setup.patch_idx_cache[patch_dim0] = patch_idx
+        return patch_dim0, patch_idx
 
     def _ensure_grad_setup(self, quad_nt: int | None, quad_np: int | None, digits: int):
         if not self._setup:
@@ -240,6 +270,8 @@ class VirtualCasingJAX:
         digits: int | None = None,
         hedgehog_order: int = 8,
         chunk_size: int = 1024,
+        patch_dim0: int | None = None,
+        patch_idx=None,
     ):
         """Compute GradBext from total B on the source grid."""
         if not self._setup:
@@ -277,6 +309,9 @@ class VirtualCasingJAX:
         J = cross_prod(self._grad_setup.normal, B_quad)
         BdotN = dot_prod(B_quad, self._grad_setup.normal)
 
+        if patch_dim0 is None or patch_idx is None:
+            patch_dim0, patch_idx = self._get_patch_idx(self._grad_setup, digits)
+
         gradG_J = laplace_fxd2_u_eval_vec_singular(
             self._grad_setup.quad_coord,
             self._grad_setup.dX,
@@ -285,8 +320,11 @@ class VirtualCasingJAX:
             self.trg_np,
             self.nfp_eff,
             digits=digits,
+            patch_dim0=patch_dim0,
             hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
+            patch_idx=patch_idx,
+            orient=self._grad_setup.orient,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, self.trg_nt, self.trg_np))
 
@@ -298,8 +336,11 @@ class VirtualCasingJAX:
             self.trg_np,
             self.nfp_eff,
             digits=digits,
+            patch_dim0=patch_dim0,
             hedgehog_order=hedgehog_order,
             chunk_size=chunk_size,
+            patch_idx=patch_idx,
+            orient=self._grad_setup.orient,
         )
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape(
             (3, 3, self.trg_nt, self.trg_np)
@@ -314,14 +355,41 @@ class VirtualCasingJAX:
         gradBvc = gradBvc + gradgradG_BdotN
         return gradBvc
 
+    def compute_external_gradB_jit(self, B0, **kwargs):
+        """JIT-compiled version of compute_external_gradB."""
+        if "X_trg" in kwargs and kwargs["X_trg"] is not None:
+            raise ValueError("compute_external_gradB_jit does not support X_trg")
+        digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
+        quad_nt = kwargs.get("quad_nt")
+        quad_np = kwargs.get("quad_np")
+        self._ensure_grad_setup(quad_nt, quad_np, digits)
+        patch_dim0, patch_idx = self._get_patch_idx(self._grad_setup, digits)
+
+        key = ("gradB", digits, quad_nt, quad_np, kwargs.get("hedgehog_order", 8), kwargs.get("chunk_size", 1024))
+        fn = self._jit_cache.get(key)
+        if fn is None:
+            fn = jax.jit(
+                lambda B: self.compute_external_gradB(
+                    B,
+                    patch_dim0=patch_dim0,
+                    patch_idx=patch_idx,
+                    **kwargs,
+                )
+            )
+            self._jit_cache[key] = fn
+        return fn(B0)
+
     def compute_external_B(
         self,
         B0,
         *,
+        X_trg=None,
         quad_nt: int | None = None,
         quad_np: int | None = None,
         digits: int | None = None,
         chunk_size: int = 1024,
+        patch_dim0: int | None = None,
+        patch_idx=None,
     ):
         """Compute Bext from total B on the source grid."""
         if not self._setup:
@@ -359,6 +427,9 @@ class VirtualCasingJAX:
         J = cross_prod(self._b_setup.normal, B_quad)
         BdotN = dot_prod(B_quad, self._b_setup.normal)
 
+        if patch_dim0 is None or patch_idx is None:
+            patch_dim0, patch_idx = self._get_patch_idx(self._b_setup, digits)
+
         gradG_J = laplace_fxd_u_eval_vec_singular(
             self._b_setup.quad_coord,
             self._b_setup.dX,
@@ -366,8 +437,12 @@ class VirtualCasingJAX:
             self.trg_nt,
             self.trg_np,
             self.nfp_eff,
+            X_trg=X_trg,
             digits=digits,
+            patch_dim0=patch_dim0,
             chunk_size=chunk_size,
+            patch_idx=patch_idx,
+            orient=self._b_setup.orient,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, self.trg_nt, self.trg_np))
 
@@ -378,8 +453,12 @@ class VirtualCasingJAX:
             self.trg_nt,
             self.trg_np,
             self.nfp_eff,
+            X_trg=X_trg,
             digits=digits,
+            patch_dim0=patch_dim0,
             chunk_size=chunk_size,
+            patch_idx=patch_idx,
+            orient=self._b_setup.orient,
         )
         gradG_BdotN = jnp.asarray(gradG_BdotN).reshape((3, self.trg_nt, self.trg_np))
 
@@ -400,3 +479,92 @@ class VirtualCasingJAX:
 
         Bvc = Bvc + gradG_BdotN + 0.5 * B_on
         return Bvc
+
+    def compute_external_B_jit(self, B0, **kwargs):
+        """JIT-compiled version of compute_external_B."""
+        if "X_trg" in kwargs and kwargs["X_trg"] is not None:
+            raise ValueError("compute_external_B_jit does not support X_trg; jit externally if needed")
+        digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
+        quad_nt = kwargs.get("quad_nt")
+        quad_np = kwargs.get("quad_np")
+        self._ensure_b_setup(quad_nt, quad_np, digits)
+        patch_dim0, patch_idx = self._get_patch_idx(self._b_setup, digits)
+
+        key = ("B", digits, quad_nt, quad_np, kwargs.get("chunk_size", 1024))
+        fn = self._jit_cache.get(key)
+        if fn is None:
+            fn = jax.jit(
+                lambda B: self.compute_external_B(
+                    B,
+                    patch_dim0=patch_dim0,
+                    patch_idx=patch_idx,
+                    **kwargs,
+                )
+            )
+            self._jit_cache[key] = fn
+        return fn(B0)
+
+    def compute_external_B_batch(self, B0_batch, *, X_trg=None, **kwargs):
+        """Vectorized compute_external_B over a batch dimension."""
+        if X_trg is None:
+            return jax.vmap(lambda b: self.compute_external_B(b, **kwargs), in_axes=0)(B0_batch)
+        return jax.vmap(lambda b, xt: self.compute_external_B(b, X_trg=xt, **kwargs), in_axes=(0, 0))(B0_batch, X_trg)
+
+    def compute_external_gradB_batch(self, B0_batch, **kwargs):
+        """Vectorized compute_external_gradB over a batch dimension."""
+        return jax.vmap(lambda b: self.compute_external_gradB(b, **kwargs), in_axes=0)(B0_batch)
+
+    def compute_external_B_autodiff(
+        self,
+        B0,
+        *,
+        X_trg,
+        quad_nt: int | None = None,
+        quad_np: int | None = None,
+        digits: int | None = None,
+        chunk_size: int = 1024,
+        hedgehog_order: int = 8,
+    ):
+        """Compute Bext with a custom JVP that matches ComputeGradB on-surface."""
+        if X_trg is None:
+            raise ValueError("X_trg must be provided for autodiff-enabled evaluation")
+
+        B0 = jnp.asarray(B0)
+        X_trg = jnp.asarray(X_trg)
+        digits = self.digits if digits is None else int(digits)
+
+        @jax.custom_jvp
+        def _eval(xtrg):
+            return self.compute_external_B(
+                B0,
+                X_trg=xtrg,
+                quad_nt=quad_nt,
+                quad_np=quad_np,
+                digits=digits,
+                chunk_size=chunk_size,
+            )
+
+        @_eval.defjvp
+        def _eval_jvp(primals, tangents):
+            (xtrg,) = primals
+            (dxtrg,) = tangents
+            b = self.compute_external_B(
+                B0,
+                X_trg=xtrg,
+                quad_nt=quad_nt,
+                quad_np=quad_np,
+                digits=digits,
+                chunk_size=chunk_size,
+            )
+            gradb = self.compute_external_gradB(
+                B0,
+                quad_nt=quad_nt,
+                quad_np=quad_np,
+                digits=digits,
+                hedgehog_order=hedgehog_order,
+                chunk_size=chunk_size,
+            )
+            db = jnp.einsum("k i t p, i t p -> k t p", gradb, dxtrg)
+            return b, db
+
+        return _eval(X_trg)

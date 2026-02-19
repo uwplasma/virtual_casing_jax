@@ -166,8 +166,10 @@ def upsample(X0, nt0: int, np0: int, nt1: int, np1: int):
 
 def resample(X0, nt0: int, np0: int, nt1: int, np1: int):
     """Resample using upsample + decimation (BIEST SurfaceOp::Resample)."""
-    skip_tor = int(jnp.ceil(nt0 / float(nt1)))
-    skip_pol = int(jnp.ceil(np0 / float(np1)))
+    import math
+
+    skip_tor = int(math.ceil(nt0 / float(nt1)))
+    skip_pol = int(math.ceil(np0 / float(np1)))
 
     X_up = upsample(X0, nt0, np0, nt1 * skip_tor, np1 * skip_pol)
     # Decimate

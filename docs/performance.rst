@@ -48,3 +48,46 @@ Tips and Tricks
 - For parity checks, use float64; for production, use mixed precision
   with float32 inputs.
   Enable ``jax_enable_x64`` in tests to match the reference C++ results.
+
+Performance Guide
+-----------------
+
+Chunk Size
+~~~~~~~~~~
+
+The ``chunk_size`` parameter controls the source tiling in direct
+quadrature. Larger chunks improve arithmetic intensity but increase
+peak memory. For parity tests, ``chunk_size=1024`` is a good balance.
+On GPUs, values in the 2k–8k range typically work well.
+
+JIT Caching
+~~~~~~~~~~~
+
+The high-level wrappers in ``VirtualCasingJAX`` expose JIT-compiled
+variants (``compute_external_B_jit`` and ``compute_external_gradB_jit``).
+These cache compiled functions keyed by argument settings. For repeated
+evaluations with fixed grid sizes, prefer the JIT variants to amortize
+compilation cost.
+
+Batching
+~~~~~~~~
+
+Use ``compute_external_B_batch`` or ``compute_external_gradB_batch`` when
+evaluating many fields in parallel (e.g., multiple VMEC surfaces or
+Monte Carlo samples). These functions use ``vmap`` to avoid Python loops.
+
+Precision Tradeoffs
+~~~~~~~~~~~~~~~~~~~
+
+Float64 is recommended for parity with the C++ backend. Mixed precision
+with float32 inputs can provide significant speedups, but requires
+relaxed tolerances in validation. Keep ``jax_enable_x64`` enabled in CI
+to maintain reference accuracy.
+
+Precompute Reuse
+~~~~~~~~~~~~~~~~
+
+The polar quadrature tables and interpolation weights are cached via
+``precompute_singular``. Patch index maps are cached per quadrature
+setup inside ``VirtualCasingJAX`` to avoid recomputing the patch gather
+indices on each call.
