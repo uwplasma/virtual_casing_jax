@@ -16,6 +16,8 @@ from .surface_ops import (
     cross_prod,
 )
 from .integrals import (
+    laplace_fxd_u_eval_singular,
+    laplace_fxd_u_eval_vec_singular,
     laplace_fxd2_u_eval_singular,
     laplace_fxd2_u_eval_vec_singular,
     laplace_dx_u_eval_singular,
@@ -23,7 +25,7 @@ from .integrals import (
 
 
 @dataclass
-class GradBSetup:
+class QuadSetup:
     quad_nt: int
     quad_np: int
     quad_coord: jnp.ndarray
@@ -32,11 +34,12 @@ class GradBSetup:
 
 
 class VirtualCasingJAX:
-    """JAX mirror of VirtualCasing focusing on GradB (external)."""
+    """JAX mirror of VirtualCasing for external field and GradB."""
 
     def __init__(self):
         self._setup = False
-        self._grad_setup: GradBSetup | None = None
+        self._grad_setup: QuadSetup | None = None
+        self._b_setup: QuadSetup | None = None
 
     def setup(
         self,
@@ -96,6 +99,7 @@ class VirtualCasingJAX:
         self.surface_coord = surface_coord
         self._setup = True
         self._grad_setup = None
+        self._b_setup = None
 
     def _select_quad_sizes(self, digits: int):
         surf_nt_full = int(self.surface_coord.shape[1])
@@ -171,6 +175,26 @@ class VirtualCasingJAX:
 
         return int(quad_nt), int(quad_np)
 
+    def _build_quad_setup(self, quad_nt: int, quad_np: int):
+        surf_nt_full = int(self.surface_coord.shape[1])
+        surf_np_full = int(self.surface_coord.shape[2])
+        quad_coord = resample(
+            self.surface_coord,
+            surf_nt_full,
+            surf_np_full,
+            quad_nt,
+            quad_np,
+        )
+        dX = grad2d(quad_coord, quad_nt, quad_np)
+        normal, _ = surf_normal_area_elem(dX, quad_coord)
+        return QuadSetup(
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+            quad_coord=quad_coord,
+            dX=dX,
+            normal=normal,
+        )
+
     def _ensure_grad_setup(self, quad_nt: int | None, quad_np: int | None, digits: int):
         if not self._setup:
             raise RuntimeError("VirtualCasingJAX.setup must be called before compute_external_gradB")
@@ -187,25 +211,25 @@ class VirtualCasingJAX:
         ):
             return
 
-        surf_nt_full = int(self.surface_coord.shape[1])
-        surf_np_full = int(self.surface_coord.shape[2])
-        quad_coord = resample(
-            self.surface_coord,
-            surf_nt_full,
-            surf_np_full,
-            quad_nt,
-            quad_np,
-        )
-        dX = grad2d(quad_coord, quad_nt, quad_np)
-        normal, _ = surf_normal_area_elem(dX, quad_coord)
+        self._grad_setup = self._build_quad_setup(quad_nt, quad_np)
 
-        self._grad_setup = GradBSetup(
-            quad_nt=quad_nt,
-            quad_np=quad_np,
-            quad_coord=quad_coord,
-            dX=dX,
-            normal=normal,
-        )
+    def _ensure_b_setup(self, quad_nt: int | None, quad_np: int | None, digits: int):
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before compute_external_B")
+
+        if quad_nt is None or quad_np is None:
+            quad_nt_sel, quad_np_sel = self._select_quad_sizes(digits)
+            quad_nt = quad_nt_sel
+            quad_np = quad_np_sel
+
+        if (
+            self._b_setup is not None
+            and self._b_setup.quad_nt == quad_nt
+            and self._b_setup.quad_np == quad_np
+        ):
+            return
+
+        self._b_setup = self._build_quad_setup(quad_nt, quad_np)
 
     def compute_external_gradB(
         self,
@@ -289,3 +313,90 @@ class VirtualCasingJAX:
 
         gradBvc = gradBvc + gradgradG_BdotN
         return gradBvc
+
+    def compute_external_B(
+        self,
+        B0,
+        *,
+        quad_nt: int | None = None,
+        quad_np: int | None = None,
+        digits: int | None = None,
+        chunk_size: int = 1024,
+    ):
+        """Compute Bext from total B on the source grid."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before compute_external_B")
+
+        digits = self.digits if digits is None else int(digits)
+        self._ensure_b_setup(quad_nt, quad_np, digits)
+        assert self._b_setup is not None
+
+        B0 = jnp.asarray(B0).reshape((3, self.src_nt, self.src_np))
+
+        dtheta = 0.0
+        if self.half_period:
+            dtheta = math.pi * (
+                1.0 / (self.nfp * self.trg_nt * 2) - 1.0 / (self.nfp * self.src_nt * 2)
+            )
+
+        B0_complete = complete_vec_field(
+            B0,
+            False,
+            self.half_period,
+            self.nfp,
+            self.src_nt,
+            self.src_np,
+            dtheta,
+        )
+        B_quad = resample(
+            B0_complete,
+            self.nfp_eff * self.src_nt,
+            self.src_np,
+            self._b_setup.quad_nt,
+            self._b_setup.quad_np,
+        )
+
+        J = cross_prod(self._b_setup.normal, B_quad)
+        BdotN = dot_prod(B_quad, self._b_setup.normal)
+
+        gradG_J = laplace_fxd_u_eval_vec_singular(
+            self._b_setup.quad_coord,
+            self._b_setup.dX,
+            J,
+            self.trg_nt,
+            self.trg_np,
+            self.nfp_eff,
+            digits=digits,
+            chunk_size=chunk_size,
+        )
+        gradG_J = jnp.asarray(gradG_J).reshape((3, 3, self.trg_nt, self.trg_np))
+
+        gradG_BdotN = laplace_fxd_u_eval_singular(
+            self._b_setup.quad_coord,
+            self._b_setup.dX,
+            BdotN,
+            self.trg_nt,
+            self.trg_np,
+            self.nfp_eff,
+            digits=digits,
+            chunk_size=chunk_size,
+        )
+        gradG_BdotN = jnp.asarray(gradG_BdotN).reshape((3, self.trg_nt, self.trg_np))
+
+        B_on_trg = resample(
+            B0_complete,
+            self.nfp_eff * self.src_nt,
+            self.src_np,
+            self.nfp_eff * self.trg_nt,
+            self.trg_np,
+        )
+        B_on = B_on_trg[:, : self.trg_nt, :]
+
+        Bvc = jnp.zeros((3, self.trg_nt, self.trg_np), dtype=gradG_J.dtype)
+        for k in range(3):
+            k1 = (k + 1) % 3
+            k2 = (k + 2) % 3
+            Bvc = Bvc.at[k].set(gradG_J[k1, k2] - gradG_J[k2, k1])
+
+        Bvc = Bvc + gradG_BdotN + 0.5 * B_on
+        return Bvc

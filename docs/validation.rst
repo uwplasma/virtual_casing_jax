@@ -36,6 +36,8 @@ Test Categories
      case.
    - ``VirtualCasingJAX.compute_external_gradB`` matches reference on
      the internal test case and SIMSOPT VMEC case.
+   - ``VirtualCasingJAX.compute_external_B`` matches reference on the
+     internal test case and SIMSOPT VMEC case.
    - ``B_external_normal`` matches reference for SIMSOPT and BIEST test cases.
    - Off-surface ``ComputeBOffSurf`` baseline is validated using
      upsampled direct-sum quadrature.
