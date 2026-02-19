@@ -7,6 +7,12 @@ Validation is performed against:
 - SIMSOPT virtual casing tests and benchmarks.
 - Analytical or semi-analytical test cases (e.g., axisymmetric surfaces).
 
+To keep these checks self-contained, the repository includes a small
+subset of SIMSOPT test assets under ``tests/test_files/`` (W7-X/QH
+VMEC outputs and BNORM data) plus the ``input.QH_finitebeta`` VMEC
+input under ``examples/inputs/``. These files are used only for
+validation and example runs.
+
 Test Categories
 ---------------
 

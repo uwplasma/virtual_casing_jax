@@ -19,6 +19,13 @@ mirrors ``simsopt.mhd.virtual_casing.VirtualCasing`` while using the
 JAX backend. Import it as ``from virtual_casing_jax import VirtualCasing``.
 See `docs/using_simsopt.rst` and the examples in `examples/` for full scripts.
 
+Bundled test data:
+To make the SIMSOPT-style examples and tests self-contained, the repo
+includes a small subset of SIMSOPT test assets under `tests/test_files/`
+and the VMEC input `examples/inputs/input.QH_finitebeta`. These files
+originated from the SIMSOPT repository ([SIMSOPT](https://github.com/hiddenSymmetries/simsopt))
+and are used only for validation and example runs.
+
 Docs
 ----
 

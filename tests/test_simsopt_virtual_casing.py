@@ -30,6 +30,7 @@ except Exception:  # pragma: no cover - optional
     Vmec = None
     HAVE_SIMSOPT = False
 
+LOCAL_TEST_DIR = Path(__file__).resolve().parent / "test_files"
 SIMSOPT_TEST_DIR = None
 if HAVE_SIMSOPT:
     try:
@@ -52,11 +53,15 @@ REQUIRES_SIMSOPT = pytest.mark.skipif(
 
 
 def _require_test_files(*names: str):
-    if SIMSOPT_TEST_DIR is None:
+    if LOCAL_TEST_DIR.is_dir():
+        base_dir = LOCAL_TEST_DIR
+    elif SIMSOPT_TEST_DIR is not None:
+        base_dir = Path(SIMSOPT_TEST_DIR)
+    else:
         pytest.skip("simsopt test_files not available")
     paths = []
     for name in names:
-        path = Path(SIMSOPT_TEST_DIR) / name
+        path = Path(base_dir) / name
         if not path.exists():
             pytest.skip(f"Missing simsopt test file: {path}")
         paths.append(path)

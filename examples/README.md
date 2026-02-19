@@ -14,3 +14,9 @@ Examples:
   finite-beta optimization example using `virtual_casing_jax.VirtualCasing`.
 - `simsopt_single_stage_optimization_finite_beta.py`: SIMSOPT single-stage
   finite-beta optimization example using `virtual_casing_jax.VirtualCasing`.
+
+Bundled inputs:
+- `tests/test_files/` contains the VMEC/BNORM data required by the SIMSOPT-style
+  examples.
+- `examples/inputs/input.QH_finitebeta` provides the VMEC input used by the
+  single-stage finite-beta example.
