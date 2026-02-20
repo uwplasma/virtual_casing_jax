@@ -344,6 +344,7 @@ class VirtualCasingJAX:
         patch_dtype=None,
         interp_block_size: int | str | None = "auto",
         remat: bool | None = None,
+        scan_targets: bool = False,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -414,6 +415,7 @@ class VirtualCasingJAX:
             patch_dtype=patch_dtype,
             interp_block_size=interp_block_size,
             remat=remat,
+            scan_targets=scan_targets,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, self.trg_nt, self.trg_np))
 
@@ -435,6 +437,7 @@ class VirtualCasingJAX:
             patch_dtype=patch_dtype,
             interp_block_size=interp_block_size,
             remat=remat,
+            scan_targets=scan_targets,
         )
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape(
             (3, 3, self.trg_nt, self.trg_np)
@@ -463,6 +466,7 @@ class VirtualCasingJAX:
         patch_dtype=None,
         interp_block_size: int | str | None = "auto",
         remat: bool | None = None,
+        scan_targets: bool = False,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -480,6 +484,7 @@ class VirtualCasingJAX:
             patch_dtype=patch_dtype,
             interp_block_size=interp_block_size,
             remat=remat,
+            scan_targets=scan_targets,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
         )
@@ -498,6 +503,7 @@ class VirtualCasingJAX:
         patch_dtype=None,
         interp_block_size: int | str | None = "auto",
         remat: bool | None = None,
+        scan_targets: bool = False,
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
@@ -515,6 +521,7 @@ class VirtualCasingJAX:
             patch_dtype=patch_dtype,
             interp_block_size=interp_block_size,
             remat=remat,
+            scan_targets=scan_targets,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
         )
@@ -556,6 +563,7 @@ class VirtualCasingJAX:
             pou_dtype,
             patch_dtype,
             interp_block_size,
+            kwargs.get("scan_targets", False),
             donate,
         )
         fn = self._jit_cache.get(key)
@@ -960,6 +968,7 @@ class VirtualCasingJAX:
             pou_dtype,
             patch_dtype,
             interp_block_size,
+            kwargs.get("scan_targets", False),
             donate,
         )
         fn = self._jit_cache.get(key)

@@ -138,6 +138,7 @@ def profile(args: argparse.Namespace):
             interp_block_size=args.interp_block_size,
             donate=args.donate if args.jit else False,
             remat=args.remat,
+            scan_targets=args.scan_targets,
         )
     elif args.op == "GradB":
         fn = vc.compute_external_gradB if args.mode == "external" else vc.compute_internal_gradB
@@ -212,6 +213,7 @@ def main():
     parser.add_argument("--donate", action="store_true", help="Enable donate_argnums for JIT wrappers")
     parser.add_argument("--remat", dest="remat", action="store_true")
     parser.add_argument("--no-remat", dest="remat", action="store_false")
+    parser.add_argument("--scan-targets", action="store_true", help="Use scan-based target loop in singular correction")
     parser.add_argument("--max-nt", type=int, default=-1)
     parser.add_argument("--max-np", type=int, default=-1)
     parser.set_defaults(remat=None)

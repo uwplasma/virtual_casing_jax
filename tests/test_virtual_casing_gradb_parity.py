@@ -148,3 +148,59 @@ def test_virtual_casing_gradb_parity(prefix):
     }
     tol = tol_map[prefix]
     assert rel < tol
+
+
+def test_gradb_scan_targets_equivalence():
+    prefix = "case_vc"
+    if not (DATA_DIR / f"{prefix}_computeGradB_gradBvc.bin").exists():
+        pytest.skip("parity dump not available")
+
+    X, src_nt, src_np, nfp, nfp_eff, half_period = _infer_setup(prefix)
+    quad_coord = load_dump(DATA_DIR / f"{prefix}_computeGradB_quad_coord")
+    gradBvc_ref = load_dump(DATA_DIR / f"{prefix}_computeGradB_gradBvc")
+
+    trg_nt = gradBvc_ref.shape[2]
+    trg_np = gradBvc_ref.shape[3]
+    quad_nt = quad_coord.shape[1]
+    quad_np = quad_coord.shape[2]
+
+    B0 = _reconstruct_B0(prefix, src_nt, src_np, nfp, nfp_eff, half_period, trg_nt, tol=1e-4)
+    vc = VirtualCasingJAX()
+    vc.setup(
+        5,
+        nfp,
+        half_period,
+        src_nt,
+        src_np,
+        X,
+        src_nt,
+        src_np,
+        trg_nt,
+        trg_np,
+    )
+
+    gradB_default = vc.compute_external_gradB(
+        B0,
+        quad_nt=quad_nt,
+        quad_np=quad_np,
+        digits=5,
+        hedgehog_order=8,
+        chunk_size=1024,
+        target_chunk_size=64,
+        scan_targets=False,
+    )
+    gradB_scan = vc.compute_external_gradB(
+        B0,
+        quad_nt=quad_nt,
+        quad_np=quad_np,
+        digits=5,
+        hedgehog_order=8,
+        chunk_size=1024,
+        target_chunk_size=64,
+        scan_targets=True,
+    )
+
+    gradB_default = np.asarray(gradB_default)
+    gradB_scan = np.asarray(gradB_scan)
+    rel = np.linalg.norm(gradB_default - gradB_scan) / (np.linalg.norm(gradB_default) + 1e-14)
+    assert rel < 1e-8

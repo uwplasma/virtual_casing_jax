@@ -105,6 +105,17 @@ size of 64 for ``B`` and 32 for ``GradB`` when the polar grid is large,
 reducing temporary memory. Set ``interp_block_size=None`` to restore the
 full (unblocked) interpolation.
 
+Target-Scan Fusion
+~~~~~~~~~~~~~~~~~~
+
+The GradB singular correction can optionally replace the ``vmap`` over
+target points with a ``lax.scan`` loop. Enable this with
+``scan_targets=True`` in ``compute_external_gradB`` (or the JIT wrapper).
+This reduces large broadcasted temporaries by avoiding replication of
+the interpolation weights across the target batch. The tradeoff is less
+parallelism per chunk, so this should be enabled only when memory is the
+bottleneck.
+
 On ``case_vc_large`` (CPU HLO), enabling ``interp_block_size="auto"``
 reduces the largest singular-correction temporaries to ~50 MiB (``B``)
 and ~76 MiB (``GradB``), compared to >150 MiB without interpolation

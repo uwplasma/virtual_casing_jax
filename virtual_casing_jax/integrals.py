@@ -1377,6 +1377,7 @@ def laplace_fxd2_u_eval_singular(
     patch_dtype=None,
     interp_block_size: int | str | None = "auto",
     remat: bool = False,
+    scan_targets: bool = False,
 ):
     """Evaluate Laplace Fxd2U with singular correction (Hedgehog)."""
     X_src = jnp.asarray(X_src)
@@ -1511,7 +1512,14 @@ def laplace_fxd2_u_eval_singular(
         G = gather(X_flat, patch_idx)
         Gg = gather(dX_flat, patch_idx)
         GF = jax.vmap(lambda idx: dens_flat[idx])(patch_idx)
-        corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
+        if scan_targets:
+            def scan_target(carry, xs):
+                Gi, Ggi, GiF, TrgCoord = xs
+                return carry, corr_fn(Gi, Ggi, GiF, TrgCoord)
+
+            _, corr = jax.lax.scan(scan_target, None, (G, Gg, GF, Trg_flat))
+        else:
+            corr = jax.vmap(corr_fn)(G, Gg, GF, Trg_flat)
     else:
         ntrg = Trg_flat.shape[0]
         pad = (-ntrg) % target_chunk_size
@@ -1528,7 +1536,14 @@ def laplace_fxd2_u_eval_singular(
             G = gather(X_flat, pidx_chunk)
             Gg = gather(dX_flat, pidx_chunk)
             GF = jax.vmap(lambda idx: dens_flat[idx])(pidx_chunk)
-            corr_chunk = jax.vmap(corr_fn)(G, Gg, GF, trg_chunk)
+            if scan_targets:
+                def scan_target(carry_inner, xs_inner):
+                    Gi, Ggi, GiF, TrgCoord = xs_inner
+                    return carry_inner, corr_fn(Gi, Ggi, GiF, TrgCoord)
+
+                _, corr_chunk = jax.lax.scan(scan_target, None, (G, Gg, GF, trg_chunk))
+            else:
+                corr_chunk = jax.vmap(corr_fn)(G, Gg, GF, trg_chunk)
             return carry, corr_chunk
 
         _, corr_chunks = jax.lax.scan(scan_fn, None, (patch_chunks, trg_chunks))
@@ -1560,6 +1575,7 @@ def laplace_fxd2_u_eval_vec_singular(
     patch_dtype=None,
     interp_block_size: int | str | None = "auto",
     remat: bool = False,
+    scan_targets: bool = False,
 ):
     density_vec = jnp.asarray(density_vec)
     return jax.vmap(
@@ -1583,6 +1599,7 @@ def laplace_fxd2_u_eval_vec_singular(
             patch_dtype=patch_dtype,
             interp_block_size=interp_block_size,
             remat=remat,
+            scan_targets=scan_targets,
         ),
         in_axes=0,
         out_axes=0,
