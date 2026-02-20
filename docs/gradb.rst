@@ -24,7 +24,7 @@ operator needed in single-stage optimization when objectives depend on
 - penalty terms involving ``\nabla B`` for smoothness or stability proxies
 
 Equations (from the BIEST formulation)
--------------------------------------
+--------------------------------------
 
 Let ``\sigma = \mathbf{B}\cdot\mathbf{n}`` and ``\mathbf{K} = \mathbf{n}\times\mathbf{B}``.
 For targets on ``Gamma`` the virtual casing formula gives [MCO2019]_:

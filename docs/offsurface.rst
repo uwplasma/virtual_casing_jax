@@ -58,6 +58,7 @@ Off-surface evaluation is performed in two stages:
      singular-correction requirements.
 
 2. **Evaluation**:
+
    - ``ComputeBOffSurf`` uses a combination of
      ``LaplaceFxdU`` and ``BiotSavartFxU``.
    - ``ComputeGradBOffSurf`` uses ``LaplaceFxd2U`` (second derivatives)

@@ -10,6 +10,7 @@ autodiff-ready wrappers.
 Performance features:
 - Source/target tiling with auto-tuned chunk sizes.
 - Rematerialization hooks for GradB singular correction.
+- Optional target-scan mode to reduce GradB peak memory (`scan_targets`).
 - Mixed-precision POU/patch tables with float64 outputs.
 - Bundled Quas3/LHD/W7X geometry assets (converted from SCTL .mat).
 

@@ -35,7 +35,7 @@ os.chdir(parent_path)
 MAXITER_stage_2 = 10
 MAXITER_single_stage = 10
 max_mode = 1
-vmec_input_filename = os.path.join(parent_path, 'inputs', 'input.QH_finitebeta')
+vmec_input_filename = os.path.join(parent_path, 'inputs', 'input.QH_finitebeta')  # bundled input
 ncoils = 3
 aspect_ratio_target = 7.0
 CC_THRESHOLD = 0.08

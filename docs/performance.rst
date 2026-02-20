@@ -68,7 +68,7 @@ via large batched kernel evaluations. The code avoids Python loops in
 performance-critical paths.
 
 Tips and Tricks
---------------
+---------------
 
 - Use a fixed set of ``nphi``, ``ntheta`` for JIT reuse.
 - Cache POU and interpolation tables for each ``(PATCH_DIM, RAD_DIM)``.

@@ -2,7 +2,7 @@ Using in SIMSOPT
 ================
 
 This section documents how to use ``virtual_casing_jax`` alongside
-SIMSOPT. The package now ships a SIMSOPT-compatible
+SIMSOPT [SIMSOPT]_. The package now ships a SIMSOPT-compatible
 ``VirtualCasing`` class that mirrors
 ``simsopt.mhd.virtual_casing.VirtualCasing`` but calls the JAX backend.
 

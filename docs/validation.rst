@@ -17,14 +17,17 @@ Test Categories
 ---------------
 
 1. **Surface Operator Parity**
+
    - FFT-based resampling and derivatives match C++ outputs.
    - Surface normals, dot/cross products, and area elements match dumps.
 
 2. **Kernel Parity**
+
    - Laplace and Biot-Savart kernels match analytic formulas and reference
      scaling (``1/(4*pi)``).
 
 3. **Boundary Integral Parity**
+
    - Singular-corrected ``LaplaceFxdU`` matches reference at ~1e-3
      relative error on small grids.
    - Singular-corrected ``LaplaceFxd2U`` (Hedgehog order 8) matches
@@ -34,6 +37,7 @@ Test Categories
    - Double-layer self-test returns ``0.5`` jump for constant density.
 
 4. **End-to-End Virtual Casing Parity**
+
    - ``VirtualCasingTestData`` B/GradB datasets are regenerated in JAX and
      matched against C++ dumps (``case_testdata_axisym``).
    - Baseline ``ComputeB`` using direct-sum integrals matches reference

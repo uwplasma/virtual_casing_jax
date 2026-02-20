@@ -43,7 +43,7 @@ LENGTH_PENALTY = 1e0
 # Number of iterations to perform:
 MAXITER = 50 if in_github_actions else 500
 
-# File for the desired boundary magnetic surface:
+# File for the desired boundary magnetic surface (bundled with this repo):
 TEST_DIR = (Path(__file__).parent / ".." / "tests" / "test_files").resolve()
 filename = 'wout_W7-X_without_coil_ripple_beta0p05_d23p4_tm_reference.nc'
 vmec_file = TEST_DIR / filename

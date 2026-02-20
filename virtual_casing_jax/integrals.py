@@ -1379,7 +1379,14 @@ def laplace_fxd2_u_eval_singular(
     remat: bool = False,
     scan_targets: bool = False,
 ):
-    """Evaluate Laplace Fxd2U with singular correction (Hedgehog)."""
+    """Evaluate Laplace Fxd2U with singular correction (Hedgehog).
+
+    Args:
+        scan_targets: If True, use a ``lax.scan`` loop over targets instead
+            of ``vmap`` in the singular correction. This can reduce peak
+            memory by avoiding large broadcasted temporaries, at the cost
+            of lower parallelism per chunk.
+    """
     X_src = jnp.asarray(X_src)
     dX_src = jnp.asarray(dX_src)
     density = jnp.asarray(density)
@@ -1577,6 +1584,11 @@ def laplace_fxd2_u_eval_vec_singular(
     remat: bool = False,
     scan_targets: bool = False,
 ):
+    """Vector-density wrapper for Laplace Fxd2U with singular correction.
+
+    Args:
+        scan_targets: forwarded to ``laplace_fxd2_u_eval_singular``.
+    """
     density_vec = jnp.asarray(density_vec)
     return jax.vmap(
         lambda dens: laplace_fxd2_u_eval_singular(

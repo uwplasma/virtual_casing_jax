@@ -470,7 +470,12 @@ class VirtualCasingJAX:
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
-        """Compute GradBext from total B on the source grid."""
+        """Compute GradBext from total B on the source grid.
+
+        Args:
+            scan_targets: If True, use a ``lax.scan`` over target points
+                inside the singular correction to reduce peak memory.
+        """
         return self._compute_gradB_signed(
             B0,
             sign=1.0,
@@ -507,7 +512,12 @@ class VirtualCasingJAX:
         patch_dim0: int | None = None,
         patch_idx=None,
     ):
-        """Compute GradBint from total B on the source grid."""
+        """Compute GradBint from total B on the source grid.
+
+        Args:
+            scan_targets: If True, use a ``lax.scan`` over target points
+                inside the singular correction to reduce peak memory.
+        """
         return self._compute_gradB_signed(
             B0,
             sign=-1.0,

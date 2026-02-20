@@ -11,7 +11,7 @@ Overview
 
 The test data builder provides:
 
-- Prebuilt analytic surfaces (axisymmetric, rotating ellipse, and W7X_)
+- Prebuilt analytic surfaces (axisymmetric, rotating ellipse, and ``W7X``)
 - Synthetic magnetic fields from internal/external current loops
 - On-surface target grids and off-surface evaluation points
 - ``GradB`` computed from the Biot–Savart gradient kernel
@@ -46,7 +46,7 @@ rotated by a toroidal-dependent angle and embedded in 3D:
    R = x_\perp' + R_0,
    \quad X = R\cos\theta, \; Y = R\sin\theta, \; Z = y_\perp'.
 
-For ``Stell`` and ``W7X_``, the surface is defined by Fourier series:
+For ``Stell`` and ``W7X``, the surface is defined by Fourier series:
 
 .. math::
 
@@ -54,7 +54,7 @@ For ``Stell`` and ``W7X_``, the surface is defined by Fourier series:
    \qquad
    Z(\theta,\phi) = \sum_{i,j} Z_{bs}(i,j)\,\sin(j\phi - N_{fp} i \theta),
 
-with ``Nfp=5`` for the built-in ``W7X_`` coefficients. The coefficients are
+with ``Nfp=5`` for the built-in ``W7X`` coefficients. The coefficients are
 embedded in :mod:`virtual_casing_jax.w7x_coeffs` and match the BIEST source.
 
 Bundled Geometry Assets
