@@ -7,7 +7,9 @@ from virtual_casing_jax.functional import (
     build_quad_setup,
     build_patch_idx,
     select_patch_dim_from_geom,
+    target_surface_normal,
     compute_external_B_functional,
+    compute_external_B_normal_functional,
     compute_external_gradB_functional,
     compute_external_B_offsurf_functional,
 )
@@ -161,3 +163,128 @@ def test_functional_grad_wrt_surface():
     fd = (scalar_fn(x_plus) - scalar_fn(x_minus)) / (2.0 * eps)
 
     np.testing.assert_allclose(grad[idx], np.asarray(fd), rtol=5e-3, atol=1e-5)
+
+
+def test_external_B_normal_functional_matches_manual_projection():
+    nfp = 1
+    half_period = False
+    surf_nt = 6
+    surf_np = 5
+    src_nt = 6
+    src_np = 5
+    trg_nt = 6
+    trg_np = 5
+    digits = 4
+
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.03 + 0.07
+
+    surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
+    quad_nt = surf_nt
+    quad_np = surf_np
+    quad_coord, dX, normal, _, orient = build_quad_setup(surface_coord, quad_nt, quad_np)
+    patch_dim0 = select_patch_dim_from_geom(dX, quad_nt, quad_np, digits)
+    patch_idx = build_patch_idx(quad_nt, quad_np, trg_nt, trg_np, nfp_eff, patch_dim0)
+
+    Bext = compute_external_B_functional(
+        X,
+        B0,
+        digits=digits,
+        nfp=nfp,
+        half_period=half_period,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=src_nt,
+        src_np=src_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        quad_nt=quad_nt,
+        quad_np=quad_np,
+        patch_dim0=patch_dim0,
+        patch_idx=patch_idx,
+        orient=orient,
+    )
+    n = target_surface_normal(
+        X,
+        nfp=nfp,
+        half_period=half_period,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        orient=orient,
+    )
+    Bnormal = compute_external_B_normal_functional(
+        X,
+        B0,
+        digits=digits,
+        nfp=nfp,
+        half_period=half_period,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=src_nt,
+        src_np=src_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        quad_nt=quad_nt,
+        quad_np=quad_np,
+        patch_dim0=patch_dim0,
+        patch_idx=patch_idx,
+        orient=orient,
+    )
+
+    np.testing.assert_allclose(Bnormal, jnp.sum(Bext * n, axis=0), rtol=1e-12, atol=1e-12)
+
+
+def test_external_B_normal_functional_jvp_wrt_surface():
+    nfp = 1
+    half_period = False
+    surf_nt = 5
+    surf_np = 4
+    src_nt = 5
+    src_np = 4
+    trg_nt = 5
+    trg_np = 4
+    digits = 4
+
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.02 + 0.05
+
+    surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
+    quad_nt = surf_nt
+    quad_np = surf_np
+    quad_coord, dX, normal, _, orient = build_quad_setup(surface_coord, quad_nt, quad_np)
+    patch_dim0 = select_patch_dim_from_geom(dX, quad_nt, quad_np, digits)
+    patch_idx = build_patch_idx(quad_nt, quad_np, trg_nt, trg_np, nfp_eff, patch_dim0)
+
+    def scalar_fn(xsurf):
+        bnormal = compute_external_B_normal_functional(
+            xsurf,
+            B0,
+            digits=digits,
+            nfp=nfp,
+            half_period=half_period,
+            surf_nt=surf_nt,
+            surf_np=surf_np,
+            src_nt=src_nt,
+            src_np=src_np,
+            trg_nt=trg_nt,
+            trg_np=trg_np,
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+            patch_dim0=patch_dim0,
+            patch_idx=patch_idx,
+            orient=orient,
+        )
+        return jnp.sum(bnormal * bnormal)
+
+    eps = 1e-5
+    idx = (0, 0, 0)
+    tangent = jnp.zeros_like(X).at[idx].set(1.0)
+    _, jvp = jax.jvp(scalar_fn, (X,), (tangent,))
+
+    x_plus = X.at[idx].add(eps)
+    x_minus = X.at[idx].add(-eps)
+    fd = (scalar_fn(x_plus) - scalar_fn(x_minus)) / (2.0 * eps)
+
+    np.testing.assert_allclose(jvp, np.asarray(fd), rtol=5e-3, atol=1e-5)

@@ -159,6 +159,35 @@ def select_patch_dim_from_geom(dX, quad_nt: int, quad_np: int, digits: int):
     return select_patch_dim(int(digits), float(cond))
 
 
+def target_surface_normal(
+    X,
+    *,
+    nfp: int,
+    half_period: bool,
+    surf_nt: int,
+    surf_np: int,
+    trg_nt: int,
+    trg_np: int,
+    orient: float | None = None,
+):
+    """Return unit normals on the virtual-casing target grid."""
+    surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
+    surf_nt_full = int(surface_coord.shape[1])
+    surf_np_full = int(surface_coord.shape[2])
+    trg_coord = resample(
+        surface_coord,
+        surf_nt_full,
+        surf_np_full,
+        nfp_eff * trg_nt,
+        trg_np,
+    )
+    dX = grad2d(trg_coord, nfp_eff * trg_nt, trg_np)
+    normal, _, orient0 = surf_normal_area_elem(dX, trg_coord, return_orientation=True)
+    if orient is not None:
+        normal = normal * (orient / orient0)
+    return normal[:, :trg_nt, :]
+
+
 def prepare_functional_setup(
     X,
     *,
@@ -386,6 +415,69 @@ def compute_external_B_functional(
         interp_block_size=interp_block_size,
         remat=remat,
     )
+
+
+def compute_external_B_normal_functional(
+    X,
+    B0,
+    *,
+    digits: int,
+    nfp: int,
+    half_period: bool,
+    surf_nt: int,
+    surf_np: int,
+    src_nt: int,
+    src_np: int,
+    trg_nt: int,
+    trg_np: int,
+    quad_nt: int,
+    quad_np: int,
+    patch_dim0: int | None = None,
+    patch_idx=None,
+    orient: float | None = None,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
+    remat: bool | None = None,
+):
+    """Compute on-surface Bext dot n with differentiable geometry inputs."""
+    Bext = compute_external_B_functional(
+        X,
+        B0,
+        digits=digits,
+        nfp=nfp,
+        half_period=half_period,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=src_nt,
+        src_np=src_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        quad_nt=quad_nt,
+        quad_np=quad_np,
+        patch_dim0=patch_dim0,
+        patch_idx=patch_idx,
+        orient=orient,
+        chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
+        pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
+        interp_block_size=interp_block_size,
+        remat=remat,
+    )
+    normal = target_surface_normal(
+        X,
+        nfp=nfp,
+        half_period=half_period,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        orient=orient,
+    )
+    return dot_prod(Bext, normal)
 
 
 def compute_internal_B_functional(
