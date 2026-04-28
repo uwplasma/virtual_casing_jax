@@ -90,7 +90,9 @@ over targets. For parity tests, ``chunk_size=1024`` and
 
 Auto tuning is enabled by passing ``chunk_size="auto"`` and
 ``target_chunk_size="auto"`` (default in the high-level API). The
-heuristics can be overridden via environment variables:
+CPU ``B`` and off-surface ``B`` heuristics leave small target grids
+unblocked because the extra target scan can dominate the kernel time.
+The heuristics can be overridden via environment variables:
 
 - ``VCJAX_CHUNK_B`` / ``VCJAX_CHUNK_B_SRC`` / ``VCJAX_CHUNK_B_TRG``
 - ``VCJAX_CHUNK_BOFF`` / ``VCJAX_CHUNK_BOFF_SRC`` / ``VCJAX_CHUNK_BOFF_TRG``
