@@ -480,6 +480,150 @@ def compute_external_B_normal_functional(
     return dot_prod(Bext, normal)
 
 
+def compute_external_B_jvp_columns_functional(
+    X,
+    B0,
+    X_tangents,
+    B0_tangents=None,
+    *,
+    digits: int,
+    nfp: int,
+    half_period: bool,
+    surf_nt: int,
+    surf_np: int,
+    src_nt: int,
+    src_np: int,
+    trg_nt: int,
+    trg_np: int,
+    quad_nt: int,
+    quad_np: int,
+    patch_dim0: int | None = None,
+    patch_idx=None,
+    orient: float | None = None,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
+    remat: bool | None = None,
+):
+    """Return Bext and multiple forward-mode tangent columns.
+
+    ``X_tangents`` has shape ``(ncols, 3, surf_nt, surf_np)``.
+    ``B0_tangents`` has shape ``(ncols, 3, src_nt, src_np)``; when omitted
+    the magnetic-field input is held fixed.  The returned tangent array has
+    shape ``(ncols, 3, trg_nt, trg_np)``.
+    """
+    X_tangents = jnp.asarray(X_tangents)
+    ncols = int(X_tangents.shape[0])
+    if B0_tangents is None:
+        B0_tangents = jnp.zeros((ncols,) + tuple(jnp.asarray(B0).shape), dtype=X_tangents.dtype)
+    else:
+        B0_tangents = jnp.asarray(B0_tangents)
+
+    def external_field(x, b0):
+        return compute_external_B_functional(
+            x,
+            b0,
+            digits=digits,
+            nfp=nfp,
+            half_period=half_period,
+            surf_nt=surf_nt,
+            surf_np=surf_np,
+            src_nt=src_nt,
+            src_np=src_np,
+            trg_nt=trg_nt,
+            trg_np=trg_np,
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+            patch_dim0=patch_dim0,
+            patch_idx=patch_idx,
+            orient=orient,
+            chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+            pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
+            interp_block_size=interp_block_size,
+            remat=remat,
+        )
+
+    Bext, field_linear = jax.linearize(external_field, X, B0)
+    columns = jax.vmap(field_linear)(X_tangents, B0_tangents)
+    return Bext, columns
+
+
+def compute_external_B_normal_jvp_columns_functional(
+    X,
+    B0,
+    X_tangents,
+    B0_tangents=None,
+    *,
+    digits: int,
+    nfp: int,
+    half_period: bool,
+    surf_nt: int,
+    surf_np: int,
+    src_nt: int,
+    src_np: int,
+    trg_nt: int,
+    trg_np: int,
+    quad_nt: int,
+    quad_np: int,
+    patch_dim0: int | None = None,
+    patch_idx=None,
+    orient: float | None = None,
+    chunk_size: int | str | None = "auto",
+    target_chunk_size: int | str | None = "auto",
+    pou_dtype=None,
+    patch_dtype=None,
+    interp_block_size: int | str | None = "auto",
+    remat: bool | None = None,
+):
+    """Return Bext dot n and multiple forward-mode tangent columns.
+
+    ``X_tangents`` has shape ``(ncols, 3, surf_nt, surf_np)``.
+    ``B0_tangents`` has shape ``(ncols, 3, src_nt, src_np)``; when omitted
+    the magnetic-field input is held fixed.  The returned tangent array has
+    shape ``(ncols, trg_nt, trg_np)``.
+    """
+    X_tangents = jnp.asarray(X_tangents)
+    ncols = int(X_tangents.shape[0])
+    if B0_tangents is None:
+        B0_tangents = jnp.zeros((ncols,) + tuple(jnp.asarray(B0).shape), dtype=X_tangents.dtype)
+    else:
+        B0_tangents = jnp.asarray(B0_tangents)
+
+    def normal_field(x, b0):
+        return compute_external_B_normal_functional(
+            x,
+            b0,
+            digits=digits,
+            nfp=nfp,
+            half_period=half_period,
+            surf_nt=surf_nt,
+            surf_np=surf_np,
+            src_nt=src_nt,
+            src_np=src_np,
+            trg_nt=trg_nt,
+            trg_np=trg_np,
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+            patch_dim0=patch_dim0,
+            patch_idx=patch_idx,
+            orient=orient,
+            chunk_size=chunk_size,
+            target_chunk_size=target_chunk_size,
+            pou_dtype=pou_dtype,
+            patch_dtype=patch_dtype,
+            interp_block_size=interp_block_size,
+            remat=remat,
+        )
+
+    Bnormal, normal_linear = jax.linearize(normal_field, X, B0)
+    columns = jax.vmap(normal_linear)(X_tangents, B0_tangents)
+    return Bnormal, columns
+
+
 def compute_internal_B_functional(
     X,
     B0,
