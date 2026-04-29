@@ -1,5 +1,3 @@
-# virtual_casing_jax
-
 [![CI](https://github.com/uwplasma/virtual_casing_jax/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/uwplasma/virtual_casing_jax/actions/workflows/ci.yml)
 [![CI-Large](https://github.com/uwplasma/virtual_casing_jax/actions/workflows/ci-large.yml/badge.svg)](https://github.com/uwplasma/virtual_casing_jax/actions/workflows/ci-large.yml)
 [![Coverage](https://codecov.io/gh/uwplasma/virtual_casing_jax/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/virtual_casing_jax)
@@ -7,12 +5,63 @@
 [![Python](https://img.shields.io/pypi/pyversions/virtual-casing-jax.svg)](https://pypi.org/project/virtual-casing-jax/)
 [![License](https://img.shields.io/github/license/uwplasma/virtual_casing_jax.svg)](LICENSE)
 
-JAX implementation of the virtual casing principle with high-order singular quadrature.
+# virtual_casing_jax
 
-Status: parity-validated B/GradB (on- and off-surface) against the C++
-reference for multiple datasets, including W7-X. The JAX port includes
-adaptive off-surface evaluation, internal/external variants, and
-autodiff-ready wrappers.
+`virtual_casing_jax` is a JAX implementation of the virtual casing
+principle for computing magnetic-field contributions from plasma currents
+using high-order singular quadrature. It is based on the C++ reference
+implementation in [`hiddenSymmetries/virtual-casing`](https://github.com/hiddenSymmetries/virtual-casing)
+and on the SIMSOPT virtual-casing interface in
+[`hiddenSymmetries/simsopt`](https://github.com/hiddenSymmetries/simsopt).
+
+Documentation is available at
+[`virtual-casing-jax.readthedocs.io`](https://virtual-casing-jax.readthedocs.io/).
+
+## Installation
+
+Install the latest release from PyPI:
+
+```bash
+pip install virtual-casing-jax
+```
+
+Or install from a local source checkout:
+
+```bash
+git clone https://github.com/uwplasma/virtual_casing_jax.git
+cd virtual_casing_jax
+pip install -e .
+```
+
+## Basic Usage
+
+The SIMSOPT-compatible wrapper can be used as a drop-in virtual-casing
+calculation when SIMSOPT is installed:
+
+```python
+from virtual_casing_jax import VirtualCasing
+
+vc = VirtualCasing.from_vmec(
+    "wout_example.nc",
+    src_nphi=32,
+    trgt_nphi=32,
+    trgt_ntheta=32,
+    filename="auto",
+)
+
+B_external_normal = vc.B_external_normal
+```
+
+For lower-level JAX workflows, use `VirtualCasingJAX` directly after
+preparing surface coordinates and magnetic-field arrays:
+
+```python
+from virtual_casing_jax import VirtualCasingJAX
+
+vc_jax = VirtualCasingJAX()
+vc_jax.setup(digits, nfp, stellsym, Nt, Np, gamma, Nt, Np, Nt, Np)
+B_external = vc_jax.compute_external_B(B_total)
+```
 
 Performance features:
 - Source/target tiling with auto-tuned chunk sizes.
