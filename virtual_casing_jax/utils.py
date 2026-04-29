@@ -51,6 +51,14 @@ def autotune_chunk_sizes(op: str, nsrc: int, ntrg: int, backend: str | None = No
             src = 1024 if nsrc >= 1024 else 512
             trg = 64
 
+    if (
+        trg_override is None
+        and backend == "cpu"
+        and op_key in ("b", "boff")
+        and ntrg <= 256
+    ):
+        trg = None
+
     if src_override is not None:
         src = src_override
     if trg_override is not None:
