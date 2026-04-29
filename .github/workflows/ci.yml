@@ -8,6 +8,8 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,15 +20,25 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
           python -m pip install -r docs/requirements.txt
-          python -m pip install pytest
+          python -m pip install pytest pytest-cov
       - name: Run tests
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          python -m pytest -q -m "not large"
+          python -m pytest -q -m "not large" \
+            --cov=virtual_casing_jax \
+            --cov-report=term-missing \
+            --cov-report=xml
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
 
   docs:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

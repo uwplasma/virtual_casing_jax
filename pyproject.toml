@@ -8,7 +8,8 @@ version = "0.0.1"
 description = "JAX implementation of the virtual casing principle with high-order quadrature"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {file = "LICENSE"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
   {name = "UW Plasma"},
 ]
@@ -19,8 +20,8 @@ dependencies = [
   "scipy",
 ]
 
-[tool.setuptools]
-packages = ["virtual_casing_jax"]
+[tool.setuptools.packages.find]
+include = ["virtual_casing_jax*"]
 
 [tool.setuptools.package-data]
 virtual_casing_jax = ["geom/*.npz"]
