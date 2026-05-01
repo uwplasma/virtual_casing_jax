@@ -68,6 +68,23 @@ def test_evaluate_on_rphiz_grid_shapes_and_components():
     np.testing.assert_allclose(grid["BZ"], 3.0, atol=1e-6)
 
 
+def test_evaluate_on_rphiz_grid_auto_and_disabled_chunking_match():
+    field = VirtualCasingExteriorField(
+        _surface_data(),
+        ExteriorFieldConfig(digits=3, levels=((13, 13),), chunk_size=64, target_chunk_size=2, dtype="float32"),
+        external_B_fn=_constant_cartesian_B,
+    )
+    R = jnp.array([2.7, 2.8], dtype=jnp.float32)
+    phi = jnp.array([0.0, 0.5 * jnp.pi], dtype=jnp.float32)
+    Z = jnp.array([0.0], dtype=jnp.float32)
+
+    auto = evaluate_on_rphiz_grid(field, R, phi, Z, chunk_size="auto")
+    disabled = evaluate_on_rphiz_grid(field, R, phi, Z, chunk_size=0)
+
+    for name in ("BR", "Bphi", "BZ", "absB"):
+        np.testing.assert_allclose(auto[name], disabled[name], atol=1e-6)
+
+
 def test_write_extended_field_netcdf_roundtrip(tmp_path: Path):
     grid = {
         "R": np.array([1.0, 2.0]),
@@ -79,12 +96,23 @@ def test_write_extended_field_netcdf_roundtrip(tmp_path: Path):
         "absB": np.sqrt(14.0) * np.ones((2, 1, 2)),
     }
     path = tmp_path / "extended.nc"
-    write_extended_field_netcdf(path, grid, {"nfp": 1, "coordinate_convention": "(R,phi,Z)"})
+    write_extended_field_netcdf(
+        path,
+        grid,
+        {
+            "nfp": 1,
+            "coordinate_convention": "(R,phi,Z)",
+            "levels": ((13, 13), (26, 13)),
+            "provenance": {"source": "unit-test"},
+        },
+    )
 
     with netcdf_file(path, "r", mmap=False) as nc:
         assert nc.dimensions["nR"] == 2
         np.testing.assert_allclose(nc.variables["BZ"].data.copy(), grid["BZ"])
         assert nc.nfp == 1
+        assert nc.levels == b"(13, 13),(26, 13)"
+        assert nc.provenance == b"{'source': 'unit-test'}"
 
 
 def test_write_mgrid_like_adds_format_metadata(tmp_path: Path):

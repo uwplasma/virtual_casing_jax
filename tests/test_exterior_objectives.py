@@ -52,6 +52,18 @@ def test_grid_divergence_penalty_zero_for_constant_cartesian_z_field():
     assert np.isclose(grid_divergence_penalty(BR, Bphi, BZ, R, phi, Z), 0.0)
 
 
+def test_grid_divergence_penalty_handles_singleton_phi_and_z_axes():
+    R = jnp.array([1.0, 1.5, 2.0])
+    phi = jnp.array([0.0])
+    Z = jnp.array([0.0])
+    BR = jnp.zeros((3, 1, 1))
+    Bphi = 2.0 * jnp.ones((3, 1, 1))
+    BZ = 3.0 * jnp.ones((3, 1, 1))
+    weights = jnp.array([[[1.0]], [[2.0]], [[3.0]]])
+
+    assert np.isclose(grid_divergence_penalty(BR, Bphi, BZ, R, phi, Z, weights=weights), 0.0)
+
+
 def test_boundary_normal_residual_projects_field_on_surface_normals():
     phi = jnp.array([0.0])
     theta = jnp.array([0.0, jnp.pi])
