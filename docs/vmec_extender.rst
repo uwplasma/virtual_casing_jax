@@ -53,6 +53,15 @@ field period. The physical toroidal angle is
 field targets are Cartesian unless a method explicitly takes ``(R, phi, Z)``.
 The exported cylindrical grid uses physical ``phi``.
 
+Fixed-schedule levels
+---------------------
+
+The high-level ``VirtualCasingExteriorField`` uses fixed off-surface schedules
+for JIT-friendly evaluation. When ``NFP > 1``, the toroidal size of each
+schedule level is rounded up to the next multiple of ``NFP`` before evaluation.
+This preserves field-period rotational covariance in the replicated source
+surface while keeping user-supplied schedules static.
+
 Python workflow
 ---------------
 

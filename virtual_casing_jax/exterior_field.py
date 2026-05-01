@@ -144,6 +144,19 @@ def B_cyl_from_B_xyz(field_fn: Callable, R_phi_Z):
     return xyz_vec_to_cyl_vec(R_phi_Z, field_fn(xyz))
 
 
+def _align_schedule_levels_to_nfp(levels, nfp: int):
+    aligned = []
+    nfp = max(int(nfp), 1)
+    for nt, npol in levels:
+        nt_i = int(nt)
+        np_i = int(npol)
+        if nt_i <= 0 or np_i <= 0:
+            raise ValueError("ExteriorFieldConfig.levels entries must be positive")
+        nt_i = nfp * ((nt_i + nfp - 1) // nfp)
+        aligned.append((nt_i, np_i))
+    return tuple(aligned)
+
+
 class VirtualCasingExteriorField:
     """JAX-native exterior field from VMEC-surface virtual-casing data.
 
@@ -180,6 +193,10 @@ class VirtualCasingExteriorField:
         self.area_vector = area_vector
         self.external_B_fn = external_B_fn
         self.external_gradB_fn = external_gradB_fn
+        self.schedule_levels = _align_schedule_levels_to_nfp(
+            self.config.levels,
+            int(surface_data.nfp),
+        )
 
         self._vc = VirtualCasingJAX()
         self._vc.setup(
@@ -203,7 +220,7 @@ class VirtualCasingExteriorField:
             target_chunk_size=self.config.target_chunk_size,
         )
         if self.config.use_jit_schedule:
-            kwargs["levels"] = tuple((int(nt), int(np)) for nt, np in self.config.levels)
+            kwargs["levels"] = self.schedule_levels
             if branch == "internal":
                 return self._vc.compute_internal_B_offsurf_schedule(self.B_total, **kwargs)
             return self._vc.compute_external_B_offsurf_schedule(self.B_total, **kwargs)
@@ -219,7 +236,7 @@ class VirtualCasingExteriorField:
             target_chunk_size=self.config.target_chunk_size,
         )
         if self.config.use_jit_schedule:
-            kwargs["levels"] = tuple((int(nt), int(np)) for nt, np in self.config.levels)
+            kwargs["levels"] = self.schedule_levels
             if branch == "internal":
                 return self._vc.compute_internal_gradB_offsurf_schedule(self.B_total, **kwargs)
             return self._vc.compute_external_gradB_offsurf_schedule(self.B_total, **kwargs)
