@@ -1136,6 +1136,8 @@ class VirtualCasingJAX:
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bext at off-surface targets using adaptive quadrature."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         X_trg = jnp.asarray(X_trg)
@@ -1172,6 +1174,8 @@ class VirtualCasingJAX:
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bint at off-surface targets using adaptive quadrature."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         X_trg = jnp.asarray(X_trg)
@@ -1210,6 +1214,8 @@ class VirtualCasingJAX:
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bext off-surface using a fixed adaptive refinement schedule."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         levels = self._resolve_offsurface_levels(
@@ -1256,6 +1262,8 @@ class VirtualCasingJAX:
         donate: bool = False,
     ):
         """JIT-compiled schedule-based off-surface Bext."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, _, _ = self._offsurface_densities(B0)
         levels = self._resolve_offsurface_levels(
@@ -1314,6 +1322,8 @@ class VirtualCasingJAX:
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bint off-surface using a fixed adaptive refinement schedule."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         levels = self._resolve_offsurface_levels(
@@ -1360,6 +1370,8 @@ class VirtualCasingJAX:
         donate: bool = False,
     ):
         """JIT-compiled schedule-based off-surface Bint."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, _, _ = self._offsurface_densities(B0)
         levels = self._resolve_offsurface_levels(
@@ -1421,6 +1433,8 @@ class VirtualCasingJAX:
         The off-surface GradB path mirrors the reference implementation and
         currently uses the base resampled grid (no adaptive refinement).
         """
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_trg = jnp.asarray(X_trg)
         X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
@@ -1491,6 +1505,8 @@ class VirtualCasingJAX:
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBint at off-surface targets using direct quadrature."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         gradB = self.compute_external_gradB_offsurf(
             B0,
             X_trg=X_trg,
@@ -1517,6 +1533,8 @@ class VirtualCasingJAX:
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBext off-surface using a fixed adaptive refinement schedule."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         levels = self._resolve_offsurface_levels(
@@ -1564,6 +1582,8 @@ class VirtualCasingJAX:
         donate: bool = False,
     ):
         """JIT-compiled schedule-based off-surface GradBext."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, _, _ = self._offsurface_densities(B0)
         levels = self._resolve_offsurface_levels(
@@ -1622,6 +1642,8 @@ class VirtualCasingJAX:
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBint off-surface using a fixed adaptive refinement schedule."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, BdotN, J = self._offsurface_densities(B0)
         levels = self._resolve_offsurface_levels(
@@ -1669,6 +1691,8 @@ class VirtualCasingJAX:
         donate: bool = False,
     ):
         """JIT-compiled schedule-based off-surface GradBint."""
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
         digits = self.digits if digits is None else int(digits)
         X_src, _, _ = self._offsurface_densities(B0)
         levels = self._resolve_offsurface_levels(
