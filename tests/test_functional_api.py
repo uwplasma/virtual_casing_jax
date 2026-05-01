@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import jax
 import jax.numpy as jnp
 
@@ -6,14 +7,18 @@ from virtual_casing_jax.functional import (
     build_surface_coord,
     build_quad_setup,
     build_patch_idx,
+    prepare_functional_setup,
     select_patch_dim_from_geom,
     target_surface_normal,
     compute_external_B_functional,
     compute_external_B_normal_functional,
     compute_external_B_jvp_columns_functional,
     compute_external_B_normal_jvp_columns_functional,
+    compute_internal_B_functional,
     compute_external_gradB_functional,
+    compute_internal_gradB_functional,
     compute_external_B_offsurf_functional,
+    compute_external_gradB_offsurf_functional,
 )
 from virtual_casing_jax.virtual_casing import VirtualCasingJAX
 
@@ -385,3 +390,211 @@ def test_external_B_jvp_columns_match_individual_jvps():
         rtol=1e-12,
         atol=1e-12,
     )
+
+
+def test_half_period_setup_builds_symmetric_metadata_and_unit_normals():
+    nfp = 2
+    surf_nt = 4
+    surf_np = 5
+    trg_nt = 4
+    trg_np = 5
+    quad_nt = 16
+    quad_np = 5
+
+    X = _torus(surf_nt, surf_np)
+    setup = prepare_functional_setup(
+        X,
+        digits=4,
+        nfp=nfp,
+        half_period=True,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=surf_nt,
+        src_np=surf_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        quad_nt=quad_nt,
+        quad_np=quad_np,
+        patch_dim0=5,
+    )
+    normal = target_surface_normal(
+        X,
+        nfp=nfp,
+        half_period=True,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+    )
+
+    assert setup.nfp == nfp
+    assert setup.nfp_eff == 2 * nfp
+    assert setup.half_period is True
+    assert setup.patch_idx.shape[-1] == (2 * setup.patch_dim0 + 1) ** 2
+    np.testing.assert_allclose(jnp.linalg.norm(normal, axis=0), 1.0, rtol=1e-12, atol=1e-12)
+
+
+def test_internal_external_functional_boundary_identities():
+    nfp = 1
+    half_period = False
+    surf_nt = 6
+    surf_np = 5
+    src_nt = 6
+    src_np = 5
+    trg_nt = 6
+    trg_np = 5
+    digits = 4
+
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.04 + jnp.array([0.2, -0.1, 0.05])[:, None, None]
+
+    kwargs = dict(
+        digits=digits,
+        nfp=nfp,
+        half_period=half_period,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=src_nt,
+        src_np=src_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        quad_nt=surf_nt,
+        quad_np=surf_np,
+        chunk_size=128,
+        target_chunk_size=7,
+        pou_dtype="auto",
+        patch_dtype="float64",
+        interp_block_size=8,
+        remat=True,
+    )
+
+    Bext = compute_external_B_functional(X, B0, **kwargs)
+    Bint = compute_internal_B_functional(X, B0, **kwargs)
+    grad_ext = compute_external_gradB_functional(X, B0, hedgehog_order=4, **kwargs)
+    grad_int = compute_internal_gradB_functional(X, B0, hedgehog_order=4, **kwargs)
+
+    # VCP jump relation on Gamma: external + internal branches recover B on the surface.
+    np.testing.assert_allclose(Bext + Bint, B0, rtol=1e-11, atol=1e-11)
+    np.testing.assert_allclose(grad_ext + grad_int, 0.0, rtol=1e-10, atol=1e-10)
+
+
+def test_external_B_functional_rejects_bad_offsurface_target_rank():
+    nfp = 1
+    surf_nt = 4
+    surf_np = 4
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.01 + 0.2
+
+    with pytest.raises(ValueError, match="X_trg must have shape"):
+        compute_external_B_functional(
+            X,
+            B0,
+            X_trg=jnp.zeros((3,)),
+            digits=4,
+            nfp=nfp,
+            half_period=False,
+            surf_nt=surf_nt,
+            surf_np=surf_np,
+            src_nt=surf_nt,
+            src_np=surf_np,
+            trg_nt=surf_nt,
+            trg_np=surf_np,
+            quad_nt=surf_nt,
+            quad_np=surf_np,
+            patch_dim0=3,
+        )
+
+
+def test_functional_offsurface_adaptive_matches_fixed_grid_when_no_refinement():
+    nfp = 1
+    half_period = False
+    surf_nt = 5
+    surf_np = 4
+    src_nt = 5
+    src_np = 4
+    trg_nt = 5
+    trg_np = 4
+    digits = 4
+
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.02 + jnp.array([0.1, -0.03, 0.04])[:, None, None]
+    X_trg = jnp.array(
+        [
+            [2.5, 2.3, 2.4],
+            [0.0, 0.2, -0.15],
+            [0.1, -0.05, 0.03],
+        ]
+    )
+    kwargs = dict(
+        X_trg=X_trg,
+        digits=digits,
+        nfp=nfp,
+        half_period=half_period,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=src_nt,
+        src_np=src_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        max_Nt=13,
+        max_Np=13,
+        chunk_size=64,
+        target_chunk_size=2,
+    )
+
+    direct = compute_external_B_offsurf_functional(X, B0, adaptive=False, **kwargs)
+    adaptive = compute_external_B_offsurf_functional(X, B0, adaptive=True, **kwargs)
+
+    np.testing.assert_allclose(adaptive, direct, rtol=1e-12, atol=1e-12)
+
+
+def test_functional_offsurface_gradB_matches_target_finite_difference_and_reshapes():
+    nfp = 1
+    half_period = False
+    surf_nt = 5
+    surf_np = 4
+    src_nt = 5
+    src_np = 4
+    trg_nt = 5
+    trg_np = 4
+    digits = 4
+
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.02 + jnp.array([0.1, -0.03, 0.04])[:, None, None]
+    target = jnp.array([[2.5], [0.0], [0.1]])
+    kwargs = dict(
+        digits=digits,
+        nfp=nfp,
+        half_period=half_period,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=src_nt,
+        src_np=src_np,
+        trg_nt=trg_nt,
+        trg_np=trg_np,
+        max_Nt=13,
+        max_Np=13,
+        chunk_size=64,
+        target_chunk_size=1,
+    )
+
+    grad = compute_external_gradB_offsurf_functional(X, B0, X_trg=target, adaptive=False, **kwargs)
+    grad_grid = compute_external_gradB_offsurf_functional(
+        X,
+        B0,
+        X_trg=target.reshape((3, 1, 1)),
+        adaptive=True,
+        **kwargs,
+    )
+
+    eps = 1e-5
+    target_plus = target.at[0, 0].add(eps)
+    target_minus = target.at[0, 0].add(-eps)
+    B_plus = compute_external_B_offsurf_functional(X, B0, X_trg=target_plus, adaptive=False, **kwargs)
+    B_minus = compute_external_B_offsurf_functional(X, B0, X_trg=target_minus, adaptive=False, **kwargs)
+    fd = (B_plus[:, 0] - B_minus[:, 0]) / (2.0 * eps)
+
+    assert grad.shape == (3, 3, 1)
+    assert grad_grid.shape == (3, 3, 1, 1)
+    np.testing.assert_allclose(grad_grid[:, :, 0, 0], grad[:, :, 0], rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(grad[:, 0, 0], fd, rtol=3e-4, atol=3e-6)
