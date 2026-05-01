@@ -1,10 +1,12 @@
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from virtual_casing_jax import VirtualCasing
+from virtual_casing_jax.simsopt_virtual_casing import _3d_from_soa, _soa_from_3d
 
 try:  # optional deps
     from mpi4py import MPI  # noqa: F401
@@ -90,6 +92,87 @@ VARIABLES = [
     "B_external",
     "B_external_normal",
 ]
+
+
+def _small_virtual_casing_result():
+    vc = VirtualCasing()
+    vc.src_ntheta = 2
+    vc.src_nphi = 3
+    vc.src_theta = np.array([0.0, 0.5])
+    vc.src_phi = np.array([0.0, 1.0 / 3.0, 2.0 / 3.0])
+    vc.trgt_ntheta = 2
+    vc.trgt_nphi = 3
+    vc.trgt_theta = np.array([0.125, 0.625])
+    vc.trgt_phi = np.array([0.05, 0.35, 0.65])
+    vc.nfp = 2
+    vc.gamma = np.arange(18.0).reshape((3, 2, 3))
+    vc.unit_normal = np.ones((3, 2, 3))
+    vc.B_total = 0.1 * np.arange(18.0).reshape((3, 2, 3))
+    vc.B_external = 0.2 * np.arange(18.0).reshape((3, 2, 3))
+    vc.B_external_normal = np.array([[1.0, -1.0], [0.5, -0.5], [0.25, -0.25]])
+    vc.B_external_normal_extended = np.vstack(
+        [vc.B_external_normal, -vc.B_external_normal, vc.B_external_normal, -vc.B_external_normal]
+    )
+    return vc
+
+
+def test_simsopt_layout_conversions_round_trip_vector_components():
+    aos = np.arange(24.0).reshape((4, 2, 3))
+
+    soa = _soa_from_3d(aos)
+    restored = _3d_from_soa(soa)
+
+    assert soa.shape == (3, 4, 2)
+    np.testing.assert_allclose(restored, aos)
+    np.testing.assert_allclose(soa[:, 1, 0], aos[1, 0, :])
+
+
+def test_virtual_casing_save_load_roundtrip_without_simsopt_runtime(tmp_path):
+    vc1 = _small_virtual_casing_result()
+    path = tmp_path / "vcasing.nc"
+
+    vc1.save(path)
+    vc2 = VirtualCasing.load(path)
+
+    for variable in VARIABLES + ["B_external_normal_extended"]:
+        np.testing.assert_allclose(getattr(vc1, variable), getattr(vc2, variable))
+    assert int(vc2.nfp) == vc1.nfp
+    assert int(vc2.src_nphi) == vc1.src_nphi
+    assert int(vc2.trgt_ntheta) == vc1.trgt_ntheta
+
+
+@pytest.mark.skipif(matplotlib is None, reason="Need matplotlib")
+def test_virtual_casing_plot_uses_existing_axis_and_returns_it():
+    vc = _small_virtual_casing_result()
+    import matplotlib.pyplot as plt
+
+    _, ax0 = plt.subplots()
+    ax1 = vc.plot(ax=ax0, show=False)
+
+    assert ax1 is ax0
+    plt.close("all")
+
+
+@pytest.mark.skipif(matplotlib is None, reason="Need matplotlib")
+def test_virtual_casing_plot_allocates_axis_and_honors_show(monkeypatch):
+    vc = _small_virtual_casing_result()
+    import matplotlib.pyplot as plt
+
+    calls = []
+    monkeypatch.setattr(plt, "show", lambda: calls.append("show"))
+
+    ax = vc.plot(show=True)
+
+    assert ax.get_title() == "B_external_normal [Tesla]"
+    assert calls == ["show"]
+    plt.close("all")
+
+
+def test_from_vmec_reports_missing_simsopt_dependency(monkeypatch):
+    monkeypatch.setitem(sys.modules, "simsopt.mhd.vmec_diagnostics", None)
+
+    with pytest.raises(RuntimeError, match="simsopt is required"):
+        VirtualCasing.from_vmec("dummy-wout.nc", src_nphi=4, filename=None)
 
 
 @pytest.mark.large
