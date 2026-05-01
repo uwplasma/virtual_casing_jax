@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -166,6 +167,75 @@ def test_virtual_casing_plot_allocates_axis_and_honors_show(monkeypatch):
     assert ax.get_title() == "B_external_normal [Tesla]"
     assert calls == ["show"]
     plt.close("all")
+
+
+def test_virtual_casing_plot_is_testable_without_matplotlib_dependency(monkeypatch):
+    vc = _small_virtual_casing_result()
+    pyplot = types.ModuleType("matplotlib.pyplot")
+    matplotlib_mod = types.ModuleType("matplotlib")
+
+    class FakeFigure:
+        def __init__(self):
+            self.colorbars = 0
+            self.tight_layouts = 0
+
+        def colorbar(self, contours):
+            assert contours == "contours"
+            self.colorbars += 1
+
+        def tight_layout(self):
+            self.tight_layouts += 1
+
+    class FakeAxis:
+        def __init__(self):
+            self.xlabel = None
+            self.ylabel = None
+            self.title = None
+
+        def contourf(self, *args):
+            assert len(args) == 4
+            return "contours"
+
+        def set_xlabel(self, label):
+            self.xlabel = label
+
+        def set_ylabel(self, label):
+            self.ylabel = label
+
+        def set_title(self, title):
+            self.title = title
+
+    figures = []
+    show_calls = []
+
+    def subplots():
+        fig = FakeFigure()
+        ax = FakeAxis()
+        figures.append(fig)
+        return fig, ax
+
+    def gcf():
+        if not figures:
+            figures.append(FakeFigure())
+        return figures[-1]
+
+    pyplot.subplots = subplots
+    pyplot.gcf = gcf
+    pyplot.show = lambda: show_calls.append("show")
+    matplotlib_mod.pyplot = pyplot
+    monkeypatch.setitem(sys.modules, "matplotlib", matplotlib_mod)
+    monkeypatch.setitem(sys.modules, "matplotlib.pyplot", pyplot)
+
+    allocated_ax = vc.plot(show=True)
+    existing_ax = FakeAxis()
+    returned_ax = vc.plot(ax=existing_ax, show=False)
+
+    assert allocated_ax.title == "B_external_normal [Tesla]"
+    assert existing_ax.title == "B_external_normal [Tesla]"
+    assert returned_ax is existing_ax
+    assert show_calls == ["show"]
+    assert sum(fig.colorbars for fig in figures) == 4
+    assert sum(fig.tight_layouts for fig in figures) == 4
 
 
 def test_from_vmec_reports_missing_simsopt_dependency(monkeypatch):
