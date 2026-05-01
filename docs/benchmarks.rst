@@ -27,8 +27,15 @@ SIMSOPT virtual casing
    parity, BNORM residuals, timings, grid sizes, and git commit hashes.
 
 EXTENDER / STELLOPT
-   Compare coil-only, plasma-only, and total fields at points and on grids for
-   matched VMEC/coils inputs.
+   ``benchmarks/external/run_extender_compare.sh`` compares point-field
+   samples exported by STELLOPT/EXTENDER with samples from the JAX
+   VMEC-extender workflow. The executable harness accepts JSON, NPZ, or CSV
+   files with matched target points and any of ``B_total_xyz``,
+   ``B_plasma_xyz``, and ``B_coils_xyz``. It reports relative L2 errors,
+   maximum absolute errors, target-point agreement, and the decomposition
+   closure ``B_total = B_plasma + B_coils`` when all components are present.
+   A complete benchmark run still requires a matched EXTENDER field-sample
+   export for the same VMEC/coils input.
 
 BMW / vector potential
    Compare direct volume-current fields and curl-of-vector-potential grids once
