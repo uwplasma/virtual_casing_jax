@@ -8,6 +8,9 @@ on:
         required: false
         default: main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   vmec-bridge-smoke:
     runs-on: ubuntu-22.04
@@ -15,16 +18,16 @@ jobs:
       contents: read
     steps:
       - name: Checkout virtual_casing_jax
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: virtual_casing_jax
       - name: Checkout vmec_jax
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: uwplasma/vmec_jax
           ref: ${{ inputs.vmec_jax_ref }}
           path: vmec_jax
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install packages
