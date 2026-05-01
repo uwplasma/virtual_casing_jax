@@ -18,9 +18,13 @@ Planned benchmark families
 --------------------------
 
 SIMSOPT virtual casing
-   Compare boundary normal fields and off-surface fields against
-   ``simsopt.mhd.VirtualCasing`` with matched VMEC input, source grid, and
-   symmetry convention.
+   ``benchmarks/external/run_simsopt_vc_compare.sh`` runs an executable
+   comparison against upstream ``simsopt.mhd.VirtualCasing`` with matched VMEC
+   input, source grid, target grid, stellarator-symmetry setting, and digits.
+   The default finite-beta QH case also evaluates the bundled BNORM
+   sine-series normal-field reference using the SIMSOPT current normalization.
+   The script writes a JSON report with external-normal parity, full-vector
+   parity, BNORM residuals, timings, grid sizes, and git commit hashes.
 
 EXTENDER / STELLOPT
    Compare coil-only, plasma-only, and total fields at points and on grids for
