@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: ["codex/**", "main"]
   pull_request:
@@ -10,11 +11,15 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -24,12 +29,14 @@ jobs:
       - name: Run tests
         env:
           JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
         run: |
           python -m pytest -q -m "not large" \
             --cov=virtual_casing_jax \
             --cov-report=term-missing \
             --cov-report=xml
       - name: Upload coverage
+        if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml
@@ -51,4 +58,4 @@ jobs:
           python -m pip install -r docs/requirements.txt
       - name: Build docs
         run: |
-          sphinx-build -b html docs docs/_build/html
+          sphinx-build -W --keep-going -b html docs docs/_build/html

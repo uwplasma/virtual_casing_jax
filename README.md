@@ -121,3 +121,39 @@ tensorboard --logdir /tmp/vc_trace_case_vc_large_GradB
 
 This writes JAX traces under `/tmp/vc_trace_*` and HLO dumps under
 `/tmp/vc_xla_*`. See `docs/performance.rst` for detailed interpretation.
+
+VMEC Exterior Fields
+--------------------
+
+`virtual_casing_jax` can wrap VMEC boundary data as an EXTENDER-like exterior
+field:
+
+```python
+import vmec_jax
+from virtual_casing_jax import (
+    ExteriorFieldConfig,
+    VirtualCasingExteriorField,
+    surface_field_from_vmec_jax,
+)
+
+run = vmec_jax.run_fixed_boundary("input.vmec")
+surface = surface_field_from_vmec_jax(run.state, run.static, run.indata)
+field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
+
+B_plasma = field.B_plasma_xyz([[1.8, 0.0, 0.0]])
+```
+
+For targets outside the VMEC boundary, the plasma-current contribution uses the
+`internal` virtual-casing branch by default because the plasma currents are
+inside the LCFS:
+
+```text
+B_out(x) = B_coils(x) + B_plasma^VC(x)
+         = B_coils(x) + B_internal^VC(x)
+```
+
+The `external` branch remains available for diagnostics and means currents
+outside the VMEC surface, not target points outside the VMEC surface. This is
+not a self-consistent SOL plasma equilibrium solver; it does not replace HINT,
+SIESTA, PIES, or M3D-C1 when islands, stochastic regions, pressure relaxation,
+edge currents, or resistive MHD response must be solved self-consistently.
