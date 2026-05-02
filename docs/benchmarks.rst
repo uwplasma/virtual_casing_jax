@@ -34,8 +34,14 @@ EXTENDER / STELLOPT
    ``B_plasma_xyz``, and ``B_coils_xyz``. It reports relative L2 errors,
    maximum absolute errors, target-point agreement, and the decomposition
    closure ``B_total = B_plasma + B_coils`` when all components are present.
-   A complete benchmark run still requires a matched EXTENDER field-sample
-   export for the same VMEC/coils input.
+   When both files provide ``normal_xyz``, it also reports normal-component
+   parity and the LCFS boundary diagnostic
+   ``rms(B_total dot n) / rms(|B_total|)``. The repository includes a
+   deterministic boundary-format example under
+   ``benchmarks/external/examples`` for exercising the file contract and
+   normal-cancellation thresholds before exchanging files with STELLOPT. A
+   complete benchmark run still requires a matched EXTENDER field-sample export
+   for the same VMEC/coils input.
 
 BMW / vector potential
    Compare direct volume-current fields and curl-of-vector-potential grids once

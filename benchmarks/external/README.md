@@ -29,4 +29,23 @@ JSON, NPZ, or CSV format. Provide `--reference` for STELLOPT/EXTENDER output
 and `--candidate` for JAX VMEC-extender output. Supported vector components are
 `B_total_xyz`, `B_plasma_xyz`, and `B_coils_xyz`; the report includes relative
 L2 errors, max absolute errors, target-point agreement, and the decomposition
-closure `B_total = B_plasma + B_coils` when all components are present.
+closure `B_total = B_plasma + B_coils` when all components are present. If both
+inputs provide `normal_xyz`, the report also includes normal-component parity
+and the LCFS-style cancellation metric `rms(B_total dot n) / rms(|B_total|)`.
+
+A deterministic boundary-format example is included so the comparator can be
+run without STELLOPT installed:
+
+```bash
+benchmarks/external/run_extender_compare.sh \
+  --reference benchmarks/external/examples/extender_boundary_reference.json \
+  --candidate benchmarks/external/examples/extender_boundary_candidate.json \
+  --max-normal-relative-l2 1e-14 \
+  --max-normal-abs 1e-14 \
+  --max-total-normal-relative-rms 1e-14 \
+  --out /tmp/extender_compare_example.json
+```
+
+The example is not a replacement for a STELLOPT run. It is a reproducible
+contract test for sample layout, vector decomposition closure, and boundary
+normal cancellation before exchanging files with an external EXTENDER build.

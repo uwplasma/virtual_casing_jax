@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 FIELD_NAMES = ("B_total_xyz", "B_plasma_xyz", "B_coils_xyz")
 POINT_ALIASES = ("xyz", "points_xyz", "target_xyz", "targets_xyz")
+NORMAL_ALIASES = ("normal_xyz", "normals_xyz", "n_xyz", "unit_normal_xyz", "normal")
 FIELD_ALIASES = {
     "B_xyz": "B_total_xyz",
     "B_total": "B_total_xyz",
@@ -44,6 +45,11 @@ CSV_FIELD_COLUMNS = {
         ("bvac_x", "bvac_y", "bvac_z"),
     ),
 }
+CSV_NORMAL_COLUMNS = (
+    ("normal_x", "normal_y", "normal_z"),
+    ("n_x", "n_y", "n_z"),
+    ("nx", "ny", "nz"),
+)
 
 
 def _git_commit(path: Path) -> str | None:
@@ -69,11 +75,22 @@ def _as_array(value: Any, name: str) -> np.ndarray:
     return arr
 
 
+def _unit_vectors(value: np.ndarray, name: str) -> np.ndarray:
+    norms = np.linalg.norm(value, axis=1)
+    if np.any(norms == 0.0):
+        raise ValueError(f"{name} contains zero-length vectors")
+    return value / norms[:, None]
+
+
 def _canonicalize_mapping(data: dict[str, Any]) -> dict[str, np.ndarray]:
     canonical: dict[str, np.ndarray] = {}
     for key in POINT_ALIASES:
         if key in data:
             canonical["xyz"] = _as_array(data[key], key)
+            break
+    for key in NORMAL_ALIASES:
+        if key in data:
+            canonical["normal_xyz"] = _as_array(data[key], key)
             break
     for key, value in data.items():
         name = FIELD_ALIASES.get(key, key)
@@ -82,6 +99,8 @@ def _canonicalize_mapping(data: dict[str, Any]) -> dict[str, np.ndarray]:
     if "xyz" not in canonical:
         raise ValueError(f"field samples must include one of {POINT_ALIASES}")
     npts = canonical["xyz"].shape[0]
+    if "normal_xyz" in canonical and canonical["normal_xyz"].shape[0] != npts:
+        raise ValueError(f"normal_xyz has {canonical['normal_xyz'].shape[0]} points but xyz has {npts}")
     for name in FIELD_NAMES:
         if name in canonical and canonical[name].shape[0] != npts:
             raise ValueError(f"{name} has {canonical[name].shape[0]} points but xyz has {npts}")
@@ -128,6 +147,9 @@ def _load_csv(path: Path) -> dict[str, np.ndarray]:
     if point_cols is None:
         raise ValueError("CSV samples must include x,y,z columns")
     data: dict[str, Any] = {"xyz": _columns(rows, point_cols)}
+    normal_cols = _first_available_columns(headers, CSV_NORMAL_COLUMNS)
+    if normal_cols is not None:
+        data["normal_xyz"] = _columns(rows, normal_cols)
     for field_name, candidates in CSV_FIELD_COLUMNS.items():
         cols = _first_available_columns(headers, candidates)
         if cols is not None:
@@ -175,6 +197,22 @@ def _closure_metrics(samples: dict[str, np.ndarray], prefix: str) -> dict[str, f
     }
 
 
+def _normal_cancellation_metrics(samples: dict[str, np.ndarray], prefix: str) -> dict[str, float]:
+    if "normal_xyz" not in samples or "B_total_xyz" not in samples:
+        return {}
+    normals = _unit_vectors(samples["normal_xyz"], f"{prefix}.normal_xyz")
+    normal_field = np.sum(samples["B_total_xyz"] * normals, axis=1)
+    scale = np.sqrt(np.mean(np.sum(samples["B_total_xyz"] ** 2, axis=1)))
+    if scale == 0.0:
+        relative_rms = float(np.sqrt(np.mean(normal_field**2)))
+    else:
+        relative_rms = float(np.sqrt(np.mean(normal_field**2)) / scale)
+    return {
+        f"{prefix}_total_normal_relative_rms": relative_rms,
+        f"{prefix}_total_normal_max_abs": float(np.max(np.abs(normal_field))),
+    }
+
+
 def compare_samples(
     reference: dict[str, np.ndarray],
     candidate: dict[str, np.ndarray],
@@ -190,6 +228,24 @@ def compare_samples(
             "candidate and reference target points differ; "
             f"max_abs_delta={float(np.max(np.abs(point_delta))):.6g}"
         )
+    has_reference_normals = "normal_xyz" in reference
+    has_candidate_normals = "normal_xyz" in candidate
+    if has_reference_normals != has_candidate_normals:
+        raise ValueError("reference and candidate must either both provide normal_xyz or both omit it")
+    normals: np.ndarray | None = None
+    if has_reference_normals:
+        if reference["normal_xyz"].shape != candidate["normal_xyz"].shape:
+            raise ValueError(
+                "normal shape mismatch: "
+                f"reference {reference['normal_xyz'].shape}, candidate {candidate['normal_xyz'].shape}"
+            )
+        if not np.allclose(candidate["normal_xyz"], reference["normal_xyz"], rtol=point_rtol, atol=point_atol):
+            normal_delta = candidate["normal_xyz"] - reference["normal_xyz"]
+            raise ValueError(
+                "candidate and reference target normals differ; "
+                f"max_abs_delta={float(np.max(np.abs(normal_delta))):.6g}"
+            )
+        normals = _unit_vectors(reference["normal_xyz"], "normal_xyz")
 
     fields = [name for name in FIELD_NAMES if name in reference and name in candidate]
     if not fields:
@@ -200,19 +256,32 @@ def compare_samples(
         "fields_compared": fields,
         "point_max_abs_delta": float(np.max(np.abs(candidate["xyz"] - reference["xyz"]))),
     }
+    if normals is not None:
+        metrics["normal_max_abs_delta"] = float(np.max(np.abs(candidate["normal_xyz"] - reference["normal_xyz"])))
     for name in fields:
         diff = candidate[name] - reference[name]
         metrics[f"{name}_relative_l2"] = _relative_l2(candidate[name], reference[name])
         metrics[f"{name}_max_abs"] = float(np.max(np.abs(diff)))
         metrics[f"{name}_max_relative_to_ref_max"] = _max_relative_to_reference(candidate[name], reference[name])
+        if normals is not None:
+            candidate_normal = np.sum(candidate[name] * normals, axis=1)
+            reference_normal = np.sum(reference[name] * normals, axis=1)
+            normal_diff = candidate_normal - reference_normal
+            metrics[f"{name}_normal_relative_l2"] = _relative_l2(candidate_normal, reference_normal)
+            metrics[f"{name}_normal_max_abs"] = float(np.max(np.abs(normal_diff)))
 
     metrics.update(_closure_metrics(reference, "reference"))
     metrics.update(_closure_metrics(candidate, "candidate"))
+    metrics.update(_normal_cancellation_metrics(reference, "reference"))
+    metrics.update(_normal_cancellation_metrics(candidate, "candidate"))
     return metrics
 
 
 def _threshold_failures(metrics: dict[str, Any], args: argparse.Namespace) -> list[str]:
     failures: list[str] = []
+    max_normal_relative_l2 = getattr(args, "max_normal_relative_l2", None)
+    max_normal_abs = getattr(args, "max_normal_abs", None)
+    max_total_normal_relative_rms = getattr(args, "max_total_normal_relative_rms", None)
     for name in metrics.get("fields_compared", []):
         rel = metrics[f"{name}_relative_l2"]
         max_abs = metrics[f"{name}_max_abs"]
@@ -220,9 +289,23 @@ def _threshold_failures(metrics: dict[str, Any], args: argparse.Namespace) -> li
             failures.append(f"{name}_relative_l2={rel:.6g} > {args.max_relative_l2:.6g}")
         if max_abs > args.max_abs:
             failures.append(f"{name}_max_abs={max_abs:.6g} > {args.max_abs:.6g}")
+        normal_rel_key = f"{name}_normal_relative_l2"
+        normal_abs_key = f"{name}_normal_max_abs"
+        if max_normal_relative_l2 is not None and normal_rel_key in metrics:
+            normal_rel = metrics[normal_rel_key]
+            if normal_rel > max_normal_relative_l2:
+                failures.append(f"{normal_rel_key}={normal_rel:.6g} > {max_normal_relative_l2:.6g}")
+        if max_normal_abs is not None and normal_abs_key in metrics:
+            normal_abs = metrics[normal_abs_key]
+            if normal_abs > max_normal_abs:
+                failures.append(f"{normal_abs_key}={normal_abs:.6g} > {max_normal_abs:.6g}")
     for key in ("reference_closure_relative_l2", "candidate_closure_relative_l2"):
         if key in metrics and metrics[key] > args.max_closure_relative_l2:
             failures.append(f"{key}={metrics[key]:.6g} > {args.max_closure_relative_l2:.6g}")
+    if max_total_normal_relative_rms is not None:
+        for key in ("reference_total_normal_relative_rms", "candidate_total_normal_relative_rms"):
+            if key in metrics and metrics[key] > max_total_normal_relative_rms:
+                failures.append(f"{key}={metrics[key]:.6g} > {max_total_normal_relative_rms:.6g}")
     return failures
 
 
@@ -295,6 +378,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", type=Path, default=ROOT / "benchmarks" / "external" / "extender_compare.json")
     parser.add_argument("--max-relative-l2", type=float, default=1e-4)
     parser.add_argument("--max-abs", type=float, default=1e-6)
+    parser.add_argument(
+        "--max-normal-relative-l2",
+        type=float,
+        default=None,
+        help="Optional threshold for field normal-component relative L2 errors when normal_xyz is present.",
+    )
+    parser.add_argument(
+        "--max-normal-abs",
+        type=float,
+        default=None,
+        help="Optional threshold for field normal-component max absolute errors when normal_xyz is present.",
+    )
+    parser.add_argument(
+        "--max-total-normal-relative-rms",
+        type=float,
+        default=None,
+        help="Optional LCFS-style threshold for rms(B_total dot n) / rms(|B_total|) when normals are present.",
+    )
     parser.add_argument("--max-closure-relative-l2", type=float, default=1e-10)
     parser.add_argument("--point-atol", type=float, default=1e-12)
     parser.add_argument("--point-rtol", type=float, default=1e-12)
