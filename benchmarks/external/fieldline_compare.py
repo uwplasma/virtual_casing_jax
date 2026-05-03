@@ -2,9 +2,9 @@
 
 The harness is format-oriented so it can compare outputs from STELLOPT
 FIELDLINES, TORLINES, FLARE, or another tracing code once they have been
-exported to simple JSON, NPZ, or CSV samples. It reports Poincare point
-agreement and connection-length agreement, the two diagnostics called out in
-the VMEC-extender benchmark plan.
+exported to simple JSON, NPZ, CSV, or STELLOPT/FIELDLINES HDF5 samples. It
+reports Poincare point agreement and connection-length agreement, the two
+diagnostics called out in the VMEC-extender benchmark plan.
 """
 
 from __future__ import annotations
@@ -182,6 +182,69 @@ def _load_csv(path: Path) -> dict[str, np.ndarray]:
     return _canonicalize_mapping(data)
 
 
+def _h5_scalar(data: Any, name: str, default: int | None = None) -> int:
+    if name not in data:
+        if default is None:
+            raise ValueError(f"FIELDLINES HDF5 file is missing {name!r}")
+        return default
+    arr = np.asarray(data[name]).reshape(-1)
+    if arr.size == 0:
+        if default is None:
+            raise ValueError(f"FIELDLINES HDF5 dataset {name!r} is empty")
+        return default
+    return int(arr[0])
+
+
+def _load_stellopt_h5(path: Path) -> dict[str, np.ndarray]:
+    try:
+        import h5py
+    except ImportError as exc:  # pragma: no cover - exercised only without optional dependency
+        raise RuntimeError("h5py is required to load STELLOPT/FIELDLINES HDF5 output") from exc
+
+    with h5py.File(path, "r") as f:
+        missing = [name for name in ("R_lines", "PHI_lines", "Z_lines") if name not in f]
+        if missing:
+            raise ValueError(f"FIELDLINES HDF5 file is missing trajectory dataset(s): {missing}")
+
+        R = np.asarray(f["R_lines"], dtype=float)
+        phi = np.asarray(f["PHI_lines"], dtype=float)
+        Z = np.asarray(f["Z_lines"], dtype=float)
+        if R.ndim != 2 or phi.shape != R.shape or Z.shape != R.shape:
+            raise ValueError(
+                "FIELDLINES trajectory datasets must share shape (nsteps, nlines); "
+                f"got R={R.shape}, PHI={phi.shape}, Z={Z.shape}"
+            )
+        if R.shape[0] == 0 or R.shape[1] == 0:
+            raise ValueError("FIELDLINES trajectory datasets must contain at least one step and one line")
+
+        stride = _h5_scalar(f, "npoinc", default=1)
+        if stride <= 0:
+            raise ValueError(f"FIELDLINES npoinc must be positive, got {stride}")
+        sample_indices = np.arange(0, R.shape[0], stride, dtype=int)
+
+        rphiz = np.stack((R[sample_indices], phi[sample_indices], Z[sample_indices]), axis=-1)
+        nsections, nlines, _ = rphiz.shape
+        data: dict[str, Any] = {
+            "poincare_rphiz": rphiz.reshape((-1, 3)),
+            "line_id": np.broadcast_to(np.arange(nlines, dtype=float), (nsections, nlines)).reshape(-1),
+            "section_phi": phi[sample_indices].reshape(-1),
+        }
+
+        if "L_lines" in f:
+            lengths = np.asarray(f["L_lines"], dtype=float).reshape(-1)
+            if lengths.size not in {nlines, nsections * nlines}:
+                raise ValueError(
+                    "FIELDLINES L_lines must have one value per line or sampled point; "
+                    f"got {lengths.size} values for {nlines} lines and {nsections} sections"
+                )
+            data["connection_lengths"] = lengths
+        if "wall_hits" in f:
+            hits = np.asarray(f["wall_hits"]).reshape(-1)
+            if hits.size:
+                data["hit_mask"] = hits.astype(bool)
+    return _canonicalize_mapping(data)
+
+
 def load_fieldline_samples(path: Path) -> dict[str, np.ndarray]:
     suffix = path.suffix.lower()
     if suffix == ".json":
@@ -190,7 +253,9 @@ def load_fieldline_samples(path: Path) -> dict[str, np.ndarray]:
         return _load_npz(path)
     if suffix in {".csv", ".txt"}:
         return _load_csv(path)
-    raise ValueError(f"Unsupported sample format {suffix!r}; expected .json, .npz, or .csv")
+    if suffix in {".h5", ".hdf5"}:
+        return _load_stellopt_h5(path)
+    raise ValueError(f"Unsupported sample format {suffix!r}; expected .json, .npz, .csv, or .h5")
 
 
 def _relative_l2(candidate: np.ndarray, reference: np.ndarray) -> float:

@@ -50,14 +50,17 @@ BMW / vector potential
 FIELDLINES / TORLINES / FLARE
    ``benchmarks/external/run_fieldline_compare.sh`` compares Poincare points
    and connection lengths exported by an external field-line tool with the
-   corresponding ESSOS/JAX diagnostics. The harness accepts JSON, NPZ, or CSV
-   files containing ``poincare_xyz`` or ``poincare_rphiz`` and/or
-   ``connection_lengths``. Ordered comparisons report point relative L2, RMS
-   distance, and max distance. Unordered point-cloud comparisons report
-   symmetric nearest-neighbor RMS and max distances. Optional ``hit_mask`` data
-   reports wall-hit mismatch fractions. A deterministic example under
-   ``benchmarks/external/examples`` exercises the file contract without
-   requiring STELLOPT to be installed.
+   corresponding ESSOS/JAX diagnostics. The harness accepts JSON, NPZ, CSV, or
+   STELLOPT/FIELDLINES HDF5 files. Plain files should contain
+   ``poincare_xyz`` or ``poincare_rphiz`` and/or ``connection_lengths``.
+   FIELDLINES HDF5 files are read directly from ``R_lines``, ``PHI_lines``,
+   ``Z_lines``, ``npoinc``, and ``L_lines``; every ``npoinc`` step is treated
+   as a field-period Poincare section. Ordered comparisons report point
+   relative L2, RMS distance, and max distance. Unordered point-cloud
+   comparisons report symmetric nearest-neighbor RMS and max distances.
+   Optional ``hit_mask`` data reports wall-hit mismatch fractions. A
+   deterministic example under ``benchmarks/external/examples`` exercises the
+   file contract without requiring STELLOPT to be installed.
 
 Reporting requirements
 ----------------------

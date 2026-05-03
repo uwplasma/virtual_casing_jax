@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -123,6 +124,174 @@ def test_load_fieldline_samples_from_json_npz_and_csv_aliases(tmp_path):
     np.testing.assert_array_equal(loaded_csv["hit_mask"], [False])
     np.testing.assert_allclose(loaded_csv["line_id"], [2.0])
     np.testing.assert_allclose(loaded_csv["section_phi"], [0.0])
+
+
+def test_load_stellopt_fieldlines_h5_samples_poincare_sections(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    h5_path = tmp_path / "fieldlines_synthetic.h5"
+    # STELLOPT/FIELDLINES writes trajectories as (nsteps, nlines) and uses
+    # npoinc as the number of integration steps per field-period Poincare hit.
+    with h5py.File(h5_path, "w") as f:
+        f["R_lines"] = np.asarray(
+            [
+                [1.0, 2.0],
+                [1.1, 2.1],
+                [1.2, 2.2],
+                [1.3, 2.3],
+                [1.4, 2.4],
+            ]
+        )
+        f["PHI_lines"] = np.asarray(
+            [
+                [0.0, 0.0],
+                [0.5, 0.5],
+                [1.0, 1.0],
+                [1.5, 1.5],
+                [2.0, 2.0],
+            ]
+        )
+        f["Z_lines"] = np.asarray(
+            [
+                [0.0, 0.2],
+                [0.1, 0.3],
+                [0.2, 0.4],
+                [0.3, 0.5],
+                [0.4, 0.6],
+            ]
+        )
+        f["L_lines"] = np.asarray([12.0, 14.0])
+        f["npoinc"] = np.asarray([2], dtype=np.int32)
+
+    loaded = fieldline_compare.load_fieldline_samples(h5_path)
+
+    np.testing.assert_allclose(
+        loaded["poincare_rphiz"],
+        [
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.2],
+            [1.2, 1.0, 0.2],
+            [2.2, 1.0, 0.4],
+            [1.4, 2.0, 0.4],
+            [2.4, 2.0, 0.6],
+        ],
+    )
+    np.testing.assert_allclose(loaded["line_id"], [0, 1, 0, 1, 0, 1])
+    np.testing.assert_allclose(loaded["section_phi"], [0, 0, 1, 1, 2, 2])
+    np.testing.assert_allclose(loaded["connection_lengths"], [12.0, 14.0])
+
+
+def test_stellopt_fieldlines_h5_defaults_to_every_step_without_npoinc(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    h5_path = tmp_path / "fieldlines_no_npoinc.hdf5"
+    with h5py.File(h5_path, "w") as f:
+        f["R_lines"] = np.asarray([[1.0], [1.1], [1.2]])
+        f["PHI_lines"] = np.asarray([[0.0], [0.5], [1.0]])
+        f["Z_lines"] = np.asarray([[0.0], [0.1], [0.2]])
+        f["wall_hits"] = np.asarray([0, 1, 0], dtype=np.int32)
+
+    loaded = fieldline_compare.load_fieldline_samples(h5_path)
+
+    np.testing.assert_allclose(
+        loaded["poincare_rphiz"],
+        [[1.0, 0.0, 0.0], [1.1, 0.5, 0.1], [1.2, 1.0, 0.2]],
+    )
+    np.testing.assert_array_equal(loaded["hit_mask"], [False, True, False])
+
+
+def test_stellopt_fieldlines_h5_empty_npoinc_uses_every_step(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    h5_path = tmp_path / "fieldlines_empty_npoinc.h5"
+    with h5py.File(h5_path, "w") as f:
+        f["R_lines"] = np.asarray([[1.0], [1.2]])
+        f["PHI_lines"] = np.asarray([[0.0], [0.6]])
+        f["Z_lines"] = np.asarray([[0.0], [0.2]])
+        f["npoinc"] = np.asarray([], dtype=np.int32)
+
+    loaded = fieldline_compare.load_fieldline_samples(h5_path)
+
+    np.testing.assert_allclose(loaded["poincare_rphiz"], [[1.0, 0.0, 0.0], [1.2, 0.6, 0.2]])
+
+
+def test_stellopt_fieldlines_h5_rejects_invalid_trajectory_contracts(tmp_path):
+    h5py = pytest.importorskip("h5py")
+
+    missing_path = tmp_path / "missing_z.h5"
+    with h5py.File(missing_path, "w") as f:
+        f["R_lines"] = np.asarray([[1.0]])
+        f["PHI_lines"] = np.asarray([[0.0]])
+    with pytest.raises(ValueError, match="missing trajectory"):
+        fieldline_compare.load_fieldline_samples(missing_path)
+
+    shape_path = tmp_path / "shape_mismatch.h5"
+    with h5py.File(shape_path, "w") as f:
+        f["R_lines"] = np.asarray([[1.0, 2.0]])
+        f["PHI_lines"] = np.asarray([[0.0]])
+        f["Z_lines"] = np.asarray([[0.0, 0.1]])
+    with pytest.raises(ValueError, match="share shape"):
+        fieldline_compare.load_fieldline_samples(shape_path)
+
+    stride_path = tmp_path / "bad_stride.h5"
+    with h5py.File(stride_path, "w") as f:
+        f["R_lines"] = np.asarray([[1.0]])
+        f["PHI_lines"] = np.asarray([[0.0]])
+        f["Z_lines"] = np.asarray([[0.0]])
+        f["npoinc"] = np.asarray([0], dtype=np.int32)
+    with pytest.raises(ValueError, match="npoinc must be positive"):
+        fieldline_compare.load_fieldline_samples(stride_path)
+
+    length_path = tmp_path / "bad_lengths.h5"
+    with h5py.File(length_path, "w") as f:
+        f["R_lines"] = np.asarray([[1.0, 2.0], [1.1, 2.1]])
+        f["PHI_lines"] = np.asarray([[0.0, 0.0], [0.5, 0.5]])
+        f["Z_lines"] = np.asarray([[0.0, 0.2], [0.1, 0.3]])
+        f["npoinc"] = np.asarray([1], dtype=np.int32)
+        f["L_lines"] = np.asarray([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError, match="L_lines"):
+        fieldline_compare.load_fieldline_samples(length_path)
+
+
+def test_stellopt_fieldlines_h5_rejects_empty_lines_and_required_scalar_errors(tmp_path):
+    h5py = pytest.importorskip("h5py")
+
+    empty_lines_path = tmp_path / "empty_lines.h5"
+    with h5py.File(empty_lines_path, "w") as f:
+        f["R_lines"] = np.empty((0, 1))
+        f["PHI_lines"] = np.empty((0, 1))
+        f["Z_lines"] = np.empty((0, 1))
+    with pytest.raises(ValueError, match="at least one step"):
+        fieldline_compare.load_fieldline_samples(empty_lines_path)
+
+    with pytest.raises(ValueError, match="missing 'required_scalar'"):
+        fieldline_compare._h5_scalar({}, "required_scalar")
+
+    empty_scalar_path = tmp_path / "empty_scalar.h5"
+    with h5py.File(empty_scalar_path, "w") as f:
+        f["required_scalar"] = np.asarray([], dtype=np.int32)
+        with pytest.raises(ValueError, match="dataset 'required_scalar' is empty"):
+            fieldline_compare._h5_scalar(f, "required_scalar")
+
+
+def test_load_fieldline_samples_rejects_unknown_format(tmp_path):
+    with pytest.raises(ValueError, match="Unsupported sample format"):
+        fieldline_compare.load_fieldline_samples(tmp_path / "samples.dat")
+
+
+def test_zero_reference_norm_metrics_fall_back_to_absolute_errors():
+    reference = {
+        "poincare_xyz": np.zeros((2, 3)),
+        "connection_lengths": np.zeros(2),
+    }
+    candidate = {
+        "poincare_xyz": np.asarray([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]]),
+        "connection_lengths": np.asarray([3.0, 4.0]),
+    }
+
+    metrics = fieldline_compare.compare_samples(reference, candidate, point_mode="ordered")
+
+    assert metrics["poincare_xyz_point_relative_l2"] == np.sqrt(5.0)
+    assert metrics["poincare_xyz_point_relative_rms_distance"] == np.sqrt(2.5)
+    assert metrics["connection_length_relative_l2"] == 5.0
+    assert metrics["connection_length_max_relative_to_ref_max"] == 4.0
 
 
 def test_run_compare_skips_with_stellopt_provenance_when_inputs_are_absent(tmp_path):

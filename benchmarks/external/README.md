@@ -53,10 +53,14 @@ contract test for sample layout, vector decomposition closure, and boundary
 normal cancellation before exchanging files with an external EXTENDER build.
 
 The FIELDLINES/TORLINES comparison consumes reference and candidate field-line
-diagnostics in JSON, NPZ, or CSV format. Provide `poincare_xyz` or
-`poincare_rphiz` points and/or `connection_lengths`. The report includes
-ordered point errors or unordered point-cloud distances, connection-length
-relative L2 errors, and optional wall-hit mask mismatch fractions.
+diagnostics in JSON, NPZ, CSV, or STELLOPT/FIELDLINES HDF5 format. Provide
+`poincare_xyz` or `poincare_rphiz` points and/or `connection_lengths` for the
+plain formats. For STELLOPT/FIELDLINES `.h5` output, the loader reads
+`R_lines`, `PHI_lines`, `Z_lines`, `npoinc`, and `L_lines`; it samples every
+`npoinc` step as a field-period Poincare section and exports ordered
+`poincare_rphiz` points. The report includes ordered point errors or unordered
+point-cloud distances, connection-length relative L2 errors, and optional
+wall-hit mask mismatch fractions.
 
 A deterministic field-line example is included:
 
@@ -72,3 +76,17 @@ benchmarks/external/run_fieldline_compare.sh \
 
 Use `--point-mode cloud` for unordered Poincare point clouds where the external
 tracer and ESSOS/JAX export do not preserve the same point ordering.
+
+An installed STELLOPT/FIELDLINES checkout can be run outside CI and compared
+directly:
+
+```bash
+xfieldlines -vmec NCSX_s1 -coil coils.NCSX -vac
+benchmarks/external/run_fieldline_compare.sh \
+  --reference fieldlines_NCSX_s1.h5 \
+  --candidate vmec_extender_trace_samples.npz \
+  --stellopt-root /path/to/STELLOPT \
+  --max-point-relative-l2 1e-3 \
+  --max-connection-relative-l2 1e-3 \
+  --out /tmp/fieldline_compare_ncsx.json
+```
