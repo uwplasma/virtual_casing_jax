@@ -48,8 +48,16 @@ BMW / vector potential
    the BMW prototype is implemented.
 
 FIELDLINES / TORLINES / FLARE
-   Compare exported-grid tracing results and connection lengths with external
-   field-line tools.
+   ``benchmarks/external/run_fieldline_compare.sh`` compares Poincare points
+   and connection lengths exported by an external field-line tool with the
+   corresponding ESSOS/JAX diagnostics. The harness accepts JSON, NPZ, or CSV
+   files containing ``poincare_xyz`` or ``poincare_rphiz`` and/or
+   ``connection_lengths``. Ordered comparisons report point relative L2, RMS
+   distance, and max distance. Unordered point-cloud comparisons report
+   symmetric nearest-neighbor RMS and max distances. Optional ``hit_mask`` data
+   reports wall-hit mismatch fractions. A deterministic example under
+   ``benchmarks/external/examples`` exercises the file contract without
+   requiring STELLOPT to be installed.
 
 Reporting requirements
 ----------------------

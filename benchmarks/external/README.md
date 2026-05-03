@@ -8,6 +8,8 @@ Initial targets:
 
 - `run_simsopt_vc_compare.sh`: executable SIMSOPT virtual-casing comparison.
 - `run_extender_compare.sh`: STELLOPT/EXTENDER point-field comparison harness.
+- `run_fieldline_compare.sh`: FIELDLINES/TORLINES/FLARE Poincare and
+  connection-length comparison harness.
 - `run_bmw_compare.sh`: BMW/vector-potential comparison placeholder.
 
 Each benchmark should write a machine-readable JSON report containing input
@@ -49,3 +51,24 @@ benchmarks/external/run_extender_compare.sh \
 The example is not a replacement for a STELLOPT run. It is a reproducible
 contract test for sample layout, vector decomposition closure, and boundary
 normal cancellation before exchanging files with an external EXTENDER build.
+
+The FIELDLINES/TORLINES comparison consumes reference and candidate field-line
+diagnostics in JSON, NPZ, or CSV format. Provide `poincare_xyz` or
+`poincare_rphiz` points and/or `connection_lengths`. The report includes
+ordered point errors or unordered point-cloud distances, connection-length
+relative L2 errors, and optional wall-hit mask mismatch fractions.
+
+A deterministic field-line example is included:
+
+```bash
+benchmarks/external/run_fieldline_compare.sh \
+  --reference benchmarks/external/examples/fieldline_reference.json \
+  --candidate benchmarks/external/examples/fieldline_candidate.json \
+  --max-point-relative-l2 1e-14 \
+  --max-connection-relative-l2 1e-14 \
+  --max-hit-mismatch-fraction 0 \
+  --out /tmp/fieldline_compare_example.json
+```
+
+Use `--point-mode cloud` for unordered Poincare point clouds where the external
+tracer and ESSOS/JAX export do not preserve the same point ordering.
