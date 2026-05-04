@@ -16,6 +16,9 @@ Initial targets:
   real STELLOPT/FIELDLINES HDF5 runs.
 - `trace_fieldlines_grid_candidate.py`: independent short-horizon candidate
   tracer for a stored STELLOPT/FIELDLINES HDF5 grid.
+- `trace_fieldlines_simsopt_candidate.py`: independent Simsopt Biot-Savart
+  tracer for a STELLOPT/FIELDLINES MAKEGRID coil case, including FIELDLINES
+  `EXTCUR` group-current scaling.
 - `run_bmw_compare.sh`: BMW/vector-potential comparison placeholder.
 
 Each benchmark should write a machine-readable JSON report containing input
@@ -194,3 +197,50 @@ The committed comparison report matches 16 labeled Poincare sections for line
 distance is `3.4256843828908055e-02` m. The finite tolerance reflects the
 intentional difference between FIELDLINES' LSODE/Hermite spline path and this
 small independent linear-grid RK4 candidate tracer.
+
+A stronger short-horizon NCSX artifact traces the same line using an
+independent Simsopt Biot-Savart field reconstructed from the MAKEGRID
+`coils.NCSX` file. The script applies the same scaled-current convention as
+STELLOPT `FIELDLINES/Sources/fieldlines_init_coil.f90`: for each current
+group, the raw MAKEGRID currents are rescaled by
+`(raw_current / first_group_current) * EXTCUR(group)` using active `EXTCUR`
+assignments from `input.NCSX_s1`.
+
+```bash
+python benchmarks/external/trace_fieldlines_simsopt_candidate.py \
+  fieldlines_NCSX_s1.h5 \
+  coils.NCSX \
+  input.NCSX_s1 \
+  --simsopt-src /path/to/simsopt/src \
+  --source-label STELLOPT_FIELDLINES_NCSX_s1 \
+  --coils-label external-run/fieldlines_NCSX_s1_run/coils.NCSX \
+  --input-label external-run/fieldlines_NCSX_s1_run/input.NCSX_s1 \
+  --lines 0 \
+  --nsections 16 \
+  --substeps 2 \
+  --order 20 \
+  --ppp 20 \
+  --reference-out benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_reference.npz \
+  --candidate-out benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_candidate.npz \
+  --report benchmarks/external/reports/fieldlines_ncsx_s1_simsopt_candidate_metadata.json
+
+benchmarks/external/run_fieldline_compare.sh \
+  --reference benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_reference.npz \
+  --candidate benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_candidate.npz \
+  --reference-label benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_reference.npz \
+  --candidate-label benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_candidate.npz \
+  --point-mode labeled \
+  --max-point-relative-l2 2e-4 \
+  --max-point-rms-distance 4e-3 \
+  --max-point-max-distance 7e-3 \
+  --max-connection-relative-l2 1e-14 \
+  --out benchmarks/external/reports/fieldlines_ncsx_s1_simsopt_candidate_compare.json
+```
+
+The committed Simsopt comparison report matches all 16 labeled sections. The
+relative L2 point error is `1.9164674995888646e-04`, RMS point distance is
+`3.544757608425162e-03` m, and max point distance is
+`6.7763504965551525e-03` m. This is an external-code cross-check of coil
+current conventions and field-line equations; it is still not a VMEC-extender
+plasma-field benchmark because no matching NCSX VMEC `wout` for this raw run
+is committed.

@@ -1,0 +1,35 @@
+{
+  "candidate": "benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_candidate.npz",
+  "compared_connection_lengths": true,
+  "compared_hit_masks": false,
+  "connection_length_count": 1,
+  "connection_length_max_abs": 0.0,
+  "connection_length_max_relative_to_ref_max": 0.0,
+  "connection_length_relative_l2": 0.0,
+  "passed_thresholds": true,
+  "poincare_rphiz_candidate_count": 16,
+  "poincare_rphiz_labeled_candidate_label_count": 16,
+  "poincare_rphiz_labeled_count_mismatch_label_count": 0,
+  "poincare_rphiz_labeled_extra_candidate_label_count": 0,
+  "poincare_rphiz_labeled_matched_label_count": 16,
+  "poincare_rphiz_labeled_matched_point_count": 16,
+  "poincare_rphiz_labeled_missing_candidate_label_count": 0,
+  "poincare_rphiz_labeled_point_max_abs_component": 0.006341264578607009,
+  "poincare_rphiz_labeled_point_max_distance": 0.0067763504965551525,
+  "poincare_rphiz_labeled_point_relative_l2": 0.00019164674995888646,
+  "poincare_rphiz_labeled_point_relative_rms_distance": 0.00019164674995888646,
+  "poincare_rphiz_labeled_point_rms_distance": 0.003544757608425162,
+  "poincare_rphiz_labeled_reference_label_count": 16,
+  "poincare_rphiz_reference_count": 16,
+  "point_coordinates_compared": [
+    "poincare_rphiz"
+  ],
+  "point_mode": "labeled",
+  "reference": "benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_reference.npz",
+  "status": "completed",
+  "stellopt": {
+    "status": "not_requested"
+  },
+  "threshold_failures": [],
+  "virtual_casing_jax_commit": "b03e51882b3c6a88411ca7932217c97301f67c90"
+}

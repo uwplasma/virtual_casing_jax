@@ -549,8 +549,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
     metrics.update(
         {
             "status": "completed",
-            "reference": str(reference_path),
-            "candidate": str(candidate_path),
+            "reference": args.reference_label or str(reference_path),
+            "candidate": args.candidate_label or str(candidate_path),
             "stellopt": _find_stellopt_root(args.stellopt_root),
             "virtual_casing_jax_commit": _git_commit(ROOT),
         }
@@ -570,6 +570,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", type=Path, default=None, help="External FIELDLINES/TORLINES samples")
     parser.add_argument("--candidate", type=Path, default=None, help="JAX/ESSOS VMEC-extender samples")
+    parser.add_argument("--reference-label", default=None, help="Portable label to record instead of the resolved reference path")
+    parser.add_argument("--candidate-label", default=None, help="Portable label to record instead of the resolved candidate path")
     parser.add_argument("--stellopt-root", type=Path, default=None, help="Optional STELLOPT checkout for provenance")
     parser.add_argument("--out", type=Path, default=ROOT / "benchmarks" / "external" / "fieldline_compare.json")
     parser.add_argument("--point-mode", choices=("ordered", "cloud", "labeled"), default="ordered")
