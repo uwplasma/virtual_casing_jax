@@ -10,6 +10,12 @@ __pycache__/
 *.egg-info/
 .dist/
 .build/
+build/
+dist/
 venv/
 .venv/
 .pytest_cache/
+docs/_build/
+htmlcov/
+.coverage
+coverage.xml

@@ -79,6 +79,9 @@ def test_jit_and_batch_wrappers_case_vc():
     Bvc = vc.compute_external_B(B0, quad_nt=quad_nt, quad_np=quad_np, digits=5, chunk_size=1024)
     Bvc_jit = vc.compute_external_B_jit(B0, quad_nt=quad_nt, quad_np=quad_np, digits=5, chunk_size=1024)
     np.testing.assert_allclose(np.asarray(Bvc_jit), np.asarray(Bvc), rtol=1e-8, atol=1e-10)
+    Bint = vc.compute_internal_B(B0, quad_nt=quad_nt, quad_np=quad_np, digits=5, chunk_size=1024)
+    Bint_jit = vc.compute_internal_B_jit(B0, quad_nt=quad_nt, quad_np=quad_np, digits=5, chunk_size=1024)
+    np.testing.assert_allclose(np.asarray(Bint_jit), np.asarray(Bint), rtol=1e-8, atol=1e-10)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="Some donated buffers were not usable")
         Bvc_jit_donate = vc.compute_external_B_jit(
@@ -90,10 +93,24 @@ def test_jit_and_batch_wrappers_case_vc():
             donate=True,
         )
     np.testing.assert_allclose(np.asarray(Bvc_jit_donate), np.asarray(Bvc), rtol=1e-8, atol=1e-10)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Some donated buffers were not usable")
+        Bint_jit_donate = vc.compute_internal_B_jit(
+            B0.copy(),
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+            digits=5,
+            chunk_size=1024,
+            donate=True,
+        )
+    np.testing.assert_allclose(np.asarray(Bint_jit_donate), np.asarray(Bint), rtol=1e-8, atol=1e-10)
 
     gradB = vc.compute_external_gradB(B0, quad_nt=quad_nt, quad_np=quad_np, digits=5, hedgehog_order=8, chunk_size=1024)
     gradB_jit = vc.compute_external_gradB_jit(B0, quad_nt=quad_nt, quad_np=quad_np, digits=5, hedgehog_order=8, chunk_size=1024)
     np.testing.assert_allclose(np.asarray(gradB_jit), np.asarray(gradB), rtol=1e-8, atol=1e-10)
+    gradBint = vc.compute_internal_gradB(B0, quad_nt=quad_nt, quad_np=quad_np, digits=5, hedgehog_order=8, chunk_size=1024)
+    gradBint_jit = vc.compute_internal_gradB_jit(B0, quad_nt=quad_nt, quad_np=quad_np, digits=5, hedgehog_order=8, chunk_size=1024)
+    np.testing.assert_allclose(np.asarray(gradBint_jit), np.asarray(gradBint), rtol=1e-8, atol=1e-10)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="Some donated buffers were not usable")
         gradB_jit_donate = vc.compute_external_gradB_jit(
@@ -106,10 +123,26 @@ def test_jit_and_batch_wrappers_case_vc():
             donate=True,
         )
     np.testing.assert_allclose(np.asarray(gradB_jit_donate), np.asarray(gradB), rtol=1e-8, atol=1e-10)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Some donated buffers were not usable")
+        gradBint_jit_donate = vc.compute_internal_gradB_jit(
+            B0.copy(),
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+            digits=5,
+            hedgehog_order=8,
+            chunk_size=1024,
+            donate=True,
+        )
+    np.testing.assert_allclose(np.asarray(gradBint_jit_donate), np.asarray(gradBint), rtol=1e-8, atol=1e-10)
 
     B0_batch = np.stack([B0, B0 * 1.001], axis=0)
     Bvc_batch = vc.compute_external_B_batch(B0_batch, quad_nt=quad_nt, quad_np=quad_np, digits=5, chunk_size=1024)
     np.testing.assert_allclose(np.asarray(Bvc_batch[0]), np.asarray(Bvc), rtol=1e-8, atol=1e-10)
+    Bint_batch = vc.compute_internal_B_batch(B0_batch, quad_nt=quad_nt, quad_np=quad_np, digits=5, chunk_size=1024)
+    np.testing.assert_allclose(np.asarray(Bint_batch[0]), np.asarray(Bint), rtol=1e-8, atol=1e-10)
 
     gradB_batch = vc.compute_external_gradB_batch(B0_batch, quad_nt=quad_nt, quad_np=quad_np, digits=5, hedgehog_order=8, chunk_size=1024)
     np.testing.assert_allclose(np.asarray(gradB_batch[0]), np.asarray(gradB), rtol=1e-8, atol=1e-10)
+    gradBint_batch = vc.compute_internal_gradB_batch(B0_batch, quad_nt=quad_nt, quad_np=quad_np, digits=5, hedgehog_order=8, chunk_size=1024)
+    np.testing.assert_allclose(np.asarray(gradBint_batch[0]), np.asarray(gradBint), rtol=1e-8, atol=1e-10)

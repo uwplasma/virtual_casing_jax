@@ -1,38 +1,67 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: ["codex/**", "main"]
   pull_request:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   tests:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
           python -m pip install -r docs/requirements.txt
-          python -m pip install pytest pytest-cov
+          python -m pip install pytest pytest-cov h5py
       - name: Run tests
         env:
           JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
         run: |
           python -m pytest -q -m "not large" \
             --cov=virtual_casing_jax \
             --cov-report=term-missing \
             --cov-report=xml
-      - name: Upload coverage
-        uses: codecov/codecov-action@v5
+      - name: Upload coverage XML artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: coverage-xml
+          path: coverage.xml
+      - name: Check Codecov token
+        if: matrix.python-version == '3.12'
+        id: codecov-token
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Codecov upload because CODECOV_TOKEN is not configured."
+          fi
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12' && steps.codecov-token.outputs.available == 'true'
+        uses: codecov/codecov-action@v6.0.0
         with:
           files: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
   docs:
@@ -40,8 +69,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install docs dependencies
@@ -51,4 +80,4 @@ jobs:
           python -m pip install -r docs/requirements.txt
       - name: Build docs
         run: |
-          sphinx-build -b html docs docs/_build/html
+          sphinx-build -W --keep-going -b html docs docs/_build/html
