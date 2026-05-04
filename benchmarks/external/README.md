@@ -7,9 +7,13 @@ run in default CI.
 Initial targets:
 
 - `run_simsopt_vc_compare.sh`: executable SIMSOPT virtual-casing comparison.
+- `vc_cpp_compare.py`: hiddenSymmetries/virtual-casing + BIEST W7-X
+  virtual-casing comparison.
 - `run_extender_compare.sh`: STELLOPT/EXTENDER point-field comparison harness.
 - `run_fieldline_compare.sh`: FIELDLINES/TORLINES/FLARE Poincare and
   connection-length comparison harness.
+- `extract_fieldlines_h5_samples.py`: compact reference artifact extractor for
+  real STELLOPT/FIELDLINES HDF5 runs.
 - `run_bmw_compare.sh`: BMW/vector-potential comparison placeholder.
 
 Each benchmark should write a machine-readable JSON report containing input
@@ -25,6 +29,32 @@ bundled under `tests/test_files` by default. It reports:
   normalization as SIMSOPT's validation tests;
 - wall-clock timings and source/target grid sizes;
 - git commit hashes when the checkouts are available.
+
+The committed report
+`benchmarks/external/reports/simsopt_vc_compare_qh_report.json` was generated
+from the bundled finite-beta QH VMEC/BNORM case and passed the default
+thresholds:
+
+- external-normal relative L2: `1.688886506194555e-05`;
+- external-vector relative L2: `3.082168761484368e-06`;
+- JAX BNORM max residual: `0.006059902309512782`.
+
+The hiddenSymmetries/virtual-casing comparison uses the local upstream
+`virtual-casing` Python extension, which wraps the BIEST/SCTL implementation
+and includes the W7-X benchmark data used by Malhotra et al. The small
+committed report
+`benchmarks/external/reports/vc_cpp_w7x_small_compare.json` is intentionally
+low-resolution so it remains quick and reproducible on a laptop:
+
+```bash
+python benchmarks/external/vc_cpp_compare.py \
+  --out benchmarks/external/reports/vc_cpp_w7x_small_compare.json
+```
+
+This is a literature-anchored numerical benchmark for the virtual-casing
+surface integral. It complements the SIMSOPT parity check by exercising an
+independent C++/BIEST implementation and an analytic reference field bundled
+with that upstream package.
 
 The EXTENDER comparison consumes reference and candidate point-field samples in
 JSON, NPZ, or CSV format. Provide `--reference` for STELLOPT/EXTENDER output
@@ -90,3 +120,34 @@ benchmarks/external/run_fieldline_compare.sh \
   --max-connection-relative-l2 1e-3 \
   --out /tmp/fieldline_compare_ncsx.json
 ```
+
+A real STELLOPT/FIELDLINES NCSX vacuum run has also been reduced to a compact
+committed reference artifact:
+
+- raw run command:
+  `xfieldlines -vmec NCSX_s1 -coil coils.NCSX -vac`;
+- raw HDF5 schema: `R_lines`, `PHI_lines`, `Z_lines`, and `B_lines` with shape
+  `(24001, 2)`, `npoinc=8`, and `L_lines` with two connection lengths;
+- committed sample:
+  `benchmarks/external/examples/fieldlines_ncsx_s1_reference.npz`, containing
+  6002 ordered `poincare_rphiz` points and two `connection_lengths`;
+- extraction metadata:
+  `benchmarks/external/reports/fieldlines_ncsx_s1_reference_metadata.json`;
+- self-check report:
+  `benchmarks/external/reports/fieldlines_ncsx_s1_self_compare.json`.
+
+Regenerate the compact artifact from a raw HDF5 file with:
+
+```bash
+python benchmarks/external/extract_fieldlines_h5_samples.py \
+  fieldlines_NCSX_s1.h5 \
+  --out benchmarks/external/examples/fieldlines_ncsx_s1_reference.npz \
+  --report benchmarks/external/reports/fieldlines_ncsx_s1_reference_metadata.json \
+  --input input.NCSX_s1 \
+  --coils coils.NCSX \
+  --source-command "xfieldlines -vmec NCSX_s1 -coil coils.NCSX -vac"
+```
+
+The raw HDF5 is not committed because it is much larger than the compact
+sample. The committed NPZ is the stable reference contract for candidate ESSOS
+or JAX field-line exports.
