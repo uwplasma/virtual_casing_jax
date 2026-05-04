@@ -16,6 +16,12 @@ fieldline_compare = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(fieldline_compare)
 
+GRID_CANDIDATE = ROOT / "benchmarks" / "external" / "trace_fieldlines_grid_candidate.py"
+grid_spec = importlib.util.spec_from_file_location("trace_fieldlines_grid_candidate", GRID_CANDIDATE)
+trace_fieldlines_grid_candidate = importlib.util.module_from_spec(grid_spec)
+assert grid_spec.loader is not None
+grid_spec.loader.exec_module(trace_fieldlines_grid_candidate)
+
 
 def _samples(point_delta: float = 0.0, length_delta: float = 0.0, hit_flip: bool = False):
     points = np.asarray(
@@ -332,6 +338,73 @@ def test_stellopt_fieldlines_h5_rejects_empty_lines_and_required_scalar_errors(t
         f["required_scalar"] = np.asarray([], dtype=np.int32)
         with pytest.raises(ValueError, match="dataset 'required_scalar' is empty"):
             fieldline_compare._h5_scalar(f, "required_scalar")
+
+
+def test_trace_fieldlines_grid_candidate_matches_constant_rhs(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    h5_path = tmp_path / "constant_rhs_fieldlines.h5"
+    raxis = np.linspace(1.0, 2.0, 5)
+    phiaxis = np.linspace(0.0, 2.0, 6)
+    zaxis = np.linspace(-0.5, 0.5, 5)
+    dR_dphi = 0.1
+    dZ_dphi = -0.05
+    phi_steps = np.linspace(0.0, 1.2, 7)
+    with h5py.File(h5_path, "w") as f:
+        f["raxis"] = raxis
+        f["phiaxis"] = phiaxis
+        f["zaxis"] = zaxis
+        f["B_R"] = np.full((zaxis.size, phiaxis.size, raxis.size), dR_dphi)
+        f["B_Z"] = np.full((zaxis.size, phiaxis.size, raxis.size), dZ_dphi)
+        f["R_lines"] = (1.2 + dR_dphi * phi_steps)[:, None]
+        f["PHI_lines"] = phi_steps[:, None]
+        f["Z_lines"] = (0.1 + dZ_dphi * phi_steps)[:, None]
+        f["npoinc"] = np.asarray([2], dtype=np.int32)
+
+    reference, candidate, metadata = trace_fieldlines_grid_candidate.trace_grid_candidate(
+        h5_path,
+        lines=[0],
+        nsections=4,
+        substeps=1,
+    )
+
+    assert metadata["axis_order"] == "(nz, nphi, nr)"
+    np.testing.assert_allclose(candidate["poincare_rphiz"], reference["poincare_rphiz"], atol=1e-14)
+    labeled = fieldline_compare.compare_samples(reference, candidate, point_mode="labeled")
+    assert labeled["poincare_rphiz_labeled_point_max_distance"] < 1e-14
+
+
+def test_trace_fieldlines_grid_candidate_rejects_nonuniform_axes_and_terminated_lines(tmp_path):
+    h5py = pytest.importorskip("h5py")
+    h5_path = tmp_path / "bad_fieldlines.h5"
+    with h5py.File(h5_path, "w") as f:
+        f["raxis"] = np.asarray([1.0, 1.2, 1.8])
+        f["phiaxis"] = np.linspace(0.0, 1.0, 3)
+        f["zaxis"] = np.linspace(0.0, 1.0, 3)
+        f["B_R"] = np.zeros((3, 3, 3))
+        f["B_Z"] = np.zeros((3, 3, 3))
+        f["R_lines"] = np.ones((3, 1))
+        f["PHI_lines"] = np.asarray([[0.0], [-1.0], [-1.0]])
+        f["Z_lines"] = np.zeros((3, 1))
+        f["npoinc"] = np.asarray([1], dtype=np.int32)
+
+    with pytest.raises(ValueError, match="raxis must be uniformly spaced"):
+        trace_fieldlines_grid_candidate.trace_grid_candidate(
+            h5_path,
+            lines=[0],
+            nsections=2,
+            substeps=1,
+        )
+
+    with h5py.File(h5_path, "a") as f:
+        del f["raxis"]
+        f["raxis"] = np.linspace(1.0, 2.0, 3)
+    with pytest.raises(ValueError, match="terminated before requested section count"):
+        trace_fieldlines_grid_candidate.trace_grid_candidate(
+            h5_path,
+            lines=[0],
+            nsections=2,
+            substeps=1,
+        )
 
 
 def test_load_fieldline_samples_rejects_unknown_format(tmp_path):
