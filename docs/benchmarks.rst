@@ -75,7 +75,10 @@ FIELDLINES / TORLINES / FLARE
    as a field-period Poincare section. Ordered comparisons report point
    relative L2, RMS distance, and max distance. Unordered point-cloud
    comparisons report symmetric nearest-neighbor RMS and max distances.
-   Optional ``hit_mask`` data reports wall-hit mismatch fractions. A
+   Labeled comparisons match by ``line_id`` and ``section_phi`` before
+   computing point errors, which is the preferred mode for external-code
+   parity once both tracers export the same seed-line and Poincare-section
+   labels. Optional ``hit_mask`` data reports wall-hit mismatch fractions. A
    deterministic example under ``benchmarks/external/examples`` exercises the
    file contract without requiring STELLOPT to be installed.
 

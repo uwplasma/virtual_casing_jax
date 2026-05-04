@@ -105,7 +105,12 @@ benchmarks/external/run_fieldline_compare.sh \
 ```
 
 Use `--point-mode cloud` for unordered Poincare point clouds where the external
-tracer and ESSOS/JAX export do not preserve the same point ordering.
+tracer and ESSOS/JAX export do not preserve the same point ordering. Prefer
+`--point-mode labeled` when both files provide `line_id` and `section_phi`:
+this matches samples by field-line id and toroidal section before computing
+point errors, so the comparison is invariant to export order while still
+catching missing, extra, or duplicated sections. The `--section-phi-atol`
+option controls the section-angle binning tolerance for labeled comparisons.
 
 An installed STELLOPT/FIELDLINES checkout can be run outside CI and compared
 directly:
@@ -135,6 +140,8 @@ committed reference artifact:
   `benchmarks/external/reports/fieldlines_ncsx_s1_reference_metadata.json`;
 - self-check report:
   `benchmarks/external/reports/fieldlines_ncsx_s1_self_compare.json`.
+- labeled self-check report:
+  `benchmarks/external/reports/fieldlines_ncsx_s1_labeled_compare.json`.
 
 Regenerate the compact artifact from a raw HDF5 file with:
 

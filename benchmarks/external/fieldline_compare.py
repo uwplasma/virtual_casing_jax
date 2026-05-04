@@ -10,11 +10,12 @@ diagnostics called out in the VMEC-extender benchmark plan.
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import csv
 import json
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -292,6 +293,80 @@ def _ordered_point_metrics(reference: np.ndarray, candidate: np.ndarray, prefix:
     }
 
 
+def _label_key(line_id: float, section_phi: float, section_phi_atol: float) -> tuple[float, int | float]:
+    line_key = float(np.round(line_id, 12))
+    if section_phi_atol <= 0.0:
+        return line_key, float(np.round(section_phi, 12))
+    return line_key, int(np.rint(section_phi / section_phi_atol))
+
+
+def _label_index(
+    samples: dict[str, np.ndarray],
+    point_name: str,
+    section_phi_atol: float,
+) -> dict[tuple[float, int | float], list[int]]:
+    if "line_id" not in samples or "section_phi" not in samples:
+        raise ValueError(
+            "point_mode='labeled' requires both reference and candidate samples to provide "
+            "line_id and section_phi arrays"
+        )
+    point_count = samples[point_name].shape[0]
+    line_id = np.asarray(samples["line_id"], dtype=float).reshape(-1)
+    section_phi = np.asarray(samples["section_phi"], dtype=float).reshape(-1)
+    if line_id.size != point_count:
+        raise ValueError(f"line_id length {line_id.size} does not match {point_name} point count {point_count}")
+    if section_phi.size != point_count:
+        raise ValueError(
+            f"section_phi length {section_phi.size} does not match {point_name} point count {point_count}"
+        )
+
+    index: dict[tuple[float, int | float], list[int]] = defaultdict(list)
+    for idx, (line, phi) in enumerate(zip(line_id, section_phi, strict=True)):
+        index[_label_key(float(line), float(phi), section_phi_atol)].append(idx)
+    return dict(index)
+
+
+def _labeled_point_metrics(
+    reference: dict[str, np.ndarray],
+    candidate: dict[str, np.ndarray],
+    point_name: str,
+    prefix: str,
+    section_phi_atol: float,
+) -> dict[str, float | int]:
+    ref_index = _label_index(reference, point_name, section_phi_atol)
+    cand_index = _label_index(candidate, point_name, section_phi_atol)
+    ref_labels = set(ref_index)
+    cand_labels = set(cand_index)
+    common_labels = sorted(ref_labels & cand_labels)
+    count_mismatch_labels = [
+        label for label in common_labels if len(ref_index[label]) != len(cand_index[label])
+    ]
+    comparable_labels = [label for label in common_labels if label not in set(count_mismatch_labels)]
+
+    metrics: dict[str, float | int] = {
+        f"{prefix}_labeled_reference_label_count": len(ref_labels),
+        f"{prefix}_labeled_candidate_label_count": len(cand_labels),
+        f"{prefix}_labeled_matched_label_count": len(common_labels),
+        f"{prefix}_labeled_missing_candidate_label_count": len(ref_labels - cand_labels),
+        f"{prefix}_labeled_extra_candidate_label_count": len(cand_labels - ref_labels),
+        f"{prefix}_labeled_count_mismatch_label_count": len(count_mismatch_labels),
+    }
+    if not comparable_labels:
+        raise ValueError(f"{prefix} has no comparable labeled Poincare samples")
+
+    ref_order = np.asarray([idx for label in comparable_labels for idx in ref_index[label]], dtype=int)
+    cand_order = np.asarray([idx for label in comparable_labels for idx in cand_index[label]], dtype=int)
+    metrics[f"{prefix}_labeled_matched_point_count"] = int(ref_order.size)
+    metrics.update(
+        _ordered_point_metrics(
+            reference[point_name][ref_order],
+            candidate[point_name][cand_order],
+            f"{prefix}_labeled",
+        )
+    )
+    return metrics
+
+
 def _cloud_point_metrics(reference: np.ndarray, candidate: np.ndarray, prefix: str) -> dict[str, float]:
     if reference.shape[1] != 3 or candidate.shape[1] != 3:
         raise ValueError(f"{prefix} point clouds must have 3 components")
@@ -339,9 +414,10 @@ def compare_samples(
     candidate: dict[str, np.ndarray],
     *,
     point_mode: str,
+    section_phi_atol: float = 1e-10,
 ) -> dict[str, Any]:
-    if point_mode not in {"ordered", "cloud"}:
-        raise ValueError("point_mode must be 'ordered' or 'cloud'")
+    if point_mode not in {"ordered", "cloud", "labeled"}:
+        raise ValueError("point_mode must be 'ordered', 'cloud', or 'labeled'")
 
     common_points = [name for name in ("poincare_xyz", "poincare_rphiz") if name in reference and name in candidate]
     has_connection = "connection_lengths" in reference and "connection_lengths" in candidate
@@ -361,8 +437,10 @@ def compare_samples(
         metrics[f"{prefix}_candidate_count"] = int(candidate[name].shape[0])
         if point_mode == "ordered":
             metrics.update(_ordered_point_metrics(reference[name], candidate[name], prefix))
-        else:
+        elif point_mode == "cloud":
             metrics.update(_cloud_point_metrics(reference[name], candidate[name], prefix))
+        else:
+            metrics.update(_labeled_point_metrics(reference, candidate, name, prefix, section_phi_atol))
 
     if has_connection:
         metrics["connection_length_count"] = int(reference["connection_lengths"].shape[0])
@@ -383,11 +461,24 @@ def _threshold_failures(metrics: dict[str, Any], args: argparse.Namespace) -> li
                 (f"{prefix}_point_rms_distance", args.max_point_rms_distance),
                 (f"{prefix}_point_max_distance", args.max_point_max_distance),
             )
-        else:
+        elif metrics["point_mode"] == "cloud":
             checks = (
                 (f"{prefix}_cloud_symmetric_relative_rms_distance", args.max_cloud_relative_rms_distance),
                 (f"{prefix}_cloud_symmetric_rms_distance", args.max_cloud_rms_distance),
                 (f"{prefix}_cloud_symmetric_max_distance", args.max_cloud_max_distance),
+            )
+        else:
+            for count_key in (
+                f"{prefix}_labeled_missing_candidate_label_count",
+                f"{prefix}_labeled_extra_candidate_label_count",
+                f"{prefix}_labeled_count_mismatch_label_count",
+            ):
+                if metrics.get(count_key, 0) > 0:
+                    failures.append(f"{count_key}={metrics[count_key]} > 0")
+            checks = (
+                (f"{prefix}_labeled_point_relative_l2", args.max_point_relative_l2),
+                (f"{prefix}_labeled_point_rms_distance", args.max_point_rms_distance),
+                (f"{prefix}_labeled_point_max_distance", args.max_point_max_distance),
             )
         for key, threshold in checks:
             if threshold is not None and key in metrics and metrics[key] > threshold:
@@ -449,7 +540,12 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
 
     reference = load_fieldline_samples(reference_path)
     candidate = load_fieldline_samples(candidate_path)
-    metrics = compare_samples(reference, candidate, point_mode=args.point_mode)
+    metrics = compare_samples(
+        reference,
+        candidate,
+        point_mode=args.point_mode,
+        section_phi_atol=args.section_phi_atol,
+    )
     metrics.update(
         {
             "status": "completed",
@@ -476,7 +572,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--candidate", type=Path, default=None, help="JAX/ESSOS VMEC-extender samples")
     parser.add_argument("--stellopt-root", type=Path, default=None, help="Optional STELLOPT checkout for provenance")
     parser.add_argument("--out", type=Path, default=ROOT / "benchmarks" / "external" / "fieldline_compare.json")
-    parser.add_argument("--point-mode", choices=("ordered", "cloud"), default="ordered")
+    parser.add_argument("--point-mode", choices=("ordered", "cloud", "labeled"), default="ordered")
+    parser.add_argument(
+        "--section-phi-atol",
+        type=float,
+        default=1e-10,
+        help="Toroidal-angle tolerance used to bin section_phi labels in --point-mode labeled.",
+    )
     parser.add_argument("--max-point-relative-l2", type=float, default=1e-3)
     parser.add_argument("--max-point-rms-distance", type=float, default=None)
     parser.add_argument("--max-point-max-distance", type=float, default=None)

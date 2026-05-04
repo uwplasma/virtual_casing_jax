@@ -37,6 +37,13 @@ def _samples(point_delta: float = 0.0, length_delta: float = 0.0, hit_flip: bool
     }
 
 
+def _labeled_samples(point_delta: float = 0.0):
+    samples = _samples(point_delta=point_delta)
+    samples["line_id"] = np.asarray([0.0, 1.0, 0.0, 1.0])
+    samples["section_phi"] = np.asarray([0.0, 0.0, 0.5, 0.5])
+    return samples
+
+
 def test_ordered_point_and_connection_metrics_report_physics_errors():
     reference = _samples()
     candidate = _samples(point_delta=1e-3, length_delta=1e-2)
@@ -62,6 +69,62 @@ def test_cloud_point_metrics_are_invariant_to_permutation():
     assert ordered["poincare_xyz_point_relative_l2"] > 0.0
     assert cloud["poincare_xyz_cloud_symmetric_rms_distance"] == 0.0
     assert cloud["poincare_xyz_cloud_symmetric_max_distance"] == 0.0
+
+
+def test_labeled_point_metrics_match_permuted_fieldline_sections():
+    reference = _labeled_samples()
+    candidate = _labeled_samples()
+    permutation = np.asarray([3, 1, 0, 2])
+    for key in ("poincare_xyz", "line_id", "section_phi"):
+        candidate[key] = candidate[key][permutation]
+
+    ordered = fieldline_compare.compare_samples(reference, candidate, point_mode="ordered")
+    labeled = fieldline_compare.compare_samples(reference, candidate, point_mode="labeled")
+
+    assert ordered["poincare_xyz_point_relative_l2"] > 0.0
+    assert labeled["poincare_xyz_labeled_matched_label_count"] == 4
+    assert labeled["poincare_xyz_labeled_missing_candidate_label_count"] == 0
+    assert labeled["poincare_xyz_labeled_extra_candidate_label_count"] == 0
+    assert labeled["poincare_xyz_labeled_count_mismatch_label_count"] == 0
+    assert labeled["poincare_xyz_labeled_point_relative_l2"] == 0.0
+    assert labeled["poincare_xyz_labeled_point_max_distance"] == 0.0
+
+
+def test_labeled_point_metrics_report_missing_extra_and_count_mismatch_labels():
+    reference = _labeled_samples()
+    candidate = _labeled_samples()
+    candidate["section_phi"] = candidate["section_phi"].copy()
+    candidate["section_phi"][0] = 1.0
+    candidate["line_id"] = np.concatenate([candidate["line_id"], [candidate["line_id"][1]]])
+    candidate["section_phi"] = np.concatenate([candidate["section_phi"], [candidate["section_phi"][1]]])
+    candidate["poincare_xyz"] = np.vstack([candidate["poincare_xyz"], candidate["poincare_xyz"][1]])
+
+    metrics = fieldline_compare.compare_samples(reference, candidate, point_mode="labeled")
+    args = argparse.Namespace(
+        max_point_relative_l2=1.0,
+        max_point_rms_distance=1.0,
+        max_point_max_distance=1.0,
+        max_cloud_relative_rms_distance=1.0,
+        max_cloud_rms_distance=1.0,
+        max_cloud_max_distance=1.0,
+        max_connection_relative_l2=1.0,
+        max_connection_max_abs=None,
+        max_hit_mismatch_fraction=1.0,
+    )
+
+    failures = fieldline_compare._threshold_failures(metrics, args)
+
+    assert metrics["poincare_xyz_labeled_missing_candidate_label_count"] == 1
+    assert metrics["poincare_xyz_labeled_extra_candidate_label_count"] == 1
+    assert metrics["poincare_xyz_labeled_count_mismatch_label_count"] == 1
+    assert any("missing_candidate_label_count" in failure for failure in failures)
+    assert any("extra_candidate_label_count" in failure for failure in failures)
+    assert any("count_mismatch_label_count" in failure for failure in failures)
+
+
+def test_labeled_point_metrics_require_line_and_section_labels():
+    with pytest.raises(ValueError, match="requires both"):
+        fieldline_compare.compare_samples(_samples(), _samples(), point_mode="labeled")
 
 
 def test_threshold_failures_cover_poincare_connection_and_wall_hit_metrics():
