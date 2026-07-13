@@ -39,7 +39,7 @@ from .integrals import (
     computeGradB_offsurface_adaptive_schedule,
     laplace_dx_u_eval_singular,
 )
-from .virtual_casing import VirtualCasingJAX
+from .virtual_casing import PrecisionPlan, VirtualCasingJAX
 from .simsopt_virtual_casing import VirtualCasing
 from .utils import build_offsurface_levels
 from .exterior_field import (
@@ -116,6 +116,7 @@ __all__ = [
     "computeGradB_offsurface_adaptive_schedule",
     "laplace_dx_u_eval_singular",
     "VirtualCasingJAX",
+    "PrecisionPlan",
     "VirtualCasing",
     "build_offsurface_levels",
     "ExteriorFieldConfig",

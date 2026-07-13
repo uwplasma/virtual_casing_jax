@@ -18,7 +18,6 @@ from .surface_ops import (
     cross_prod,
 )
 from .integrals import (
-    laplace_fxd_u_eval,
     laplace_fxd_u_eval_singular,
     laplace_fxd_u_eval_vec_singular,
     laplace_fxd2_u_eval,
@@ -45,6 +44,29 @@ class QuadSetup:
     normal: jnp.ndarray
     orient: float
     patch_idx_cache: dict[int, jnp.ndarray] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PrecisionPlan:
+    """Adaptive-precision choices for a virtual-casing evaluation.
+
+    The quadrature grid sizes and the singular-patch indices are normally
+    auto-selected from the surface geometry inside the compute path, which
+    concretizes surface-derived values (``float(jnp.min(...))``, a
+    condition-number branch) and so cannot run under ``jax.grad``/``jit`` when
+    the surface is a traced array.  :meth:`VirtualCasingJAX.plan_precision`
+    performs that selection ONCE from a concrete surface and returns this plan
+    of static values; passing it back as ``precision=`` to
+    :meth:`compute_internal_B` / :meth:`compute_external_B` keeps the whole B
+    evaluation differentiable in the surface geometry (the precision is held
+    fixed, which is correct — these are numerical-accuracy knobs, robust to the
+    small surface perturbations of an optimization step).
+    """
+
+    quad_nt: int
+    quad_np: int
+    patch_dim0: int
+    patch_idx: jnp.ndarray
 
 
 class VirtualCasingJAX:
@@ -263,7 +285,12 @@ class VirtualCasingJAX:
         )
         dX = grad2d(quad_coord, quad_nt, quad_np)
         normal, _, orient = surf_normal_area_elem(dX, quad_coord, return_orientation=True)
-        orient = float(orient)
+        # ``orient`` is a discrete +/-1 sign (normal_orientation); ``float()`` it
+        # would concretize a surface-derived value and break tracing when the
+        # surface is differentiated.  Keep it as a stop-gradient jnp scalar: the
+        # sign is topologically stable under the small surface perturbations of
+        # an optimization step, so a zero gradient through it is correct.
+        orient = jax.lax.stop_gradient(jnp.asarray(orient))
         return QuadSetup(
             quad_nt=quad_nt,
             quad_np=quad_np,
@@ -292,6 +319,55 @@ class VirtualCasingJAX:
             )
             setup.patch_idx_cache[patch_dim0] = patch_idx
         return patch_dim0, patch_idx
+
+    def plan_precision(
+        self,
+        *,
+        digits: int | None = None,
+        quad_nt: int | None = None,
+        quad_np: int | None = None,
+    ) -> "PrecisionPlan":
+        """Select the adaptive precision from the *concrete* surface, once.
+
+        Returns a :class:`PrecisionPlan` (quadrature grid sizes + singular-patch
+        indices) of static values.  Pass it back as ``precision=`` to
+        :meth:`compute_internal_B` / :meth:`compute_external_B` so those calls
+        run with a fixed precision and stay differentiable in the surface
+        geometry.  Call this on a VC object built from a *concrete* surface (the
+        current optimization iterate); the auto-selection here concretizes
+        surface-derived quantities, which is exactly what must happen outside the
+        traced region.
+
+        Does not mutate the object's cached ``_b_setup`` — it builds a throwaway
+        setup solely to choose the patch indices.
+        """
+        if not self._setup:
+            raise RuntimeError("VirtualCasingJAX.setup must be called before plan_precision")
+        digits = self.digits if digits is None else int(digits)
+        if quad_nt is None or quad_np is None:
+            quad_nt, quad_np = self._select_quad_sizes(digits)
+        quad_nt, quad_np = int(quad_nt), int(quad_np)
+        scratch = self._build_quad_setup(quad_nt, quad_np)
+        patch_dim0, patch_idx = self._get_patch_idx(scratch, digits)
+        return PrecisionPlan(
+            quad_nt=quad_nt, quad_np=quad_np,
+            patch_dim0=int(patch_dim0), patch_idx=patch_idx,
+        )
+
+    @staticmethod
+    def _apply_precision(precision, quad_nt, quad_np, patch_dim0, patch_idx):
+        """Fill any unset quad/patch kwargs from a :class:`PrecisionPlan`."""
+        if precision is None:
+            return quad_nt, quad_np, patch_dim0, patch_idx
+        if quad_nt is None:
+            quad_nt = precision.quad_nt
+        if quad_np is None:
+            quad_np = precision.quad_np
+        if patch_dim0 is None:
+            patch_dim0 = precision.patch_dim0
+        if patch_idx is None:
+            patch_idx = precision.patch_idx
+        return quad_nt, quad_np, patch_dim0, patch_idx
 
     def _ensure_grad_setup(self, quad_nt: int | None, quad_np: int | None, digits: int):
         if not self._setup:
@@ -614,10 +690,13 @@ class VirtualCasingJAX:
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
+        precision=None,
     ):
         if not self._setup:
             raise RuntimeError("VirtualCasingJAX.setup must be called before compute_B")
 
+        quad_nt, quad_np, patch_dim0, patch_idx = self._apply_precision(
+            precision, quad_nt, quad_np, patch_dim0, patch_idx)
         digits = self.digits if digits is None else int(digits)
         self._ensure_b_setup(quad_nt, quad_np, digits)
         assert self._b_setup is not None
@@ -749,6 +828,7 @@ class VirtualCasingJAX:
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
+        precision=None,
     ):
         """Compute Bext from total B on the source grid."""
         return self._compute_B_signed(
@@ -766,6 +846,7 @@ class VirtualCasingJAX:
             remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
+            precision=precision,
         )
 
     def compute_internal_B(
@@ -784,6 +865,7 @@ class VirtualCasingJAX:
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
+        precision=None,
     ):
         """Compute Bint from total B on the source grid."""
         return self._compute_B_signed(
@@ -801,6 +883,7 @@ class VirtualCasingJAX:
             remat=remat,
             patch_dim0=patch_dim0,
             patch_idx=patch_idx,
+            precision=precision,
         )
 
     def compute_external_B_jit(self, B0, **kwargs):

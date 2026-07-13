@@ -63,6 +63,31 @@ vc_jax.setup(digits, nfp, stellsym, Nt, Np, gamma, Nt, Np, Nt, Np)
 B_external = vc_jax.compute_external_B(B_total)
 ```
 
+### Differentiable in the surface geometry
+
+`compute_external_B` / `compute_internal_B` are differentiable in the source
+field out of the box. They are *also* differentiable in the **surface
+coordinates** — useful for single-stage stellarator optimization, where the
+plasma boundary itself is a degree of freedom — once the adaptive precision is
+frozen. The precision auto-selection (quadrature grid size, singular-patch
+dimension) concretizes surface-derived values, so under `jax.grad`/`jit` of the
+surface you first pick it once from a concrete surface and pass it back:
+
+```python
+plan = vc_jax.plan_precision(digits=4)          # concrete surface -> PrecisionPlan
+
+def loss(surface_coord):                        # surface is the differentiated input
+    vc = VirtualCasingJAX()
+    vc.setup(digits, nfp, stellsym, Nt, Np, surface_coord, Nt, Np, Nt, Np)
+    return objective(vc.compute_internal_B(B_total, precision=plan))
+
+grad = jax.grad(loss)(surface_coord)            # finite (NaN-safe self-interaction)
+```
+
+`precision=plan` reproduces the auto-selected precision exactly (identical `B`),
+and the Laplace kernels use a NaN-safe self-interaction gradient, so the surface
+gradient is finite. `plan_precision` also accepts explicit `quad_nt`/`quad_np`.
+
 Performance features:
 - Source/target tiling with auto-tuned chunk sizes.
 - Rematerialization hooks for GradB singular correction.
