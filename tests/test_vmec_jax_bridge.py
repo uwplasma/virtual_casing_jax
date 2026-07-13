@@ -32,6 +32,8 @@ def _vmec_example_root():
 
 def test_surface_field_from_vmec_jax_circular_tokamak_smoke():
     vmec_jax = pytest.importorskip("vmec_jax")
+    if not hasattr(vmec_jax, "load_example"):
+        pytest.skip("vmec_jax.load_example helper is not available in this vmec_jax")
     root = _vmec_example_root()
     if root is None:
         pytest.skip("vmec_jax circular_tokamak example data is not available")
