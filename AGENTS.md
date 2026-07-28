@@ -2,7 +2,7 @@
 
 When modifying VMEC-extender or BMW code:
 
-1. Do not reimplement VMEC field construction; use `vmec_jax` public APIs.
+1. Do not reimplement VMEC field construction; use VMEX (`vmex`, formerly `vmec_jax`) public APIs.
 2. Treat `phi` vs `zeta` conventions as high-risk. Add tests for every change touching toroidal coordinates.
 3. Treat virtual-casing `internal` vs `external` branch signs as high-risk. Run branch/sign physics tests.
 4. Keep shapes static in JIT-heavy functions.

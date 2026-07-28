@@ -2,7 +2,11 @@ VMEC Extender
 =============
 
 ``virtual_casing_jax`` provides the plasma-field core for an EXTENDER-like
-workflow built from ``vmec_jax`` boundary data.
+workflow built from VMEC boundary data. The current downstream integration is
+`VMEX <https://github.com/uwplasma/vmex>`_ (package ``vmex``, the JAX VMEC
+formerly named ``vmec_jax``), whose free-boundary module
+``vmex.core.freeboundary_diff`` consumes this package's
+:class:`VmecSurfaceFieldData` and :class:`VirtualCasingExteriorField`.
 
 Physics model
 -------------
@@ -42,8 +46,9 @@ with coil-normal fields on a matched free-boundary case. It does not mean
 Coordinate conventions
 ----------------------
 
-``vmec_jax`` evaluates geometry on ``(s, theta, zeta)`` where ``zeta`` spans a
-field period. The physical toroidal angle is
+VMEX (like the historical ``vmec_jax``) evaluates geometry on
+``(s, theta, zeta)`` where ``zeta`` spans a field period. The physical
+toroidal angle is
 
 .. math::
 
@@ -65,21 +70,30 @@ surface while keeping user-supplied schedules static.
 Python workflow
 ---------------
 
+With VMEX installed, build the surface data directly from a ``wout`` file (or
+from a VMEX state via ``surface_field_data_from_state``):
+
 .. code-block:: python
 
-   import vmec_jax
-   from virtual_casing_jax import (
-       ExteriorFieldConfig,
-       VirtualCasingExteriorField,
-       surface_field_from_vmec_jax,
-   )
+   from vmex import read_wout
+   from vmex.core.freeboundary_diff import surface_field_data_from_wout
+   from virtual_casing_jax import ExteriorFieldConfig, VirtualCasingExteriorField
 
-   run = vmec_jax.run_fixed_boundary("input.vmec")
-   surface = surface_field_from_vmec_jax(run.state, run.static, run.indata)
+   wout = read_wout("wout_circular_tokamak.nc")
+   surface = surface_field_data_from_wout(wout, nphi=32, ntheta=32)
    field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
 
    B_plasma = field.B_plasma_xyz([[1.8, 0.0, 0.0]])
    B_cyl = field.B_cyl([[1.8, 0.0, 0.0]])
+
+Legacy ``vmec_jax`` bridge
+--------------------------
+
+The module ``virtual_casing_jax.vmec_jax_bridge`` and its entry point
+``surface_field_from_vmec_jax`` are retained only for backwards compatibility
+with the historical ``vmec_jax`` package name. They require that package to be
+importable and are not used by VMEX; new code should build
+:class:`VmecSurfaceFieldData` through VMEX as shown above.
 
 Validation checks
 -----------------

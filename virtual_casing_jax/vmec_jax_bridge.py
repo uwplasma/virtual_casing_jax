@@ -1,4 +1,10 @@
-"""Bridge helpers from ``vmec_jax`` state/static data to virtual casing."""
+"""Legacy bridge from the historical ``vmec_jax`` package to virtual casing.
+
+This module is retained for backwards compatibility with the ``vmec_jax``
+package name only. The current downstream integration is VMEX
+(``uwplasma/vmex``), which builds :class:`VmecSurfaceFieldData` itself via
+``vmex.core.freeboundary_diff`` and does not use this bridge.
+"""
 from __future__ import annotations
 
 import numpy as np

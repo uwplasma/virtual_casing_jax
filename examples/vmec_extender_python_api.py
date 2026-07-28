@@ -1,4 +1,8 @@
-"""Minimal VMEC-extender Python API example.
+"""Minimal VMEC-extender Python API example (legacy ``vmec_jax`` bridge).
+
+This example exercises the legacy ``vmec_jax`` bridge kept for backwards
+compatibility. The current downstream integration is VMEX (``uwplasma/vmex``),
+which builds the surface data via ``vmex.core.freeboundary_diff`` instead.
 
 Run from a checkout that also has ``vmec_jax`` importable, for example:
 

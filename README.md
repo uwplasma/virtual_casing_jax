@@ -151,22 +151,28 @@ VMEC Exterior Fields
 --------------------
 
 `virtual_casing_jax` can wrap VMEC boundary data as an EXTENDER-like exterior
-field:
+field. The current downstream integration is
+[VMEX](https://github.com/uwplasma/vmex) (package `vmex`, the JAX VMEC
+formerly named `vmec_jax`), whose free-boundary module
+`vmex.core.freeboundary_diff` builds a `VmecSurfaceFieldData` directly from a
+`wout` file or a VMEX state:
 
 ```python
-import vmec_jax
-from virtual_casing_jax import (
-    ExteriorFieldConfig,
-    VirtualCasingExteriorField,
-    surface_field_from_vmec_jax,
-)
+from vmex import read_wout
+from vmex.core.freeboundary_diff import surface_field_data_from_wout
+from virtual_casing_jax import ExteriorFieldConfig, VirtualCasingExteriorField
 
-run = vmec_jax.run_fixed_boundary("input.vmec")
-surface = surface_field_from_vmec_jax(run.state, run.static, run.indata)
+wout = read_wout("wout_circular_tokamak.nc")
+surface = surface_field_data_from_wout(wout, nphi=32, ntheta=32)
 field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
 
 B_plasma = field.B_plasma_xyz([[1.8, 0.0, 0.0]])
 ```
+
+The legacy bridge `surface_field_from_vmec_jax`
+(module `virtual_casing_jax.vmec_jax_bridge`) is kept only for backwards
+compatibility with the historical `vmec_jax` package name and requires that
+package to be importable.
 
 For targets outside the VMEC boundary, the plasma-current contribution uses the
 `internal` virtual-casing branch by default because the plasma currents are

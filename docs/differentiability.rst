@@ -18,9 +18,9 @@ their inputs are JAX arrays and static shapes are fixed:
 * cylindrical coordinate conversion;
 * smooth objectives such as normal-field and magnitude mean-square residuals.
 
-For VMEC-coupled differentiation, use the ``vmec_jax`` state/static path and
-avoid hidden Python-side resampling. Fixed source grid shapes are part of the
-compiled function contract.
+For VMEC-coupled differentiation, use the VMEX (``vmex``) state/static path
+and avoid hidden Python-side resampling. Fixed source grid shapes are part of
+the compiled function contract.
 
 Diagnostics only
 ----------------
