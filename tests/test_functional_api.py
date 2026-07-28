@@ -133,7 +133,7 @@ def test_functional_grad_wrt_surface():
     quad_np = surf_np
     quad_coord, dX, normal, _, orient = build_quad_setup(surface_coord, quad_nt, quad_np)
     patch_dim0 = select_patch_dim_from_geom(dX, quad_nt, quad_np, digits)
-    patch_idx = build_patch_idx(quad_nt, quad_np, trg_nt, trg_np, nfp_eff, patch_dim0)
+    build_patch_idx(quad_nt, quad_np, trg_nt, trg_np, nfp_eff, patch_dim0)
 
     X_trg = jnp.array(
         [

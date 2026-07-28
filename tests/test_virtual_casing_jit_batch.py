@@ -53,7 +53,6 @@ def test_jit_and_batch_wrappers_case_vc():
     prefix = "case_vc"
     X, src_nt, src_np, nfp, nfp_eff, half_period = _infer_setup(prefix)
     Bvc_ref = load_dump(DATA_DIR / f"{prefix}_computeB_Bvc")
-    gradB_ref = load_dump(DATA_DIR / f"{prefix}_computeGradB_gradBvc")
     quad_coord = load_dump(DATA_DIR / f"{prefix}_computeB_quad_coord")
     quad_nt = quad_coord.shape[1]
     quad_np = quad_coord.shape[2]

@@ -83,7 +83,6 @@ def test_gradb_offsurf_adaptive_matches_fd():
     gradB = np.asarray(gradB)
 
     eps = 1e-5
-    ntrg = Xt.shape[1]
     grad_fd = np.zeros_like(gradB)
     for i in range(3):
         Xt_pos = Xt.copy()
