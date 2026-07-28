@@ -1030,7 +1030,6 @@ def laplace_fxd_u_eval_singular(
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
     )
-    patch_dim = precomp.patch_dim
     ngrid = precomp.ngrid
 
     skip_nt = nt // (nfp * trg_nt)
@@ -1245,7 +1244,6 @@ def laplace_dx_u_eval_singular(
         pou_dtype=pou_dtype,
         patch_dtype=patch_dtype,
     )
-    patch_dim = precomp.patch_dim
     ngrid = precomp.ngrid
 
     skip_nt = nt // (nfp * trg_nt)

@@ -39,9 +39,25 @@ from .integrals import (
     computeGradB_offsurface_adaptive_schedule,
     laplace_dx_u_eval_singular,
 )
-from .virtual_casing import VirtualCasingJAX
+from .virtual_casing import PrecisionPlan, VirtualCasingJAX
 from .simsopt_virtual_casing import VirtualCasing
 from .utils import build_offsurface_levels
+from .exterior_field import (
+    ExteriorFieldConfig,
+    VirtualCasingExteriorField,
+    VmecSurfaceFieldData,
+    B_cyl_from_B_xyz,
+    cyl_to_xyz,
+    xyz_vec_to_cyl_vec,
+)
+from .vmec_jax_bridge import surface_field_from_vmec_jax
+from .grid_export import evaluate_on_rphiz_grid, write_extended_field_netcdf, write_mgrid_like
+from .objectives import (
+    boundary_normal_residual,
+    exterior_B_magnitude_squared,
+    exterior_Bn_squared,
+    grid_divergence_penalty,
+)
 from . import functional
 from .functional import (
     FunctionalSetup,
@@ -100,8 +116,23 @@ __all__ = [
     "computeGradB_offsurface_adaptive_schedule",
     "laplace_dx_u_eval_singular",
     "VirtualCasingJAX",
+    "PrecisionPlan",
     "VirtualCasing",
     "build_offsurface_levels",
+    "ExteriorFieldConfig",
+    "VirtualCasingExteriorField",
+    "VmecSurfaceFieldData",
+    "B_cyl_from_B_xyz",
+    "cyl_to_xyz",
+    "xyz_vec_to_cyl_vec",
+    "surface_field_from_vmec_jax",
+    "evaluate_on_rphiz_grid",
+    "write_extended_field_netcdf",
+    "write_mgrid_like",
+    "boundary_normal_residual",
+    "exterior_B_magnitude_squared",
+    "exterior_Bn_squared",
+    "grid_divergence_penalty",
     "functional",
     "FunctionalSetup",
     "build_surface_coord",

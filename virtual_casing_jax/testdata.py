@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 import functools
 import importlib.resources as resources
-from typing import Iterable, List, Sequence, Tuple
+from typing import List, Sequence
 
 import jax.numpy as jnp
 import numpy as np

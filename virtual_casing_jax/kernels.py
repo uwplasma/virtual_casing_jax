@@ -7,7 +7,15 @@ FOUR_PI = 4.0 * jnp.pi
 
 
 def _safe_rinv(r2, eps=1e-30):
-    return jnp.where(r2 > eps, 1.0 / jnp.sqrt(r2), 0.0)
+    # Self-interaction points (r2 -> 0) are excluded from the singular
+    # quadrature, so the VALUE is 0 there.  But ``jnp.where`` differentiates
+    # BOTH branches, and ``1/sqrt(r2)`` has a -inf gradient at r2 = 0 which the
+    # VJP turns into ``nan * 0 = nan`` -- poisoning any gradient w.r.t. the
+    # surface geometry (which moves the quadrature points).  The double-``where``
+    # feeds a safe ``1.0`` into the differentiated branch wherever the result is
+    # masked to 0, so both the value AND the gradient stay finite and correct.
+    safe_r2 = jnp.where(r2 > eps, r2, 1.0)
+    return jnp.where(r2 > eps, 1.0 / jnp.sqrt(safe_r2), 0.0)
 
 
 def laplace_fx_u(dx, f):

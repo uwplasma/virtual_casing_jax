@@ -13,9 +13,13 @@ JAX implementation of the virtual casing principle with high-order singular quad
    functional
    gradb
    offsurface
+   vmec_extender
+   exterior_field_api
+   differentiability
    testdata
    implementation
    performance
+   benchmarks
    using_simsopt
    validation
    parity_datasets

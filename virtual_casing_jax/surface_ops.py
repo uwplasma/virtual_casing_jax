@@ -1,7 +1,6 @@
 """JAX surface operators matching BIEST conventions."""
 from __future__ import annotations
 
-import jax
 import jax.numpy as jnp
 
 TWOPI = 2.0 * jnp.pi

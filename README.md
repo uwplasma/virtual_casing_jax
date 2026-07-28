@@ -63,6 +63,31 @@ vc_jax.setup(digits, nfp, stellsym, Nt, Np, gamma, Nt, Np, Nt, Np)
 B_external = vc_jax.compute_external_B(B_total)
 ```
 
+### Differentiable in the surface geometry
+
+`compute_external_B` / `compute_internal_B` are differentiable in the source
+field out of the box. They are *also* differentiable in the **surface
+coordinates** — useful for single-stage stellarator optimization, where the
+plasma boundary itself is a degree of freedom — once the adaptive precision is
+frozen. The precision auto-selection (quadrature grid size, singular-patch
+dimension) concretizes surface-derived values, so under `jax.grad`/`jit` of the
+surface you first pick it once from a concrete surface and pass it back:
+
+```python
+plan = vc_jax.plan_precision(digits=4)          # concrete surface -> PrecisionPlan
+
+def loss(surface_coord):                        # surface is the differentiated input
+    vc = VirtualCasingJAX()
+    vc.setup(digits, nfp, stellsym, Nt, Np, surface_coord, Nt, Np, Nt, Np)
+    return objective(vc.compute_internal_B(B_total, precision=plan))
+
+grad = jax.grad(loss)(surface_coord)            # finite (NaN-safe self-interaction)
+```
+
+`precision=plan` reproduces the auto-selected precision exactly (identical `B`),
+and the Laplace kernels use a NaN-safe self-interaction gradient, so the surface
+gradient is finite. `plan_precision` also accepts explicit `quad_nt`/`quad_np`.
+
 Performance features:
 - Source/target tiling with auto-tuned chunk sizes.
 - Rematerialization hooks for GradB singular correction.
@@ -121,3 +146,45 @@ tensorboard --logdir /tmp/vc_trace_case_vc_large_GradB
 
 This writes JAX traces under `/tmp/vc_trace_*` and HLO dumps under
 `/tmp/vc_xla_*`. See `docs/performance.rst` for detailed interpretation.
+
+VMEC Exterior Fields
+--------------------
+
+`virtual_casing_jax` can wrap VMEC boundary data as an EXTENDER-like exterior
+field. The current downstream integration is
+[VMEX](https://github.com/uwplasma/vmex) (package `vmex`, the JAX VMEC
+formerly named `vmec_jax`), whose free-boundary module
+`vmex.core.freeboundary_diff` builds a `VmecSurfaceFieldData` directly from a
+`wout` file or a VMEX state:
+
+```python
+from vmex import read_wout
+from vmex.core.freeboundary_diff import surface_field_data_from_wout
+from virtual_casing_jax import ExteriorFieldConfig, VirtualCasingExteriorField
+
+wout = read_wout("wout_circular_tokamak.nc")
+surface = surface_field_data_from_wout(wout, nphi=32, ntheta=32)
+field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
+
+B_plasma = field.B_plasma_xyz([[1.8, 0.0, 0.0]])
+```
+
+The legacy bridge `surface_field_from_vmec_jax`
+(module `virtual_casing_jax.vmec_jax_bridge`) is kept only for backwards
+compatibility with the historical `vmec_jax` package name and requires that
+package to be importable.
+
+For targets outside the VMEC boundary, the plasma-current contribution uses the
+`internal` virtual-casing branch by default because the plasma currents are
+inside the LCFS:
+
+```text
+B_out(x) = B_coils(x) + B_plasma^VC(x)
+         = B_coils(x) + B_internal^VC(x)
+```
+
+The `external` branch remains available for diagnostics and means currents
+outside the VMEC surface, not target points outside the VMEC surface. This is
+not a self-consistent SOL plasma equilibrium solver; it does not replace HINT,
+SIESTA, PIES, or M3D-C1 when islands, stochastic regions, pressure relaxation,
+edge currents, or resistive MHD response must be solved self-consistently.

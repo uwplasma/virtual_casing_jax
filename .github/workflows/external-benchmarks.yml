@@ -1,0 +1,45 @@
+name: External Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark:
+        description: External benchmark entry point
+        required: true
+        default: simsopt-vc
+        type: choice
+        options:
+          - simsopt-vc
+          - extender
+          - bmw
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  external-benchmark:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install base package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Run selected external benchmark
+        run: |
+          case "${{ inputs.benchmark }}" in
+            simsopt-vc)
+              benchmarks/external/run_simsopt_vc_compare.sh
+              ;;
+            extender)
+              benchmarks/external/run_extender_compare.sh
+              ;;
+            bmw)
+              benchmarks/external/run_bmw_compare.sh
+              ;;
+          esac

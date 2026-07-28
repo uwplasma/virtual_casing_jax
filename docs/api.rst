@@ -31,6 +31,26 @@ API
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: virtual_casing_jax.exterior_field
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: virtual_casing_jax.vmec_jax_bridge
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: virtual_casing_jax.grid_export
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: virtual_casing_jax.objectives
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: virtual_casing_jax.testdata
    :members:
    :undoc-members:

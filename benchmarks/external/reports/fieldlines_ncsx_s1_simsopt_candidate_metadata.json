@@ -1,0 +1,91 @@
+{
+  "active_extcur_groups": [
+    1,
+    2,
+    3,
+    7,
+    9,
+    10
+  ],
+  "candidate_out": "benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_candidate.npz",
+  "coils_source": "external-run/fieldlines_NCSX_s1_run/coils.NCSX",
+  "current_mode": "scaled",
+  "group_currents": {
+    "1": {
+      "count": 6,
+      "current_max": 652271.9419853,
+      "current_min": 652271.9419853,
+      "label": "ModA"
+    },
+    "10": {
+      "count": 18,
+      "current_max": 45513.87376532,
+      "current_min": 45513.87376532,
+      "label": "TF"
+    },
+    "2": {
+      "count": 6,
+      "current_max": 652271.9419853,
+      "current_min": 652271.9419853,
+      "label": "ModB"
+    },
+    "3": {
+      "count": 6,
+      "current_max": 652271.9419853,
+      "current_min": 652271.9419853,
+      "label": "ModC"
+    },
+    "4": {
+      "count": 8,
+      "current_max": 0.0,
+      "current_min": 0.0,
+      "label": "PF1"
+    },
+    "5": {
+      "count": 8,
+      "current_max": 0.0,
+      "current_min": 0.0,
+      "label": "PF2"
+    },
+    "6": {
+      "count": 8,
+      "current_max": 0.0,
+      "current_min": 0.0,
+      "label": "PF3"
+    },
+    "7": {
+      "count": 12,
+      "current_max": -54804.95,
+      "current_min": -54804.95,
+      "label": "PF4"
+    },
+    "8": {
+      "count": 4,
+      "current_max": 0.0,
+      "current_min": 0.0,
+      "label": "PF5"
+    },
+    "9": {
+      "count": 2,
+      "current_max": 94240.91,
+      "current_min": 94240.91,
+      "label": "PF6"
+    }
+  },
+  "input_source": "external-run/fieldlines_NCSX_s1_run/input.NCSX_s1",
+  "lines": [
+    0
+  ],
+  "method": "RK4 on Simsopt BiotSavart loaded from STELLOPT/MAKEGRID coils",
+  "ncoils": 78,
+  "npoinc": 8,
+  "nsections": 16,
+  "order": 20,
+  "ppp": 20,
+  "reference_out": "benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_simsopt_reference.npz",
+  "simsopt_commit": "ef37da4f64c476a8999c01c71d4af838f7f3e024",
+  "source": "STELLOPT_FIELDLINES_NCSX_s1",
+  "status": "completed",
+  "substeps": 2,
+  "virtual_casing_jax_commit": "b03e51882b3c6a88411ca7932217c97301f67c90"
+}

@@ -1,0 +1,14 @@
+{
+  "metadata": {
+    "description": "Deterministic field-line diagnostic sample for exercising the FIELDLINES/TORLINES comparator.",
+    "units": "arbitrary"
+  },
+  "poincare_xyz": [
+    [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [-1.0, 0.0, 0.0],
+    [0.0, -1.0, 0.0]
+  ],
+  "connection_lengths": [10.0, 11.0, 12.0, 13.0],
+  "hit_mask": [0, 0, 1, 1]
+}

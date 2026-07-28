@@ -1,0 +1,28 @@
+{
+  "candidate": "benchmarks/external/examples/fieldlines_ncsx_s1_reference.npz",
+  "compared_connection_lengths": true,
+  "compared_hit_masks": false,
+  "connection_length_count": 2,
+  "connection_length_max_abs": 0.0,
+  "connection_length_max_relative_to_ref_max": 0.0,
+  "connection_length_relative_l2": 0.0,
+  "passed_thresholds": true,
+  "poincare_rphiz_candidate_count": 6002,
+  "poincare_rphiz_point_max_abs_component": 0.0,
+  "poincare_rphiz_point_max_distance": 0.0,
+  "poincare_rphiz_point_relative_l2": 0.0,
+  "poincare_rphiz_point_relative_rms_distance": 0.0,
+  "poincare_rphiz_point_rms_distance": 0.0,
+  "poincare_rphiz_reference_count": 6002,
+  "point_coordinates_compared": [
+    "poincare_rphiz"
+  ],
+  "point_mode": "ordered",
+  "reference": "benchmarks/external/examples/fieldlines_ncsx_s1_reference.npz",
+  "status": "completed",
+  "stellopt": {
+    "status": "not_requested"
+  },
+  "threshold_failures": [],
+  "virtual_casing_jax_commit": "300a37c398f947f870f7df1cee3c8e61d0981c88"
+}

@@ -1,0 +1,15 @@
+{
+  "axis_order": "(nz, nphi, nr)",
+  "candidate_out": "benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_grid_candidate.npz",
+  "lines": [
+    0
+  ],
+  "method": "RK4 on stored FIELDLINES R*BR/BPHI and R*BZ/BPHI grid",
+  "npoinc": 8,
+  "nsections": 16,
+  "reference_out": "benchmarks/external/examples/fieldlines_ncsx_s1_line0_16_reference.npz",
+  "source": "external-run/fieldlines_NCSX_s1_run/fieldlines_NCSX_s1.h5",
+  "status": "completed",
+  "substeps": 1,
+  "virtual_casing_jax_commit": "14d5f85fcfa06eeec2a69ebc8ca0de2ed274c501"
+}

@@ -1,0 +1,23 @@
+{
+  "arrays": {
+    "connection_lengths": [
+      2
+    ],
+    "line_id": [
+      6002
+    ],
+    "poincare_rphiz": [
+      6002,
+      3
+    ],
+    "section_phi": [
+      6002
+    ]
+  },
+  "connection_length_count": 2,
+  "out": "benchmarks/external/examples/fieldlines_ncsx_s1_reference.npz",
+  "sample_count": 6002,
+  "source": "external-run/fieldlines_NCSX_s1_run/fieldlines_NCSX_s1.h5",
+  "status": "completed",
+  "virtual_casing_jax_commit": "300a37c398f947f870f7df1cee3c8e61d0981c88"
+}
