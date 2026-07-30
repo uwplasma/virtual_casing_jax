@@ -1,12 +1,39 @@
 """Boundary integral evaluation (baseline direct-sum)."""
 from __future__ import annotations
 
+from typing import Literal
+
 import jax
 import jax.numpy as jnp
 
 from .kernels import laplace_fxd_u, laplace_fxd2_u, biotsavart_fx_u, biotsavart_fxd_u, laplace_dx_u
 from .surface_ops import upsample, resample, grad2d, surf_normal_area_elem, normal_orientation
 from .singular_quadrature import precompute_singular, select_patch_dim, INTERP_ORDER
+
+
+class OffsurfaceConvergenceError(RuntimeError):
+    """Raised when eager off-surface refinement exhausts its finite budget."""
+
+    def __init__(
+        self,
+        *,
+        tolerance: float,
+        achieved_error: float,
+        nt: int,
+        npol: int,
+        levels: int,
+    ):
+        self.tolerance = float(tolerance)
+        self.achieved_error = float(achieved_error)
+        self.nt = int(nt)
+        self.np = int(npol)
+        self.levels = int(levels)
+        super().__init__(
+            "off-surface quadrature did not converge: "
+            f"error={self.achieved_error:.6e}, "
+            f"tolerance={self.tolerance:.6e}, "
+            f"final_grid=({self.nt}, {self.np}), levels={self.levels}"
+        )
 
 
 def _flatten_soa(x, name: str):
@@ -603,6 +630,7 @@ def computeB_offsurface_adaptive(
     digits: int = 5,
     max_Nt: int = -1,
     max_Np: int = -1,
+    max_levels: int = 6,
     ext: bool = True,
     chunk_size: int = 1024,
     target_chunk_size: int | None = None,
@@ -616,6 +644,7 @@ def computeB_offsurface_adaptive(
         digits=digits,
         max_Nt=max_Nt,
         max_Np=max_Np,
+        max_levels=max_levels,
         chunk_size=chunk_size,
         target_chunk_size=target_chunk_size,
     )
@@ -842,6 +871,7 @@ def _offsurface_adapt_grid(
     digits: int = 5,
     max_Nt: int = -1,
     max_Np: int = -1,
+    max_levels: int = 6,
     chunk_size: int = 1024,
     target_chunk_size: int | None = None,
 ):
@@ -855,7 +885,10 @@ def _offsurface_adapt_grid(
     npol = X_src.shape[2]
     tol = 10.0 ** (-digits)
 
-    while True:
+    if max_levels < 1:
+        raise ValueError("max_levels must be at least 1")
+
+    for level in range(1, max_levels + 1):
         dX = grad2d(X_src, nt, npol)
         normal, area_elem = surf_normal_area_elem(dX, X_src)
 
@@ -875,6 +908,15 @@ def _offsurface_adapt_grid(
         if err <= tol:
             return X_src, BdotN, J, area_elem
 
+        if level == max_levels:
+            raise OffsurfaceConvergenceError(
+                tolerance=tol,
+                achieved_error=float(err),
+                nt=nt,
+                npol=npol,
+                levels=level,
+            )
+
         nt2 = nt * 2
         np2 = npol * 2
         if max_Nt > 0:
@@ -882,7 +924,13 @@ def _offsurface_adapt_grid(
         if max_Np > 0:
             np2 = min(np2, max_Np)
         if nt2 == nt and np2 == npol:
-            return X_src, BdotN, J, area_elem
+            raise OffsurfaceConvergenceError(
+                tolerance=tol,
+                achieved_error=float(err),
+                nt=nt,
+                npol=npol,
+                levels=level,
+            )
 
         X_src = upsample(X_src, nt, npol, nt2, np2)
         BdotN = upsample(BdotN[None, ...], nt, npol, nt2, np2)[0]
@@ -1376,6 +1424,7 @@ def laplace_fxd2_u_eval_singular(
     interp_block_size: int | str | None = "auto",
     remat: bool = False,
     scan_targets: bool = False,
+    hedgehog_side: Literal["interior", "exterior"] = "interior",
 ):
     """Evaluate Laplace Fxd2U with singular correction (Hedgehog).
 
@@ -1384,7 +1433,11 @@ def laplace_fxd2_u_eval_singular(
             of ``vmap`` in the singular correction. This can reduce peak
             memory by avoiding large broadcasted temporaries, at the cost
             of lower parallelism per chunk.
+
+        hedgehog_side: Side from which the on-surface limit is taken.
     """
+    if hedgehog_side not in ("interior", "exterior"):
+        raise ValueError("hedgehog_side must be 'interior' or 'exterior'")
     X_src = jnp.asarray(X_src)
     dX_src = jnp.asarray(dX_src)
     density = jnp.asarray(density)
@@ -1490,7 +1543,13 @@ def laplace_fxd2_u_eval_singular(
         ntrg1 = Ggi[4, patch_dim0 * patch_dim + patch_dim0] * Ggi[1, patch_dim0 * patch_dim + patch_dim0] - Ggi[5, patch_dim0 * patch_dim + patch_dim0] * Ggi[0, patch_dim0 * patch_dim + patch_dim0]
         ntrg2 = Ggi[0, patch_dim0 * patch_dim + patch_dim0] * Ggi[3, patch_dim0 * patch_dim + patch_dim0] - Ggi[1, patch_dim0 * patch_dim + patch_dim0] * Ggi[2, patch_dim0 * patch_dim + patch_dim0]
         rtrg = jnp.sqrt(ntrg0 * ntrg0 + ntrg1 * ntrg1 + ntrg2 * ntrg2)
-        scal = jnp.sqrt(rtrg * invNt * invNp) * orient / rtrg * (-20.0 / precomp.rad_dim)
+        side_sign = -1.0 if hedgehog_side == "interior" else 1.0
+        scal = (
+            jnp.sqrt(rtrg * invNt * invNp)
+            * orient
+            / rtrg
+            * (side_sign * 20.0 / precomp.rad_dim)
+        )
         nvec = jnp.array([ntrg0, ntrg1, ntrg2]) * scal
         TrgCoordPolar = TrgCoord[None, :] + interp_nds[:, None] * nvec[None, :]
 
@@ -1581,11 +1640,14 @@ def laplace_fxd2_u_eval_vec_singular(
     interp_block_size: int | str | None = "auto",
     remat: bool = False,
     scan_targets: bool = False,
+    hedgehog_side: Literal["interior", "exterior"] = "interior",
 ):
     """Vector-density wrapper for Laplace Fxd2U with singular correction.
 
     Args:
         scan_targets: forwarded to ``laplace_fxd2_u_eval_singular``.
+
+        hedgehog_side: forwarded to ``laplace_fxd2_u_eval_singular``.
     """
     density_vec = jnp.asarray(density_vec)
     return jax.vmap(
@@ -1610,6 +1672,7 @@ def laplace_fxd2_u_eval_vec_singular(
             interp_block_size=interp_block_size,
             remat=remat,
             scan_targets=scan_targets,
+            hedgehog_side=hedgehog_side,
         ),
         in_axes=0,
         out_axes=0,

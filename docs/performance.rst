@@ -178,13 +178,30 @@ Precompute Reuse
 ~~~~~~~~~~~~~~~~
 
 The polar quadrature tables and interpolation weights are cached via
-``precompute_singular``. Patch index maps are cached per quadrature
+``precompute_singular``. The bounded cache stores only host NumPy arrays;
+JAX conversion occurs outside the cache so tracers cannot escape a JIT trace.
+Patch index maps are cached per quadrature
 setup inside ``VirtualCasingJAX`` to avoid recomputing the patch gather
 indices on each call. Patch indices are stored as int32 to reduce memory
 traffic during gathers.
 
 Profiling and Diagnostics
 -------------------------
+
+Reproducible Benchmarks
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``tools/benchmark_vc.py`` runs every case in an isolated process, synchronizes
+JAX outputs, and records first-call time, steady-state median/p95, peak RSS,
+accuracy metrics, device/runtime versions, git state, and dataset provenance.
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python tools/benchmark_vc.py --suite quick --repeats 5
+   JAX_ENABLE_X64=1 python tools/benchmark_vc.py --suite full --repeats 5
+
+The dated JSON and Markdown reports are written to ``benchmark_results/``.
+Timing values are observational and are not CI pass/fail thresholds.
 
 JAX Profiler (TensorBoard)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

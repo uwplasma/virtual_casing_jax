@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 
-from .utils import autotune_chunk_sizes
+from .utils import autotune_chunk_sizes, warn_if_x64_needed
 from .surface_ops import (
     complete_vec_field,
     resample,
@@ -52,6 +52,28 @@ class FunctionalSetup:
     patch_dim0: int
     patch_idx: jnp.ndarray
     orient: float
+
+
+def _validate_on_surface_targets(X_trg, trg_nt: int, trg_np: int):
+    if X_trg is None:
+        return None
+    X_trg = jnp.asarray(X_trg)
+    expected = trg_nt * trg_np
+    valid = (
+        X_trg.ndim in (2, 3)
+        and X_trg.shape[0] == 3
+        and (
+            (X_trg.ndim == 3 and X_trg.shape[1] * X_trg.shape[2] == expected)
+            or (X_trg.ndim == 2 and X_trg.shape[1] == expected)
+        )
+    )
+    if not valid:
+        raise ValueError(
+            "on-surface X_trg must have shape "
+            f"(3, {trg_nt}, {trg_np}) or (3, {expected}); "
+            "use an off-surface API for arbitrary targets"
+        )
+    return X_trg
 
 
 def _resolve_chunk_sizes(op: str, chunk_size, target_chunk_size, *, nsrc: int, ntrg: int):
@@ -280,6 +302,8 @@ def _compute_B_signed(
     if remat is None:
         remat = False
     value_dtype = jnp.asarray(B0).dtype
+    warn_if_x64_needed(digits, value_dtype)
+    X_trg = _validate_on_surface_targets(X_trg, trg_nt, trg_np)
     pou_dtype = _resolve_pou_dtype(pou_dtype, value_dtype)
     patch_dtype = _resolve_patch_dtype(patch_dtype, value_dtype)
     nsrc = quad_nt * quad_np
@@ -713,6 +737,7 @@ def _compute_gradB_signed(
     if remat is None:
         remat = True
     value_dtype = jnp.asarray(B0).dtype
+    warn_if_x64_needed(digits, value_dtype)
     pou_dtype = _resolve_pou_dtype(pou_dtype, value_dtype)
     patch_dtype = _resolve_patch_dtype(patch_dtype, value_dtype)
     nsrc = quad_nt * quad_np
@@ -724,6 +749,7 @@ def _compute_gradB_signed(
         patch_dim0 = select_patch_dim_from_geom(dX, quad_nt, quad_np, digits)
     if patch_idx is None:
         patch_idx = build_patch_idx(quad_nt, quad_np, trg_nt, trg_np, nfp_eff, patch_dim0)
+    hedgehog_side = "interior" if sign > 0 else "exterior"
 
     dtheta = _compute_dtheta(nfp, half_period, trg_nt, src_nt)
     B0_complete = _complete_b0(B0, nfp, half_period, src_nt, src_np, dtheta)
@@ -750,6 +776,7 @@ def _compute_gradB_signed(
         patch_dtype=patch_dtype,
         interp_block_size=interp_block_size,
         remat=remat,
+        hedgehog_side=hedgehog_side,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, trg_nt, trg_np))
 
@@ -771,6 +798,7 @@ def _compute_gradB_signed(
         patch_dtype=patch_dtype,
         interp_block_size=interp_block_size,
         remat=remat,
+        hedgehog_side=hedgehog_side,
     )
     gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, trg_nt, trg_np))
 
@@ -909,11 +937,13 @@ def compute_external_B_offsurf_functional(
     trg_np: int,
     max_Nt: int = -1,
     max_Np: int = -1,
+    max_levels: int = 6,
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     adaptive: bool = True,
 ):
     """Compute off-surface Bext with differentiable geometry inputs."""
+    warn_if_x64_needed(digits, jnp.asarray(B0).dtype)
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
     surf_nt_full = int(surface_coord.shape[1])
     surf_np_full = int(surface_coord.shape[2])
@@ -946,6 +976,7 @@ def compute_external_B_offsurf_functional(
             digits=digits,
             max_Nt=max_Nt,
             max_Np=max_Np,
+            max_levels=max_levels,
             ext=True,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
@@ -978,11 +1009,13 @@ def compute_external_gradB_offsurf_functional(
     trg_np: int,
     max_Nt: int = -1,
     max_Np: int = -1,
+    max_levels: int = 6,
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     adaptive: bool = False,
 ):
     """Compute off-surface GradBext with differentiable geometry inputs."""
+    warn_if_x64_needed(digits, jnp.asarray(B0).dtype)
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
     surf_nt_full = int(surface_coord.shape[1])
     surf_np_full = int(surface_coord.shape[2])
@@ -1017,6 +1050,7 @@ def compute_external_gradB_offsurf_functional(
             digits=digits,
             max_Nt=max_Nt,
             max_Np=max_Np,
+            max_levels=max_levels,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
         )

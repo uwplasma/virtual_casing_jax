@@ -65,28 +65,24 @@ B_external = vc_jax.compute_external_B(B_total)
 
 ### Differentiable in the surface geometry
 
-`compute_external_B` / `compute_internal_B` are differentiable in the source
-field out of the box. They are *also* differentiable in the **surface
-coordinates** — useful for single-stage stellarator optimization, where the
-plasma boundary itself is a degree of freedom — once the adaptive precision is
-frozen. The precision auto-selection (quadrature grid size, singular-patch
-dimension) concretizes surface-derived values, so under `jax.grad`/`jit` of the
-surface you first pick it once from a concrete surface and pass it back:
+`compute_external_B` and `compute_internal_B` are differentiable in the source
+field directly. They are also differentiable in the surface coordinates once
+the geometry-dependent precision selection has been frozen:
 
 ```python
-plan = vc_jax.plan_precision(digits=4)          # concrete surface -> PrecisionPlan
+plan = vc_jax.plan_precision(digits=4)
 
-def loss(surface_coord):                        # surface is the differentiated input
+def loss(surface_coord):
     vc = VirtualCasingJAX()
     vc.setup(digits, nfp, stellsym, Nt, Np, surface_coord, Nt, Np, Nt, Np)
     return objective(vc.compute_internal_B(B_total, precision=plan))
 
-grad = jax.grad(loss)(surface_coord)            # finite (NaN-safe self-interaction)
+grad = jax.grad(loss)(surface_coord)
 ```
 
-`precision=plan` reproduces the auto-selected precision exactly (identical `B`),
-and the Laplace kernels use a NaN-safe self-interaction gradient, so the surface
-gradient is finite. `plan_precision` also accepts explicit `quad_nt`/`quad_np`.
+`precision=plan` reuses concrete quadrature sizes and singular-patch indices,
+while the numerical surface geometry remains differentiable. Recreate the plan
+when geometry changes are large enough to alter the appropriate quadrature.
 
 Performance features:
 - Source/target tiling with auto-tuned chunk sizes.
@@ -152,10 +148,9 @@ VMEC Exterior Fields
 
 `virtual_casing_jax` can wrap VMEC boundary data as an EXTENDER-like exterior
 field. The current downstream integration is
-[VMEX](https://github.com/uwplasma/vmex) (package `vmex`, the JAX VMEC
-formerly named `vmec_jax`), whose free-boundary module
-`vmex.core.freeboundary_diff` builds a `VmecSurfaceFieldData` directly from a
-`wout` file or a VMEX state:
+[VMEX](https://github.com/uwplasma/vmex), whose
+`vmex.core.freeboundary_diff` module builds `VmecSurfaceFieldData` from a
+`wout` file or VMEX state:
 
 ```python
 from vmex import read_wout
@@ -169,22 +164,22 @@ field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
 B_plasma = field.B_plasma_xyz([[1.8, 0.0, 0.0]])
 ```
 
-The legacy bridge `surface_field_from_vmec_jax`
-(module `virtual_casing_jax.vmec_jax_bridge`) is kept only for backwards
-compatibility with the historical `vmec_jax` package name and requires that
-package to be importable.
+For targets outside the VMEC boundary, the plasma-current contribution uses
+the `internal` virtual-casing branch because the plasma currents are inside
+the LCFS. The `external` branch means currents outside the VMEC surface, not
+targets outside it.
 
-For targets outside the VMEC boundary, the plasma-current contribution uses the
-`internal` virtual-casing branch by default because the plasma currents are
-inside the LCFS:
+The legacy `surface_field_from_vmec_jax` bridge remains available for the
+historical `vmec_jax` package name. This field wrapper is not a self-consistent
+SOL or edge-MHD solver.
 
-```text
-B_out(x) = B_coils(x) + B_plasma^VC(x)
-         = B_coils(x) + B_internal^VC(x)
+For synchronized correctness and timing measurements in isolated processes:
+
+```bash
+JAX_ENABLE_X64=1 python tools/benchmark_vc.py --suite quick --repeats 5
+JAX_ENABLE_X64=1 python tools/benchmark_vc.py --suite full --repeats 5
 ```
 
-The `external` branch remains available for diagnostics and means currents
-outside the VMEC surface, not target points outside the VMEC surface. This is
-not a self-consistent SOL plasma equilibrium solver; it does not replace HINT,
-SIESTA, PIES, or M3D-C1 when islands, stochastic regions, pressure relaxation,
-edge currents, or resistive MHD response must be solved self-consistently.
+The benchmark writes dated JSON and Markdown reports under
+`benchmark_results/`. These machine-specific results are intentionally
+untracked.

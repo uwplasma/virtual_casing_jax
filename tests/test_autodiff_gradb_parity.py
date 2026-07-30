@@ -103,3 +103,31 @@ def test_autodiff_gradb_matches_reference(prefix):
     rel = np.linalg.norm(diag - gradBvc_ref) / (np.linalg.norm(gradBvc_ref) + 1e-14)
     tol = 5e-3 if prefix == "case_vc" else 7e-3
     assert rel < tol
+
+    tangent = jnp.linspace(-0.2, 0.3, X_trg.size).reshape(X_trg.shape)
+    output_shape = (gradBvc_ref.shape[0], trg_nt, trg_np)
+    cotangent = jnp.linspace(0.4, -0.1, np.prod(output_shape)).reshape(
+        output_shape
+    )
+    _, jvp = jax.jvp(f, (X_trg,), (tangent,))
+    value, pullback = jax.vjp(f, X_trg)
+    vjp = pullback(cotangent)[0]
+    lhs = jnp.vdot(cotangent, jvp)
+    rhs = jnp.vdot(vjp, tangent)
+    assert np.all(np.isfinite(np.asarray((value, jvp, vjp))))
+    np.testing.assert_allclose(lhs, rhs, rtol=1e-10, atol=1e-10)
+
+    if prefix == "case_vc":
+        options = dict(
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+            digits=5,
+            chunk_size=1024,
+            patch_dtype=jnp.float32,
+            interp_block_size=128,
+        )
+        custom_primal = vc.compute_external_B_autodiff(
+            B0, X_trg=X_trg, **options
+        )
+        direct_primal = vc.compute_external_B(B0, X_trg=X_trg, **options)
+        np.testing.assert_allclose(custom_primal, direct_primal, rtol=0.0, atol=0.0)

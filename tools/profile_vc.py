@@ -5,6 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import jax
 import jax.numpy as jnp
@@ -14,7 +19,7 @@ from virtual_casing_jax.surface_ops import rotate_toroidal, complete_vec_field
 from virtual_casing_jax.virtual_casing import VirtualCasingJAX
 
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "tests" / "data"
+DATA_DIR = ROOT / "tests" / "data"
 
 
 def load_dump(base_path: Path):
@@ -126,8 +131,7 @@ def profile(args: argparse.Namespace):
         fn = vc.compute_external_B if args.mode == "external" else vc.compute_internal_B
         if args.jit:
             fn = vc.compute_external_B_jit if args.mode == "external" else vc.compute_internal_B_jit
-        call = lambda: fn(
-            B0,
+        call_kwargs = dict(
             quad_nt=quad_nt,
             quad_np=quad_np,
             digits=digits,
@@ -136,16 +140,16 @@ def profile(args: argparse.Namespace):
             pou_dtype=args.pou_dtype,
             patch_dtype=args.patch_dtype,
             interp_block_size=args.interp_block_size,
-            donate=args.donate if args.jit else False,
             remat=args.remat,
-            scan_targets=args.scan_targets,
         )
+        if args.jit:
+            call_kwargs["donate"] = args.donate
+        call = lambda: fn(B0, **call_kwargs)
     elif args.op == "GradB":
         fn = vc.compute_external_gradB if args.mode == "external" else vc.compute_internal_gradB
         if args.jit:
             fn = vc.compute_external_gradB_jit if args.mode == "external" else vc.compute_internal_gradB_jit
-        call = lambda: fn(
-            B0,
+        call_kwargs = dict(
             quad_nt=quad_nt,
             quad_np=quad_np,
             digits=digits,
@@ -154,9 +158,12 @@ def profile(args: argparse.Namespace):
             pou_dtype=args.pou_dtype,
             patch_dtype=args.patch_dtype,
             interp_block_size=args.interp_block_size,
-            donate=args.donate if args.jit else False,
             remat=args.remat,
+            scan_targets=args.scan_targets,
         )
+        if args.jit:
+            call_kwargs["donate"] = args.donate
+        call = lambda: fn(B0, **call_kwargs)
     elif args.op == "Boff":
         fn = vc.compute_external_B_offsurf if args.mode == "external" else vc.compute_internal_B_offsurf
         call = lambda: fn(

@@ -95,8 +95,11 @@ The high-level call ``VirtualCasingJAX.compute_external_gradB`` implements:
 
    with cyclic indices ``(k, k_1, k_2)``.
 
-The implementation mirrors the C++ ``ComputeGradB`` path, including the
-**same quadrature order**, **patch selection**, and **singular corrections**.
+The external implementation mirrors the C++ ``ComputeGradB`` path, including
+the **same quadrature order**, **patch selection**, and **singular
+corrections**. The internal limit uses Hedgehog targets displaced to the
+exterior side of the surface. A sign change alone is not sufficient because
+the two one-sided hypersingular limits differ.
 
 Reference Mapping
 -----------------
@@ -105,8 +108,9 @@ The following functions align with the reference C++ API:
 
 - ``VirtualCasingJAX.compute_external_gradB`` →
   ``VirtualCasing::ComputeGradBext`` (C++)
-- ``VirtualCasingJAX.compute_internal_gradB`` →
-  ``VirtualCasing::ComputeGradBint`` (C++)
+- ``VirtualCasingJAX.compute_internal_gradB`` implements the corrected
+  exterior-side internal limit. Upstream C++ currently does not provide an
+  independent production oracle for this path.
 - ``VirtualCasingJAX.compute_external_gradB_offsurf`` →
   ``VirtualCasing::ComputeGradBOffSurf`` (C++ local parity extension)
 
@@ -156,6 +160,11 @@ The JVP calls ``compute_external_gradB`` and applies:
 This provides **exact on-surface derivatives** consistent with the C++
 ``ComputeGradB`` operator, and it avoids differentiating through the
 singular correction machinery.
+
+``X_trg`` in the on-surface API is limited to a one-to-one perturbation of the
+configured target grid. It must contain exactly ``trg_nt * trg_np`` points.
+Use the off-surface API for arbitrary target sets. The ``B/2`` jump term stays
+anchored to the configured surface nodes.
 
 For off-surface GradB, no custom JVP is used. The kernels are smooth
 off the surface, so JAX can differentiate through the direct quadrature

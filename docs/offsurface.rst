@@ -80,13 +80,19 @@ the strategy in BIEST:
 
   where ``U_i`` is the double-layer potential at target ``i``.
 - Refine the source grid by doubling ``(Nt, Np)`` until
-  ``\epsilon \le 10^{-digits}`` or the optional ``max_Nt/max_Np`` caps
-  are reached.
+  ``\epsilon \le 10^{-digits}``, a ``max_Nt/max_Np`` cap is reached, or
+  ``max_levels`` (six by default) is exhausted.
 
 This logic is implemented in
 ``virtual_casing_jax.integrals.computeB_offsurface_adaptive`` and
 ``_offsurface_adapt_grid``, mirroring
 ``ExtVacuumField::EvalOffSurface`` in the C++ code.
+
+The eager adaptive methods raise ``OffsurfaceConvergenceError`` instead of
+silently returning an unconverged value. The exception reports the requested
+tolerance, achieved error, final grid, and attempted level count. Fixed
+schedule methods remain finite by construction and return the best result
+from the supplied schedule.
 
 JIT-Friendly Schedule
 ---------------------

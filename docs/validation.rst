@@ -44,14 +44,17 @@ Test Categories
      within coarse tolerances.
    - Singular-corrected ``ComputeB`` achieves ~1e-4 relative error on
      small grids.
-   - Internal ``ComputeB`` and ``ComputeGradB`` match reference on the
-     internal parity cases (``case_vc_int`` and ``case_simsopt_int``).
+   - Internal ``ComputeB`` matches reference on the internal parity cases
+     (``case_vc_int`` and ``case_simsopt_int``).
    - ``ComputeGradB`` matches reference within ~5e-3 on the GradB parity
      case.
    - ``VirtualCasingJAX.compute_external_gradB`` matches reference on
      the internal test case and SIMSOPT VMEC case.
-   - ``VirtualCasingJAX.compute_internal_gradB`` matches reference on
-     the internal test case and SIMSOPT VMEC case.
+   - ``VirtualCasingJAX.compute_internal_gradB`` is validated independently
+     against analytic synthetic loop fields, the total-field decomposition,
+     and vacuum symmetry/divergence identities. Historical internal-GradB
+     dumps are not treated as an oracle because they encode the former
+     sign-only implementation.
    - ``VirtualCasingJAX.compute_external_B`` matches reference on the
      internal test case and SIMSOPT VMEC case.
    - ``VirtualCasingJAX.compute_internal_B`` matches reference on the
