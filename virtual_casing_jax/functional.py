@@ -504,6 +504,35 @@ def compute_external_B_normal_functional(
     return dot_prod(Bext, normal)
 
 
+def compute_external_B_normal_vjp_functional(
+    X,
+    B0,
+    cotangent,
+    **kwargs,
+):
+    """Return the normal field and pullback to ``X`` and ``B0``.
+
+    This helper keeps the Virtual Casing reverse pass separate from any
+    upstream equilibrium solve. ``cotangent`` must match the normal-field
+    output shape. Memory-sensitive callers should enable ``remat`` and use
+    finite source/target chunk sizes in ``kwargs``.
+    """
+    X = jnp.asarray(X)
+    B0 = jnp.asarray(B0)
+    cotangent = jnp.asarray(cotangent)
+
+    def normal_field(x, b0):
+        return compute_external_B_normal_functional(x, b0, **kwargs)
+
+    value, pullback = jax.vjp(normal_field, X, B0)
+    if cotangent.shape != value.shape:
+        raise ValueError(
+            f"cotangent must have shape {value.shape}, got {cotangent.shape}"
+        )
+    X_cotangent, B0_cotangent = pullback(cotangent)
+    return value, X_cotangent, B0_cotangent
+
+
 def compute_external_B_jvp_columns_functional(
     X,
     B0,

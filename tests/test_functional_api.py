@@ -12,6 +12,7 @@ from virtual_casing_jax.functional import (
     target_surface_normal,
     compute_external_B_functional,
     compute_external_B_normal_functional,
+    compute_external_B_normal_vjp_functional,
     compute_external_B_jvp_columns_functional,
     compute_external_B_normal_jvp_columns_functional,
     compute_internal_B_functional,
@@ -295,6 +296,57 @@ def test_external_B_normal_functional_jvp_wrt_surface():
     fd = (scalar_fn(x_plus) - scalar_fn(x_minus)) / (2.0 * eps)
 
     np.testing.assert_allclose(jvp, np.asarray(fd), rtol=5e-3, atol=1e-5)
+
+
+def test_external_B_normal_vjp_functional_matches_jax_pullback():
+    nfp = 1
+    surf_nt, surf_np = 5, 4
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.02 + 0.05
+    surface_coord, nfp_eff = build_surface_coord(
+        X, nfp, False, surf_nt, surf_np, surf_nt
+    )
+    _, dX, _, _, orient = build_quad_setup(
+        surface_coord, surf_nt, surf_np
+    )
+    patch_dim0 = select_patch_dim_from_geom(dX, surf_nt, surf_np, 4)
+    patch_idx = build_patch_idx(
+        surf_nt, surf_np, surf_nt, surf_np, nfp_eff, patch_dim0
+    )
+    kwargs = dict(
+        digits=4,
+        nfp=nfp,
+        half_period=False,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=surf_nt,
+        src_np=surf_np,
+        trg_nt=surf_nt,
+        trg_np=surf_np,
+        quad_nt=surf_nt,
+        quad_np=surf_np,
+        patch_dim0=patch_dim0,
+        patch_idx=patch_idx,
+        orient=orient,
+        chunk_size=16,
+        target_chunk_size=2,
+        remat=True,
+    )
+    cotangent = jnp.linspace(-0.5, 0.5, surf_nt * surf_np).reshape(
+        surf_nt, surf_np
+    )
+    value, X_bar, B0_bar = compute_external_B_normal_vjp_functional(
+        X, B0, cotangent, **kwargs
+    )
+
+    def normal_field(x, b0):
+        return compute_external_B_normal_functional(x, b0, **kwargs)
+
+    expected_value, pullback = jax.vjp(normal_field, X, B0)
+    expected_X_bar, expected_B0_bar = pullback(cotangent)
+    np.testing.assert_allclose(value, expected_value, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(X_bar, expected_X_bar, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(B0_bar, expected_B0_bar, rtol=1e-12, atol=1e-12)
 
 
 def test_external_B_jvp_columns_match_individual_jvps():

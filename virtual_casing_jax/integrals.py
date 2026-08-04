@@ -84,6 +84,7 @@ def laplace_fxd_u_eval(
     *,
     chunk_size: int = 1024,
     target_chunk_size: int | None = None,
+    remat: bool = False,
 ):
     """Evaluate Laplace FxdU (grad single-layer) by direct quadrature.
 
@@ -161,7 +162,12 @@ def laplace_fxd_u_eval(
         out, _ = jax.lax.scan(scan_fn, init, (X_chunks, w_chunks))
         return out
 
-    _, outs = jax.lax.scan(lambda c, x: (c, eval_chunk(x)), None, Xt_chunks)
+    eval_body = jax.checkpoint(eval_chunk) if remat else eval_chunk
+
+    def target_scan(carry, target_chunk):
+        return carry, eval_body(target_chunk)
+
+    _, outs = jax.lax.scan(target_scan, None, Xt_chunks)
     out = outs.reshape((ntrg_pad, 3))[:ntrg]
     return jnp.transpose(out, (1, 0))
 
@@ -283,6 +289,7 @@ def laplace_fxd_u_eval_vec(
     *,
     chunk_size: int = 1024,
     target_chunk_size: int | None = None,
+    remat: bool = False,
 ):
     """Vector-density wrapper for Laplace FxdU.
 
@@ -298,6 +305,7 @@ def laplace_fxd_u_eval_vec(
             area_elem,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
+            remat=remat,
         ),
         in_axes=0,
         out_axes=0,
@@ -1063,6 +1071,7 @@ def laplace_fxd_u_eval_singular(
         surf_normal_area_elem(dX_src, X_src)[1],
         chunk_size=chunk_size,
         target_chunk_size=target_chunk_size,
+        remat=remat,
     )
 
     if patch_dim0 is None:
@@ -1180,7 +1189,8 @@ def laplace_fxd_u_eval_singular(
             corr_chunk = jax.vmap(corr_fn)(G, Gg, GF, trg_chunk)
             return carry, corr_chunk
 
-        _, corr_chunks = jax.lax.scan(scan_fn, None, (patch_chunks, trg_chunks))
+        scan_body = jax.checkpoint(scan_fn) if remat else scan_fn
+        _, corr_chunks = jax.lax.scan(scan_body, None, (patch_chunks, trg_chunks))
         corr = corr_chunks.reshape((ntrg_pad, -1))[:ntrg]
 
     corr = corr.T.reshape((3, trg_nt, trg_np))
@@ -1394,7 +1404,8 @@ def laplace_dx_u_eval_singular(
             corr_chunk = jax.vmap(corr_fn)(G, Gg, GF, trg_chunk)
             return carry, corr_chunk
 
-        _, corr_chunks = jax.lax.scan(scan_fn, None, (patch_chunks, trg_chunks))
+        scan_body = jax.checkpoint(scan_fn) if remat else scan_fn
+        _, corr_chunks = jax.lax.scan(scan_body, None, (patch_chunks, trg_chunks))
         corr = corr_chunks.reshape((ntrg_pad,))[:ntrg]
 
     corr = corr.reshape((1, trg_nt, trg_np))
