@@ -349,6 +349,55 @@ def test_external_B_normal_vjp_functional_matches_jax_pullback():
     np.testing.assert_allclose(B0_bar, expected_B0_bar, rtol=1e-12, atol=1e-12)
 
 
+def test_external_B_normal_vjp_is_target_chunk_invariant_in_float64():
+    """Target blocking must not change the singular on-surface operator."""
+    nfp = 1
+    surf_nt, surf_np = 6, 5
+    X = _torus(surf_nt, surf_np)
+    B0 = X * 0.02 + 0.05
+    surface_coord, nfp_eff = build_surface_coord(
+        X, nfp, False, surf_nt, surf_np, surf_nt
+    )
+    _, dX, _, _, orient = build_quad_setup(
+        surface_coord, surf_nt, surf_np
+    )
+    patch_dim0 = select_patch_dim_from_geom(dX, surf_nt, surf_np, 4)
+    patch_idx = build_patch_idx(
+        surf_nt, surf_np, surf_nt, surf_np, nfp_eff, patch_dim0
+    )
+    kwargs = dict(
+        digits=4,
+        nfp=nfp,
+        half_period=False,
+        surf_nt=surf_nt,
+        surf_np=surf_np,
+        src_nt=surf_nt,
+        src_np=surf_np,
+        trg_nt=surf_nt,
+        trg_np=surf_np,
+        quad_nt=surf_nt,
+        quad_np=surf_np,
+        patch_dim0=patch_dim0,
+        patch_idx=patch_idx,
+        orient=orient,
+        chunk_size=16,
+        remat=True,
+    )
+    cotangent = jnp.linspace(-0.5, 0.5, surf_nt * surf_np).reshape(
+        surf_nt, surf_np
+    )
+
+    chunk1 = compute_external_B_normal_vjp_functional(
+        X, B0, cotangent, target_chunk_size=1, **kwargs
+    )
+    chunk2 = compute_external_B_normal_vjp_functional(
+        X, B0, cotangent, target_chunk_size=2, **kwargs
+    )
+
+    for value1, value2 in zip(chunk1, chunk2):
+        np.testing.assert_allclose(value1, value2, rtol=1e-11, atol=1e-12)
+
+
 def test_external_B_jvp_columns_match_individual_jvps():
     nfp = 1
     half_period = False
