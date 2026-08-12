@@ -63,17 +63,16 @@ def laplace_fxd2_u(dx, f):
 
 
 def laplace_dx_u(dx, n, f):
-    """Laplace double-layer kernel: (-(n·dx) * f) / (4*pi*r^3).
+    """Laplace double-layer kernel: ``(n·dx) f / (4 pi r^3)``.
 
-    dx: (..., 3)
-    n: (..., 3) source normals
-    f: (...,)
-    returns (...,)
+    This is the outward-normal convention used by SCTL and BIEST since
+    BIEST commit ``0bf9ddc``. For a closed surface, ``D[1]`` is ``-1``
+    inside, ``0`` outside, and ``-1/2`` on the surface.
     """
     r2 = jnp.sum(dx * dx, axis=-1)
     rinv = _safe_rinv(r2)
     rinv3 = rinv * rinv * rinv
-    ndotr = -jnp.sum(n * dx, axis=-1)
+    ndotr = jnp.sum(n * dx, axis=-1)
     return f * ndotr * rinv3 / FOUR_PI
 
 

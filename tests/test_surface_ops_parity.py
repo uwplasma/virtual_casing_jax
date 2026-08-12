@@ -13,6 +13,7 @@ sys.path.append(str(_Path(__file__).parent))
 from dump_io import load_dump  # noqa: E402
 
 DATA_DIR = Path(__file__).parent / "data"
+pytestmark = pytest.mark.reference
 
 
 def _dump_exists(prefix: str, name: str):

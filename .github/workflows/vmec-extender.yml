@@ -1,10 +1,10 @@
-name: VMEC Extender Bridge
+name: VMEX Integration
 
 on:
   workflow_dispatch:
     inputs:
-      vmec_jax_ref:
-        description: vmec_jax git ref to test against
+      vmex_ref:
+        description: VMEX git ref to test against
         required: false
         default: main
 
@@ -12,7 +12,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  vmec-bridge-smoke:
+  vmex-smoke:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -21,12 +21,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: virtual_casing_jax
-      - name: Checkout vmec_jax
+      - name: Checkout VMEX
         uses: actions/checkout@v5
         with:
-          repository: uwplasma/vmec_jax
-          ref: ${{ inputs.vmec_jax_ref }}
-          path: vmec_jax
+          repository: uwplasma/vmex
+          ref: ${{ inputs.vmex_ref }}
+          path: vmex
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
@@ -34,8 +34,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e virtual_casing_jax
-          python -m pip install -e vmec_jax
-      - name: Run focused extender tests and VMEC bridge example
+          python -m pip install -e vmex
+          python -m pip install pytest
+      - name: Run focused exterior-field and VMEX tests
         env:
           JAX_ENABLE_X64: "1"
           JAX_PLATFORMS: cpu
@@ -46,7 +47,6 @@ jobs:
             tests/test_exterior_field_cylindrical.py \
             tests/test_exterior_field_gradients.py \
             tests/test_exterior_field_grid_export.py \
-            tests/test_exterior_objectives.py \
-            tests/test_vmec_jax_bridge.py
-          python examples/vmec_extender_python_api.py
-          python benchmarks/vmec_extender_smoke_benchmark.py
+            tests/test_exterior_objectives.py
+          cd ../vmex
+          python -m pytest -q -m "not full" tests/test_freeboundary_diff.py

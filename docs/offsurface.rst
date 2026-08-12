@@ -76,9 +76,11 @@ the strategy in BIEST:
 
   .. math::
 
-     \epsilon = \max_i \min(|1-U_i|, |U_i|),
+     \epsilon = \max_i \min(|1+U_i|, |U_i|),
 
-  where ``U_i`` is the double-layer potential at target ``i``.
+  where ``U_i`` is the double-layer potential at target ``i``. With the
+  outward-normal SCTL/BIEST convention, the exact values are ``-1`` inside and
+  ``0`` outside the surface.
 - Refine the source grid by doubling ``(Nt, Np)`` until
   ``\epsilon \le 10^{-digits}`` or the optional ``max_Nt/max_Np`` caps
   are reached.
@@ -98,9 +100,9 @@ refinement schedule can be provided:
 ``computeB_offsurface_adaptive_schedule`` and
 ``computeGradB_offsurface_adaptive_schedule`` accept a static tuple of
 ``(Nt, Np)`` pairs (e.g. ``((24, 24), (48, 48), (96, 96))``). The
-implementation evaluates each level and **updates the result only when**
-the double-layer error is above the tolerance. This preserves the adaptive
-decision while keeping the shapes static, so the function is JIT-safe.
+implementation evaluates each level and updates only targets whose
+double-layer error is above the tolerance. Refinement is therefore independent
+of target batching while every array shape remains static for JIT.
 
 High-level wrappers are exposed as:
 

@@ -30,8 +30,7 @@ intersphinx_mapping = {
     "jax": ("https://jax.readthedocs.io/en/latest", None),
 }
 
-html_theme = "sphinx_rtd_theme"
+html_theme = "furo"
 html_static_path = ["_static"]
 
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
-

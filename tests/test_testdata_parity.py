@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from virtual_casing_jax import SurfType
 from virtual_casing_jax import testdata
@@ -10,6 +11,7 @@ from virtual_casing_jax import testdata
 from dump_io import load_dump  # noqa: E402
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
+pytestmark = pytest.mark.reference
 
 
 def _assert_close(got, ref, rtol=1e-10, atol=1e-12, atol_zero=None):

@@ -23,6 +23,19 @@ def _3d_from_soa(arr_soa: np.ndarray) -> np.ndarray:
     return np.transpose(arr_soa, (1, 2, 0))
 
 
+def _extend_normal_field(Bnormal: np.ndarray, nfp: int, stellsym: bool) -> np.ndarray:
+    """Extend a field-period normal field over the full torus."""
+    Bnormal = np.asarray(Bnormal)
+    if not stellsym:
+        return np.tile(Bnormal, (int(nfp), 1))
+
+    # Stellarator symmetry maps (phi, theta) to (-phi, -theta), while the
+    # normal component changes sign. The theta grid contains 0 but not 2*pi.
+    theta_reverse = (-np.arange(Bnormal.shape[1])) % Bnormal.shape[1]
+    period = np.concatenate((Bnormal, -Bnormal[::-1][:, theta_reverse]))
+    return np.tile(period, (int(nfp), 1))
+
+
 class VirtualCasing:
     r"""
     SIMSOPT-compatible VirtualCasing class backed by JAX.
@@ -146,14 +159,9 @@ class VirtualCasing:
         vc.unit_normal = unit_normal
         vc.B_external = Bexternal3d
         vc.B_external_normal = Bexternal_normal
-
-        Bexternal_normal_with_last_point = np.hstack((Bexternal_normal, Bexternal_normal[:, [0]]))
-        Bexternal_normal_with_last_point = np.vstack(
-            (Bexternal_normal_with_last_point, -np.flip(np.flip(Bexternal_normal_with_last_point, axis=0), axis=1)[0])
-        )
-        flipped_B = -np.flip(np.flip(Bexternal_normal_with_last_point, axis=0), axis=1)
-        vc.B_external_normal_extended = np.concatenate(
-            [np.concatenate((Bexternal_normal, flipped_B[:-1, :-1])) for _ in range(nfp)]
+        vc.trgt_nphi_extended = trgt_nphi * nfp * (2 if stellsym else 1)
+        vc.B_external_normal_extended = _extend_normal_field(
+            Bexternal_normal, nfp, stellsym
         )
 
         if filename is not None:
@@ -167,6 +175,9 @@ class VirtualCasing:
 
     def save(self, filename="vcasing.nc"):
         """Save the results of a virtual casing calculation in a NetCDF file."""
+        trgt_nphi_extended = int(
+            getattr(self, "trgt_nphi_extended", self.B_external_normal_extended.shape[0])
+        )
         with netcdf_file(filename, "w") as f:
             f.history = "This file created by virtual_casing_jax on " + datetime.now().strftime(
                 "%B %d %Y, %H:%M:%S"
@@ -175,7 +186,7 @@ class VirtualCasing:
             f.createDimension("src_nphi", self.src_nphi)
             f.createDimension("trgt_ntheta", self.trgt_ntheta)
             f.createDimension("trgt_nphi", self.trgt_nphi)
-            f.createDimension("trgt_nphi_extended", self.trgt_nphi * 2 * self.nfp)
+            f.createDimension("trgt_nphi_extended", trgt_nphi_extended)
             f.createDimension("xyz", 3)
 
             src_ntheta = f.createVariable("src_ntheta", "i", tuple())
@@ -197,6 +208,13 @@ class VirtualCasing:
             trgt_nphi.data[()] = self.trgt_nphi
             trgt_nphi.description = "Number of grid points in toroidal angle phi for output"
             trgt_nphi.units = "Dimensionless"
+
+            trgt_nphi_extended_var = f.createVariable("trgt_nphi_extended", "i", tuple())
+            trgt_nphi_extended_var.data[()] = trgt_nphi_extended
+            trgt_nphi_extended_var.description = (
+                "Number of toroidal grid points after extension to the full torus"
+            )
+            trgt_nphi_extended_var.units = "Dimensionless"
 
             nfp = f.createVariable("nfp", "i", tuple())
             nfp.data[()] = self.nfp

@@ -257,7 +257,7 @@ class VirtualCasingJAX:
                 digits=digits,
                 chunk_size=1024,
             )
-            err = float(jnp.max(jnp.abs(jnp.asarray(U).reshape(-1) - 0.5)))
+            err = float(jnp.max(jnp.abs(jnp.asarray(U).reshape(-1) + 0.5)))
             if err <= 0:
                 break
             scal = max(1.0, (digits + 1) / (math.log(err) / math.log(0.1)))

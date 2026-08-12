@@ -73,6 +73,11 @@ Python workflow
 With VMEX installed, build the surface data directly from a ``wout`` file (or
 from a VMEX state via ``surface_field_data_from_state``):
 
+.. code-block:: console
+
+   $ python -m pip install --upgrade "vmex[freeb]"
+   $ python -c "from vmex.core.freeboundary_diff import have_virtual_casing_jax; assert have_virtual_casing_jax()"
+
 .. code-block:: python
 
    from vmex import read_wout
@@ -83,8 +88,17 @@ from a VMEX state via ``surface_field_data_from_state``):
    surface = surface_field_data_from_wout(wout, nphi=32, ntheta=32)
    field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
 
-   B_plasma = field.B_plasma_xyz([[1.8, 0.0, 0.0]])
+   points = [[1.8, 0.0, 0.0]]
+   B_plasma = field.B_plasma_xyz(points)
    B_cyl = field.B_cyl([[1.8, 0.0, 0.0]])
+
+VMEX provides the stateful magnetic-field interface used by applications.
+``virtual_casing_jax`` deliberately accepts explicit arrays and remains the
+stateless numerical backend.
+
+If VMEX reports that ``virtual_casing_jax`` is missing, run both commands with
+the exact interpreter used to start the VMEX script. Version ``0.0.3`` is the
+first PyPI release with the API VMEX consumes.
 
 Legacy ``vmec_jax`` bridge
 --------------------------

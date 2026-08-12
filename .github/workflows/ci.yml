@@ -3,7 +3,7 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: ["codex/**", "main"]
+    branches: ["main"]
   pull_request:
 
 env:
@@ -27,25 +27,46 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-          python -m pip install -r docs/requirements.txt
-          python -m pip install pytest pytest-cov h5py
+          python -m pip install pytest h5py
       - name: Run tests
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+        run: |
+          python -m pytest -q -m "not large and not reference"
+
+  coverage:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest pytest-cov h5py
+      - name: Fetch checksummed reference data
+        run: python tools/fetch_reference_data.py
+      - name: Run coverage suite
         env:
           JAX_ENABLE_X64: "1"
           JAX_PLATFORMS: cpu
         run: |
           python -m pytest -q -m "not large" \
             --cov=virtual_casing_jax \
+            --cov-fail-under=95 \
             --cov-report=term-missing \
             --cov-report=xml
       - name: Upload coverage XML artifact
-        if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: coverage-xml
           path: coverage.xml
       - name: Check Codecov token
-        if: matrix.python-version == '3.12'
         id: codecov-token
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
@@ -57,7 +78,7 @@ jobs:
             echo "::notice::Skipping Codecov upload because CODECOV_TOKEN is not configured."
           fi
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12' && steps.codecov-token.outputs.available == 'true'
+        if: steps.codecov-token.outputs.available == 'true'
         uses: codecov/codecov-action@v6.0.0
         with:
           files: ./coverage.xml

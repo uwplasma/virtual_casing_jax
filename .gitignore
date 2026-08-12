@@ -19,3 +19,6 @@ docs/_build/
 htmlcov/
 .coverage
 coverage.xml
+/.cache/
+/tests/data/
+/tests/test_files/

@@ -22,7 +22,15 @@ Documentation is available at
 Install the latest release from PyPI:
 
 ```bash
-pip install virtual-casing-jax
+python -m pip install --upgrade virtual-casing-jax
+```
+
+VMEX users should install its free-boundary dependency with the same Python
+interpreter that runs VMEX:
+
+```bash
+python -m pip install --upgrade "vmex[freeb]"
+python -c "from vmex.core.freeboundary_diff import have_virtual_casing_jax; assert have_virtual_casing_jax()"
 ```
 
 Or install from a local source checkout:
@@ -30,7 +38,7 @@ Or install from a local source checkout:
 ```bash
 git clone https://github.com/uwplasma/virtual_casing_jax.git
 cd virtual_casing_jax
-pip install -e .
+python -m pip install -e .
 ```
 
 ## Basic Usage
@@ -101,12 +109,19 @@ mirrors ``simsopt.mhd.virtual_casing.VirtualCasing`` while using the
 JAX backend. Import it as ``from virtual_casing_jax import VirtualCasing``.
 See `docs/using_simsopt.rst` and the examples in `examples/` for full scripts.
 
-Bundled test data:
-To make the SIMSOPT-style examples and tests self-contained, the repo
-includes a small subset of SIMSOPT test assets under `tests/test_files/`
-and the VMEC input `examples/inputs/input.QH_finitebeta`. These files
-originated from the SIMSOPT repository ([SIMSOPT](https://github.com/hiddenSymmetries/simsopt))
-and are used only for validation and example runs.
+Reference test data:
+The default suite uses generated analytic cases. Upstream C++ and SIMSOPT
+parity data are kept outside git so a clone stays small. To run those scheduled
+checks locally, download the checksummed release archive and run the marked
+tests:
+
+```bash
+python tools/fetch_reference_data.py
+pytest -m "large or reference"
+```
+
+The finite-beta VMEC input in `examples/inputs/` remains small enough to ship
+with the source.
 
 Docs
 ----
@@ -166,8 +181,13 @@ wout = read_wout("wout_circular_tokamak.nc")
 surface = surface_field_data_from_wout(wout, nphi=32, ntheta=32)
 field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
 
-B_plasma = field.B_plasma_xyz([[1.8, 0.0, 0.0]])
+points = [[1.8, 0.0, 0.0]]
+B_plasma = field.B_plasma_xyz(points)
 ```
+
+The explicit field functions and their derivatives are JAX differentiable.
+VMEX owns the user-facing magnetic-field object and SIMSOPT-compatible
+stored-point methods.
 
 The legacy bridge `surface_field_from_vmec_jax`
 (module `virtual_casing_jax.vmec_jax_bridge`) is kept only for backwards

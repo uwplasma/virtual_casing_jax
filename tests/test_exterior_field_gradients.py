@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -84,3 +86,52 @@ def test_B_xyz_jvp_matches_finite_difference_for_target_coordinate():
     expected = _linear_external_gradB(point) @ tangent
 
     np.testing.assert_allclose(jvp, expected, rtol=1e-5, atol=1e-5)
+
+
+def test_gradB_autodifferentiates_external_callback_when_gradient_is_omitted():
+    field = VirtualCasingExteriorField(
+        _zero_surface_data(),
+        ExteriorFieldConfig(
+            digits=3,
+            levels=((13, 13),),
+            chunk_size=64,
+            target_chunk_size=1,
+            dtype="float32",
+        ),
+        external_B_fn=_linear_external_B,
+    )
+    points = jnp.array(
+        [[2.8, 0.1, 0.2], [2.7, -0.2, 0.3]], dtype=jnp.float32
+    )
+
+    np.testing.assert_allclose(
+        field.gradB_xyz(points),
+        _linear_external_gradB(points),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+
+def test_fixed_schedule_gradient_is_independent_of_target_batching():
+    surface = _zero_surface_data()
+    surface = replace(
+        surface,
+        B_total=jnp.stack(
+            (-surface.gamma[1], surface.gamma[0], jnp.zeros_like(surface.gamma[0]))
+        ),
+    )
+    field = VirtualCasingExteriorField(
+        surface,
+        ExteriorFieldConfig(
+            digits=3,
+            levels=((13, 13), (26, 26)),
+            chunk_size=64,
+            target_chunk_size=2,
+            dtype="float32",
+        ),
+    )
+    points = jnp.array([[2.8, 0.0, 0.1], [0.0, 2.9, -0.1]], dtype=jnp.float32)
+
+    batched = field.gradB_xyz(points)
+    separate = jnp.stack([field.gradB_xyz(point) for point in points])
+    np.testing.assert_allclose(batched, separate, rtol=2e-5, atol=2e-6)

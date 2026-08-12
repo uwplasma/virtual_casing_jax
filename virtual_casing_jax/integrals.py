@@ -691,7 +691,7 @@ def computeB_offsurface_adaptive_schedule(
             target_chunk_size=target_chunk_size,
         )
         U = jnp.asarray(U).reshape(-1)
-        err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
+        err = jnp.minimum(jnp.abs(1.0 + U), jnp.abs(U))
 
         gradG = laplace_fxd_u_eval(
             X_lvl,
@@ -719,13 +719,19 @@ def computeB_offsurface_adaptive_schedule(
         np_i = int(npol)
 
         def update(state):
-            return eval_level(nt_i, np_i)
+            B_prev, err_prev = state
+            B_level, err_level = eval_level(nt_i, np_i)
+            refine = err_prev > tol
+            return (
+                jnp.where(refine[None, :], B_level, B_prev),
+                jnp.where(refine, err_level, err_prev),
+            )
 
         def keep(state):
             return state
 
         B_best, err_best = jax.lax.cond(
-            err_best > tol,
+            jnp.any(err_best > tol),
             update,
             keep,
             operand=(B_best, err_best),
@@ -779,7 +785,7 @@ def computeGradB_offsurface_adaptive_schedule(
             target_chunk_size=target_chunk_size,
         )
         U = jnp.asarray(U).reshape(-1)
-        err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
+        err = jnp.minimum(jnp.abs(1.0 + U), jnp.abs(U))
 
         gradG_J = laplace_fxd2_u_eval_vec(
             X_lvl,
@@ -818,13 +824,19 @@ def computeGradB_offsurface_adaptive_schedule(
         np_i = int(npol)
 
         def update(state):
-            return eval_level(nt_i, np_i)
+            grad_prev, err_prev = state
+            grad_level, err_level = eval_level(nt_i, np_i)
+            refine = err_prev > tol
+            return (
+                jnp.where(refine[None, None, :], grad_level, grad_prev),
+                jnp.where(refine, err_level, err_prev),
+            )
 
         def keep(state):
             return state
 
         grad_best, err_best = jax.lax.cond(
-            err_best > tol,
+            jnp.any(err_best > tol),
             update,
             keep,
             operand=(grad_best, err_best),
@@ -870,7 +882,7 @@ def _offsurface_adapt_grid(
             target_chunk_size=target_chunk_size,
         )
         U = jnp.asarray(U).reshape(-1)
-        err = jnp.max(jnp.minimum(jnp.abs(1.0 - U), jnp.abs(U)))
+        err = jnp.max(jnp.minimum(jnp.abs(1.0 + U), jnp.abs(U)))
 
         if err <= tol:
             return X_src, BdotN, J, area_elem

@@ -14,6 +14,7 @@ from virtual_casing_jax.integrals import (
     laplace_fxd_u_eval,
     laplace_fxd_u_eval_vec,
 )
+from virtual_casing_jax.surface_ops import grad2d, surf_normal_area_elem
 from virtual_casing_jax.kernels import (
     biotsavart_fx_u,
     biotsavart_fxd_u,
@@ -172,6 +173,41 @@ def test_direct_integral_evaluators_restore_target_grid_shape():
     assert laplace.shape == (3, 12)
     assert biot.shape == (3, 12)
     assert dlayer.shape == (1, 12)
+
+
+def test_double_layer_constant_is_solid_angle_indicator_for_torus():
+    """The latest BIEST/SCTL convention gives D[1] = -1 inside, 0 outside."""
+    nt = npol = 64
+    phi = 2.0 * jnp.pi * jnp.arange(nt) / nt
+    theta = 2.0 * jnp.pi * jnp.arange(npol) / npol
+    phi2d, theta2d = jnp.meshgrid(phi, theta, indexing="ij")
+    radius, major_radius = 0.4, 2.0
+    X = jnp.stack(
+        (
+            (major_radius + radius * jnp.cos(theta2d)) * jnp.cos(phi2d),
+            (major_radius + radius * jnp.cos(theta2d)) * jnp.sin(phi2d),
+            radius * jnp.sin(theta2d),
+        )
+    )
+    dX = grad2d(X, nt, npol)
+    normal, area = surf_normal_area_elem(dX, X)
+    targets = jnp.array(
+        [[major_radius, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=X.dtype
+    ).T
+
+    value = laplace_dx_u_eval(
+        X,
+        normal,
+        targets,
+        jnp.ones((nt, npol)),
+        area,
+        chunk_size=256,
+        target_chunk_size=2,
+    ).reshape(-1)
+
+    # The target inside the tube is only one minor radius from the surface.
+    # The 64 x 64 periodic trapezoid rule resolves its solid angle to 4e-5.
+    np.testing.assert_allclose(value, [-1.0, 0.0], atol=4e-5, rtol=0.0)
 
 
 def test_laplace_vector_density_wrappers_match_componentwise_evaluations():

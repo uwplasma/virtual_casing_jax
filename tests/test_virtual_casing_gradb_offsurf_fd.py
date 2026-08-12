@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from virtual_casing_jax.virtual_casing import VirtualCasingJAX
 from virtual_casing_jax.surface_ops import rotate_toroidal, complete_vec_field
@@ -12,6 +13,7 @@ sys.path.append(str(_Path(__file__).parent))
 from dump_io import load_dump  # noqa: E402
 
 DATA_DIR = Path(__file__).parent / "data"
+pytestmark = pytest.mark.reference
 
 
 def _infer_setup(prefix: str):

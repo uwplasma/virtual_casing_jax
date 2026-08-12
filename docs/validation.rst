@@ -7,11 +7,17 @@ Validation is performed against:
 - SIMSOPT virtual casing tests and benchmarks.
 - Analytical or semi-analytical test cases (e.g., axisymmetric surfaces).
 
-To keep these checks self-contained, the repository includes a small
-subset of SIMSOPT test assets under ``tests/test_files/`` (W7-X/QH
-VMEC outputs and BNORM data) plus the ``input.QH_finitebeta`` VMEC
-input under ``examples/inputs/``. These files are used only for
-validation and example runs.
+The default suite uses generated analytic cases and needs no downloaded data.
+Upstream C++ and SIMSOPT parity data live in a checksummed release archive,
+rather than in git. Fetch them and run the scheduled suite with:
+
+.. code-block:: bash
+
+   python tools/fetch_reference_data.py
+   pytest -m "large or reference"
+
+The ``input.QH_finitebeta`` VMEC input under ``examples/inputs/`` remains in
+the repository because it is small and useful in examples.
 
 Test Categories
 ---------------
@@ -34,7 +40,7 @@ Test Categories
      reference at ~5e-3 relative error on the GradB parity case.
    - Baseline direct-sum ``LaplaceFxdU`` matches reference up to
      singular-correction errors.
-   - Double-layer self-test returns ``0.5`` jump for constant density.
+   - Double-layer self-test returns the ``-0.5`` principal value for constant density.
 
 4. **End-to-End Virtual Casing Parity**
 

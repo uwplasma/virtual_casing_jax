@@ -69,31 +69,43 @@ Kernel Formulas
 ---------------
 
 Let ``r = x - x'`` be the displacement from a source to a target point.
-The kernels implemented follow the BIEST convention with a ``1/(4*pi)`` factor.
+The kernels implement the current `BIEST
+<https://github.com/dmalhotra/BIEST>`_ convention with a ``1/(4*pi)`` factor.
 
 Laplace single-layer:
 
 .. math::
 
-   G(r) = \\frac{1}{4\\pi \\lVert r \\rVert}
+   G(r) = \frac{1}{4\pi \lVert r \rVert}
 
 Gradient of single-layer:
 
 .. math::
 
-   \\nabla G(r) = -\\frac{r}{4\\pi \\lVert r \\rVert^3}
+   \nabla G(r) = -\frac{r}{4\pi \lVert r \rVert^3}
 
 Second derivatives:
 
 .. math::
 
-   \\partial_i\\partial_j G(r) = \\frac{1}{4\\pi}\\left(-\\delta_{ij}\\lVert r \\rVert^{-3} + 3 r_i r_j \\lVert r \\rVert^{-5}\\right)
+   \partial_i\partial_j G(r) = \frac{1}{4\pi}\left(-\delta_{ij}\lVert r \rVert^{-3} + 3 r_i r_j \lVert r \rVert^{-5}\right)
 
 Biot-Savart (single-layer):
 
 .. math::
 
-   \\mathbf{K}(r) = \\frac{1}{4\\pi} \\frac{\\mathbf{f} \\times r}{\\lVert r \\rVert^3}
+   \mathbf{K}(r) = \frac{1}{4\pi} \frac{\mathbf{f} \times r}{\lVert r \rVert^3}
+
+The outward-normal Laplace double layer is
+
+.. math::
+
+   D[\mu](x) = \frac{1}{4\pi}\int_\Gamma
+   \frac{n(x')\cdot(x-x')}{\lVert x-x'\rVert^3}\mu(x')\,da(x').
+
+This sign gives ``D[1] = -1`` inside a closed surface, ``0`` outside, and the
+principal value ``-1/2`` on the surface. These identities are tested directly
+on a torus and follow the SCTL convention adopted by BIEST in August 2026.
 
 The derivative ``FxdU`` for Biot-Savart is implemented explicitly to match the
 reference code in ``biest/kernel.hpp``.
