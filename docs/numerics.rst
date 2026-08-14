@@ -137,7 +137,7 @@ The field-period operator chooses a quadrature resolution ``quad_Nt``
 ``quad_Np`` based on:
 
 - Surface anisotropy estimates.
-- A double-layer self-test that checks the expected ``1/2`` jump
+- A double-layer self-test that checks the expected ``-1/2`` principal value
   for constant density.
 
 This adaptive selection is replicated in the JAX implementation to

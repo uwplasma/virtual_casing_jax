@@ -274,11 +274,21 @@ class VirtualCasingExteriorField:
         return _restore_matrix_output(self._call_vc_gradB(xyz_soa, branch), xyz)
 
     def gradB_xyz(self, xyz):
-        """Return ``dB_i/dx_j`` for the total field when callbacks support it."""
+        """Return ``dB_i/dx_j`` for the total field.
+
+        JAX differentiates ``external_B_fn`` point by point when an analytic
+        ``external_gradB_fn`` was not supplied.
+        """
         gradB = self.gradB_plasma_xyz(xyz)
-        if self.external_gradB_fn is None:
+        if self.external_gradB_fn is not None:
+            return gradB + self.external_gradB_fn(xyz)
+        if self.external_B_fn is None:
             return gradB
-        return gradB + self.external_gradB_fn(xyz)
+
+        points_soa, _ = _points_to_soa(xyz)
+        external_gradB = jax.vmap(jax.jacfwd(self.external_B_fn))(points_soa.T)
+        external_gradB = jnp.moveaxis(external_gradB, (1, 2), (0, 1))
+        return gradB + _restore_matrix_output(external_gradB, xyz)
 
     def B_cyl(self, R_phi_Z):
         """Evaluate the total field and return ``(B_R, B_phi, B_Z)``."""

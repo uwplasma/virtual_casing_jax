@@ -1,43 +1,59 @@
-"""Minimal VMEC-extender Python API example (legacy ``vmec_jax`` bridge).
+"""Evaluate the virtual-casing plasma field from a VMEX ``wout`` file.
 
-This example exercises the legacy ``vmec_jax`` bridge kept for backwards
-compatibility. The current downstream integration is VMEX (``uwplasma/vmex``),
-which builds the surface data via ``vmex.core.freeboundary_diff`` instead.
+Run from an environment containing VMEX and this package:
 
-Run from a checkout that also has ``vmec_jax`` importable, for example:
-
-    PYTHONPATH=/path/to/vmec_jax:/path/to/virtual_casing_jax \
-      python examples/vmec_extender_python_api.py
+    python examples/vmec_extender_python_api.py wout_example.nc
 """
 
 from __future__ import annotations
 
+import argparse
+
 import numpy as np
 
-import vmec_jax
-from virtual_casing_jax import (
-    ExteriorFieldConfig,
-    VirtualCasingExteriorField,
-    surface_field_from_vmec_jax,
-)
+from vmex import read_wout
+from vmex.core.freeboundary_diff import surface_field_data_from_wout
+from virtual_casing_jax import ExteriorFieldConfig, VirtualCasingExteriorField
 
 
 def main():
-    example = vmec_jax.load_example("circular_tokamak", root="../vmec_jax")
-    surface = surface_field_from_vmec_jax(example.state, example.static, example.indata, wout=example.wout)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("wout", help="VMEC/VMEX wout NetCDF file")
+    parser.add_argument("--nphi", type=int, default=32)
+    parser.add_argument("--ntheta", type=int, default=32)
+    parser.add_argument("--digits", type=int, default=4)
+    parser.add_argument(
+        "--target",
+        type=float,
+        nargs=3,
+        metavar=("X", "Y", "Z"),
+        default=(2.5, 0.0, 0.0),
+        help="Cartesian target point",
+    )
+    args = parser.parse_args()
+
+    wout = read_wout(args.wout)
+    surface = surface_field_data_from_wout(
+        wout,
+        nphi=args.nphi,
+        ntheta=args.ntheta,
+    )
+    levels = (
+        (args.nphi, args.ntheta),
+        (2 * args.nphi, 2 * args.ntheta),
+    )
     field = VirtualCasingExteriorField(
         surface,
         ExteriorFieldConfig(
-            digits=3,
-            levels=((13, 13),),
-            chunk_size=128,
-            target_chunk_size=4,
+            digits=args.digits,
+            levels=levels,
+            chunk_size="auto",
+            target_chunk_size="auto",
         ),
     )
 
-    target_xyz = np.array([[2.5, 0.0, 0.0]])
+    target_xyz = np.asarray([args.target])
     print("B_plasma_xyz:", np.asarray(field.B_plasma_xyz(target_xyz)))
-    print("B_cyl:", np.asarray(field.B_cyl(np.array([[2.5, 0.0, 0.0]]))))
 
 
 if __name__ == "__main__":

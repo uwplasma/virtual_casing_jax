@@ -1,74 +1,39 @@
-from pathlib import Path
+"""Independent physical validation for the internal on-surface GradB limit.
+
+The historical ``*_int_computeGradB`` dumps were produced with the same
+sign-only implementation that this test is intended to catch, so they are not
+used as an oracle here.
+"""
+from __future__ import annotations
 
 import numpy as np
-import jax.numpy as jnp
 import pytest
 
-from virtual_casing_jax.virtual_casing import VirtualCasingJAX
-from virtual_casing_jax.surface_ops import rotate_toroidal, complete_vec_field
-
-# Allow direct import of dump_io when tests are not a package.
-import sys
-from pathlib import Path as _Path
-sys.path.append(str(_Path(__file__).parent))
-from dump_io import load_dump  # noqa: E402
-
-DATA_DIR = Path(__file__).parent / "data"
+from virtual_casing_jax import SurfType, VirtualCasingJAX
+from virtual_casing_jax import testdata
+from virtual_casing_jax.integrals import field_period_target_coords
 
 
-def _infer_setup(prefix: str):
-    X = load_dump(DATA_DIR / f"{prefix}_setup_X")
-    surf = load_dump(DATA_DIR / f"{prefix}_setup_surface_coord")
-    B0_complete = load_dump(DATA_DIR / f"{prefix}_computeGradB_B0_complete")
+@pytest.mark.large
+def test_internal_gradb_matches_analytic_loop_field():
+    nfp = 1
+    half_period = False
+    src_nt, src_np = 24, 20
+    trg_nt, trg_np = 4, 4
 
-    src_nt = X.shape[1]
-    src_np = X.shape[2]
-    nfp_eff = B0_complete.shape[1] // src_nt
-    half_period = surf.shape[1] == nfp_eff * (src_nt + 1)
-    nfp = nfp_eff // 2 if half_period else nfp_eff
-    return X, src_nt, src_np, nfp, nfp_eff, half_period
+    X = testdata.surface_coordinates(
+        nfp, half_period, src_nt, src_np, SurfType.AxisymNarrow
+    )
+    Bext, Bint = testdata.magnetic_field_data(
+        nfp, half_period, src_nt, src_np, X, src_nt, src_np
+    )
+    grad_ext_ref, grad_int_ref = testdata.magnetic_field_grad_data(
+        nfp, half_period, src_nt, src_np, X, trg_nt, trg_np
+    )
 
-
-def _reconstruct_B0(prefix: str, src_nt: int, src_np: int, nfp: int, nfp_eff: int, half_period: bool, trg_nt: int):
-    B0_complete_ref = load_dump(DATA_DIR / f"{prefix}_computeGradB_B0_complete")
-    B0_complete_ref = jnp.asarray(B0_complete_ref)
-    B0_complete = B0_complete_ref
-
-    dtheta = 0.0
-    if half_period:
-        dtheta = np.pi * (1.0 / (nfp * trg_nt * 2) - 1.0 / (nfp * src_nt * 2))
-        B0_complete = rotate_toroidal(B0_complete, nfp_eff * src_nt, src_np, -dtheta)
-
-    B0 = B0_complete[:, :src_nt, :]
-
-    B0_re = complete_vec_field(B0, False, half_period, nfp, src_nt, src_np, dtheta)
-    num = np.linalg.norm(np.asarray(B0_re) - np.asarray(B0_complete_ref))
-    den = np.linalg.norm(np.asarray(B0_complete_ref)) + 1e-14
-    assert num / den < 1e-4
-
-    return np.asarray(B0)
-
-
-@pytest.mark.parametrize("prefix", ["case_vc_int", "case_simsopt_int"])
-def test_virtual_casing_gradbint_parity(prefix):
-    if not (DATA_DIR / f"{prefix}_computeGradB_gradBvc.bin").exists():
-        pytest.skip("parity dump not available")
-
-    X, src_nt, src_np, nfp, nfp_eff, half_period = _infer_setup(prefix)
-    gradBvc_ref = load_dump(DATA_DIR / f"{prefix}_computeGradB_gradBvc")
-    quad_coord = load_dump(DATA_DIR / f"{prefix}_computeGradB_quad_coord")
-
-    trg_nt = gradBvc_ref.shape[2]
-    trg_np = gradBvc_ref.shape[3]
-    quad_nt = quad_coord.shape[1]
-    quad_np = quad_coord.shape[2]
-
-    B0 = _reconstruct_B0(prefix, src_nt, src_np, nfp, nfp_eff, half_period, trg_nt)
-
-    digits = 5
     vc = VirtualCasingJAX()
     vc.setup(
-        digits,
+        6,
         nfp,
         half_period,
         src_nt,
@@ -79,17 +44,64 @@ def test_virtual_casing_gradbint_parity(prefix):
         trg_nt,
         trg_np,
     )
+    Btotal = Bext + Bint
+    Bext_got = np.asarray(vc.compute_external_B(Btotal, chunk_size=512))
+    Bint_got = np.asarray(vc.compute_internal_B(Btotal, chunk_size=512))
+    Bext_ref = np.asarray(Bext[:, :: src_nt // trg_nt, :: src_np // trg_np])
+    Bint_ref = np.asarray(Bint[:, :: src_nt // trg_nt, :: src_np // trg_np])
+    grad_ext = np.asarray(vc.compute_external_gradB(Btotal, chunk_size=512))
+    grad_int = np.asarray(vc.compute_internal_gradB(Btotal, chunk_size=512))
+    grad_ext_ref = np.asarray(grad_ext_ref)
+    grad_int_ref = np.asarray(grad_int_ref)
 
-    gradB = vc.compute_internal_gradB(
-        B0,
-        quad_nt=quad_nt,
-        quad_np=quad_np,
-        digits=digits,
-        hedgehog_order=8,
-        chunk_size=1024,
+    def relerr(got, ref):
+        return np.linalg.norm(got - ref) / (np.linalg.norm(ref) + 1e-14)
+
+    assert relerr(Bext_got, Bext_ref) < 1e-3
+    assert relerr(Bint_got, Bint_ref) < 1e-3
+
+    # The internal component is the primary independent oracle.  The sum is
+    # more accurately resolved than the much smaller external component.
+    assert relerr(grad_int, grad_int_ref) < 1e-2
+    assert relerr(grad_ext + grad_int, grad_ext_ref + grad_int_ref) < 1e-2
+
+    antisymmetric = grad_int - np.swapaxes(grad_int, 0, 1)
+    trace = np.trace(grad_int, axis1=0, axis2=1)
+    scale = np.linalg.norm(grad_int) + 1e-14
+    assert np.linalg.norm(antisymmetric) / scale < 1e-2
+    assert np.linalg.norm(trace) / scale < 1e-2
+
+    setup = vc._grad_setup
+    target = field_period_target_coords(
+        setup.quad_coord, trg_nt, trg_np, vc.nfp_eff
     )
-    gradB = np.asarray(gradB)
+    normal = field_period_target_coords(
+        setup.normal, trg_nt, trg_np, vc.nfp_eff
+    )
+    one_sided_errors = []
+    for epsilon in (0.02, 0.01, 0.0025):
+        _, grad_int_off = testdata.magnetic_field_grad_data_offsurf(
+            nfp,
+            half_period,
+            src_nt,
+            src_np,
+            X,
+            target + epsilon * normal,
+        )
+        one_sided_errors.append(relerr(grad_int, np.asarray(grad_int_off)))
 
-    rel = np.linalg.norm(gradB - gradBvc_ref) / (np.linalg.norm(gradBvc_ref) + 1e-14)
-    tol = 5e-3 if prefix == "case_vc_int" else 6e-3
-    assert rel < tol
+    assert one_sided_errors[-1] < one_sided_errors[0]
+    assert one_sided_errors[-1] < 2e-2
+
+    targets = np.array([[2.0, 3.0], [0.0, 0.0], [0.0, 0.0]])
+    Bext_off_ref, Bint_off_ref = testdata.magnetic_field_data_offsurf(
+        nfp, half_period, src_nt, src_np, X, targets
+    )
+    kwargs = dict(X_trg=targets, levels=((48, 40),), digits=4, chunk_size=512)
+    Bext_off = vc.compute_external_B_offsurf_schedule(Btotal, **kwargs)
+    Bint_off = vc.compute_internal_B_offsurf_schedule(Btotal, **kwargs)
+
+    # The external-current representation is valid inside the torus; the
+    # internal-current representation is valid outside it.
+    assert relerr(np.asarray(Bext_off)[:, 0], np.asarray(Bext_off_ref)[:, 0]) < 1e-3
+    assert relerr(np.asarray(Bint_off)[:, 1], np.asarray(Bint_off_ref)[:, 1]) < 1e-3

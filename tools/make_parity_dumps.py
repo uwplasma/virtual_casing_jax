@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import hashlib
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -12,6 +15,90 @@ from pathlib import Path
 
 import numpy as np
 import json
+
+PINNED_VIRTUAL_CASING_COMMIT = "6a3898add7324125a938fded698ac145479e823e"
+PINNED_SIMSOPT_COMMIT = "377cf665158f47a9bed4a8b03a00352457ea27c8"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _generator_git_state() -> tuple[str | None, str | None]:
+    root = Path(__file__).resolve().parents[1]
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    ).stdout.strip() or None
+    diff = subprocess.run(
+        ["git", "diff", "--binary"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    ).stdout
+    return commit, hashlib.sha256(diff).hexdigest() if diff else None
+
+
+def _write_provenance(
+    dst_dir: Path,
+    *,
+    cases: list[str],
+    virtual_casing_commit: str,
+    simsopt_commit: str,
+    instrumentation_patch_sha256: str | None,
+    command: list[str],
+    generated_files: list[str],
+):
+    generator_commit, generator_diff = _generator_git_state()
+    files = {}
+    for name in sorted(set(generated_files)):
+        path = dst_dir / name
+        if not path.exists():
+            raise FileNotFoundError(f"Generated provenance file is missing: {path}")
+        files[path.name] = {"bytes": path.stat().st_size, "sha256": _sha256(path)}
+    legacy_files = sorted(
+        path.name
+        for path in dst_dir.iterdir()
+        if path.suffix in (".bin", ".json")
+        and path.name != "provenance.json"
+        and path.name not in files
+    )
+    manifest = {
+        "schema_version": 1,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_cases": cases,
+        "references": {
+            "virtual_casing": {
+                "url": "https://github.com/hiddenSymmetries/virtual-casing",
+                "commit": virtual_casing_commit,
+            },
+            "simsopt": {
+                "url": "https://github.com/hiddenSymmetries/simsopt",
+                "commit": simsopt_commit,
+            },
+            "instrumentation_patch_sha256": instrumentation_patch_sha256,
+        },
+        "generator": {
+            "repository_commit": generator_commit,
+            "dirty_diff_sha256": generator_diff,
+            "command": command,
+        },
+        "environment": {
+            "python": sys.version.split()[0],
+            "numpy": np.__version__,
+            "platform": platform.platform(),
+        },
+        "files": files,
+        "unverified_legacy_files": legacy_files,
+    }
+    (dst_dir / "provenance.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 
 def _copy_prefix(src_dir: Path, dst_dir: Path, prefix: str):
@@ -337,8 +424,17 @@ def run_case(case: str, dst_dir: Path):
             _copy_prefix(tmpdir, dst_dir, case)
         elif case == "case_testdata_axisym":
             make_virtual_casing_testdata_dumps(dst_dir)
+            return sorted(path.name for path in dst_dir.glob(f"{case}_*"))
         else:
             raise ValueError(f"Unknown case: {case}")
+
+        generated = []
+        for path in sorted(tmpdir.glob(f"{case}_*.bin")):
+            generated.append(path.name)
+            meta = path.with_suffix(".json")
+            if meta.exists():
+                generated.append(meta.name)
+        return generated
 
 
 def main():
@@ -349,6 +445,22 @@ def main():
         action="store_true",
         help="Run each case in a separate subprocess to avoid VC_DUMP_PREFIX caching",
     )
+    parser.add_argument(
+        "--virtual-casing-commit",
+        required=True,
+        help=f"Exact virtual-casing reference commit (recommended: {PINNED_VIRTUAL_CASING_COMMIT})",
+    )
+    parser.add_argument(
+        "--simsopt-commit",
+        required=True,
+        help=f"Exact Simsopt reference commit (recommended: {PINNED_SIMSOPT_COMMIT})",
+    )
+    parser.add_argument(
+        "--instrumentation-patch-sha256",
+        default="",
+        help="SHA-256 of any uncommitted reference dump instrumentation patch",
+    )
+    parser.add_argument("--no-manifest", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     dst_dir = Path(__file__).resolve().parents[1] / "tests" / "data"
@@ -367,22 +479,83 @@ def main():
     ]
 
     if args.case:
-        run_case(args.case, dst_dir)
+        generated_files = run_case(args.case, dst_dir)
+        if not args.no_manifest:
+            _write_provenance(
+                dst_dir,
+                cases=[args.case] if generated_files else [],
+                virtual_casing_commit=args.virtual_casing_commit,
+                simsopt_commit=args.simsopt_commit,
+                instrumentation_patch_sha256=args.instrumentation_patch_sha256 or None,
+                command=sys.argv,
+                generated_files=generated_files,
+            )
+        print("VC_GENERATED_FILES=" + json.dumps(generated_files))
         print(f"Parity dumps written to {dst_dir}")
         return
 
     if args.subprocess:
+        generated_files = []
+        generated_cases = []
         for case in cases:
-            subprocess.run(
-                [sys.executable, __file__, "--case", case],
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    __file__,
+                    "--case",
+                    case,
+                    "--virtual-casing-commit",
+                    args.virtual_casing_commit,
+                    "--simsopt-commit",
+                    args.simsopt_commit,
+                    "--no-manifest",
+                ],
                 check=True,
+                text=True,
+                capture_output=True,
             )
+            print(completed.stdout, end="")
+            marker = next(
+                (
+                    line
+                    for line in completed.stdout.splitlines()
+                    if line.startswith("VC_GENERATED_FILES=")
+                ),
+                "",
+            )
+            case_files = json.loads(marker.split("=", 1)[1]) if marker else []
+            generated_files.extend(case_files)
+            if case_files:
+                generated_cases.append(case)
+        _write_provenance(
+            dst_dir,
+            cases=generated_cases,
+            virtual_casing_commit=args.virtual_casing_commit,
+            simsopt_commit=args.simsopt_commit,
+            instrumentation_patch_sha256=args.instrumentation_patch_sha256 or None,
+            command=sys.argv,
+            generated_files=generated_files,
+        )
         print(f"Parity dumps written to {dst_dir}")
         return
 
+    generated_files = []
+    generated_cases = []
     for case in cases:
-        run_case(case, dst_dir)
+        case_files = run_case(case, dst_dir)
+        generated_files.extend(case_files)
+        if case_files:
+            generated_cases.append(case)
 
+    _write_provenance(
+        dst_dir,
+        cases=generated_cases,
+        virtual_casing_commit=args.virtual_casing_commit,
+        simsopt_commit=args.simsopt_commit,
+        instrumentation_patch_sha256=args.instrumentation_patch_sha256 or None,
+        command=sys.argv,
+        generated_files=generated_files,
+    )
     print(f"Parity dumps written to {dst_dir}")
 
 

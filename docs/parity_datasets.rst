@@ -1,8 +1,9 @@
 Parity Datasets
 ===============
 
-This project uses small parity datasets generated from the reference
-``virtual-casing`` code and SIMSOPT examples/tests.
+This project uses parity datasets generated from the reference
+``virtual-casing`` code and SIMSOPT examples/tests. They are archived as a
+release asset so routine clones and installations do not carry test data.
 
 Dataset Sources
 ---------------
@@ -35,7 +36,20 @@ Each dataset consists of binary arrays with JSON metadata:
 The metadata contains ``dtype`` and ``shape`` fields to reconstruct
 arrays in NumPy or JAX.
 
-Reproduction
+Download and Test
+-----------------
+
+The fetcher verifies the archive's SHA-256 digest before extracting it:
+
+.. code-block:: bash
+
+   python tools/fetch_reference_data.py
+   pytest -m "large or reference"
+
+The archive is versioned independently of the package, and its URL and digest
+are explicit in ``tools/fetch_reference_data.py``.
+
+Regeneration
 ------------
 
 Parity datasets are generated with:
@@ -43,8 +57,8 @@ Parity datasets are generated with:
 - ``VC_DUMP_DIR`` environment variable for C++ dumps.
 - ``tools/make_parity_dumps.py`` in this repository.
 
-The datasets are intentionally small to keep the repository size
-reasonable.
+Regeneration requires the reference C++ implementation. It is not part of the
+normal package build or test path.
 
 Subprocess Mode
 ---------------
@@ -55,5 +69,20 @@ To ensure each prefix is honored, run:
 .. code-block:: bash
 
    python tools/make_parity_dumps.py --subprocess
+
+Reference commit IDs are mandatory:
+
+.. code-block:: bash
+
+   python tools/make_parity_dumps.py --subprocess \
+     --virtual-casing-commit 6a3898add7324125a938fded698ac145479e823e \
+     --simsopt-commit 377cf665158f47a9bed4a8b03a00352457ea27c8
+
+Generation writes ``tests/data/provenance.json`` with the reference and
+generator commits, command, UTC timestamp, environment, and SHA-256/size of
+every dump. If the reference implementation needed uncommitted dump
+instrumentation, pass its hash with ``--instrumentation-patch-sha256``.
+Legacy dumps without this manifest remain explicitly unverified; commit IDs
+must not be inferred retroactively.
 
 This spawns a fresh process per case and avoids prefix caching issues.

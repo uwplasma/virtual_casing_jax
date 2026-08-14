@@ -1,13 +1,13 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "virtual-casing-jax"
-version = "0.0.3"
+version = "0.0.4"
 description = "JAX implementation of the virtual casing principle with high-order quadrature"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
@@ -15,10 +15,14 @@ authors = [
 ]
 dependencies = [
   "jax",
-  "jaxlib",
   "numpy",
   "scipy",
 ]
+
+[project.urls]
+Documentation = "https://virtual-casing-jax.readthedocs.io/"
+Issues = "https://github.com/uwplasma/virtual_casing_jax/issues"
+Repository = "https://github.com/uwplasma/virtual_casing_jax"
 
 [tool.setuptools.packages.find]
 include = ["virtual_casing_jax*"]
@@ -30,6 +34,12 @@ virtual_casing_jax = ["geom/*.npz"]
 "tools/*" = ["E731"]
 
 [tool.pytest.ini_options]
+addopts = "-m 'not large and not reference'"
 markers = [
   "large: large parity datasets (longer runtime)",
+  "reference: comparisons with archived upstream reference data",
 ]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true

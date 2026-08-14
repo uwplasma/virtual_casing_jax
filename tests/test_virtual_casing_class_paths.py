@@ -69,7 +69,7 @@ def test_on_surface_bad_offsurface_target_rank_rejected_after_setup():
         )
 
 
-def test_offsurface_internal_branches_reshape_and_cancel_external_branch():
+def test_offsurface_scheduled_branches_reshape_and_cancel_external_branch():
     X = _torus()
     B0 = X * 0.03 + 0.08
     X_trg = jnp.array(
@@ -85,21 +85,19 @@ def test_offsurface_internal_branches_reshape_and_cancel_external_branch():
     X_src, _, _ = vc._offsurface_densities(B0)
     levels = ((int(X_src.shape[1]), int(X_src.shape[2])),)
 
-    Bext = vc.compute_external_B_offsurf(
+    Bext = vc.compute_external_B_offsurf_schedule(
         B0,
         X_trg=X_trg,
+        levels=levels,
         digits=2,
-        max_Nt=13,
-        max_Np=13,
         chunk_size=64,
         target_chunk_size=1,
     )
-    Bint = vc.compute_internal_B_offsurf(
+    Bint = vc.compute_internal_B_offsurf_schedule(
         B0,
         X_trg=X_trg,
+        levels=levels,
         digits=2,
-        max_Nt=13,
-        max_Np=13,
         chunk_size=64,
         target_chunk_size=1,
     )

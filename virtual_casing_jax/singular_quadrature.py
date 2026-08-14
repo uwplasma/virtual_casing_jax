@@ -104,8 +104,8 @@ def _lagrange_interp(z0, z1, i0, i1):
     return p
 
 
-@functools.lru_cache(maxsize=None)
-def precompute_singular(
+@functools.lru_cache(maxsize=8)
+def _precompute_singular_host(
     patch_dim0: int,
     rad_dim: int,
     hedgehog_order: int = 1,
@@ -201,13 +201,13 @@ def precompute_singular(
 
     def _cast_pou(arr):
         if pou_dtype is None:
-            return jnp.asarray(arr)
-        return jnp.asarray(arr, dtype=pou_dtype)
+            return np.asarray(arr)
+        return np.asarray(arr, dtype=pou_dtype)
 
     def _cast_patch(arr):
         if patch_dtype is None:
-            return jnp.asarray(arr)
-        return jnp.asarray(arr, dtype=patch_dtype)
+            return np.asarray(arr)
+        return np.asarray(arr, dtype=patch_dtype)
 
     return SingularPrecomp(
         patch_dim0=patch_dim0,
@@ -218,14 +218,56 @@ def precompute_singular(
         patch_dim=patch_dim,
         ngrid=ngrid,
         npolar=npolar,
-        qx=jnp.asarray(qx),
-        qw=jnp.asarray(qw),
+        qx=np.asarray(qx),
+        qw=np.asarray(qw),
         Gpou=_cast_pou(Gpou),
         Ppou=_cast_pou(Ppou),
-        I_G2P=jnp.asarray(I_G2P, dtype=jnp.dtype(index_dtype)),
+        I_G2P=np.asarray(I_G2P, dtype=index_dtype),
         M_G2P=_cast_patch(M_G2P),
-        interp_idx=jnp.asarray(interp_idx, dtype=jnp.dtype(index_dtype)),
+        interp_idx=np.asarray(interp_idx, dtype=index_dtype),
         hedgehog_wts=_cast_pou(wts),
+    )
+
+
+def precompute_singular(
+    patch_dim0: int,
+    rad_dim: int,
+    hedgehog_order: int = 1,
+    pou_dtype=None,
+    patch_dtype=None,
+    index_dtype=None,
+):
+    """Build JAX constants from a bounded cache of host NumPy arrays.
+
+    JAX conversion is intentionally outside the cached function.  Otherwise a
+    JIT-first invocation can cache tracers globally and leak them into later
+    eager calls.
+    """
+    host = _precompute_singular_host(
+        patch_dim0,
+        rad_dim,
+        hedgehog_order,
+        pou_dtype=pou_dtype,
+        patch_dtype=patch_dtype,
+        index_dtype=index_dtype,
+    )
+    return SingularPrecomp(
+        patch_dim0=host.patch_dim0,
+        hedgehog_order=host.hedgehog_order,
+        rad_dim_base=host.rad_dim_base,
+        rad_dim=host.rad_dim,
+        ang_dim=host.ang_dim,
+        patch_dim=host.patch_dim,
+        ngrid=host.ngrid,
+        npolar=host.npolar,
+        qx=jnp.asarray(host.qx),
+        qw=jnp.asarray(host.qw),
+        Gpou=jnp.asarray(host.Gpou),
+        Ppou=jnp.asarray(host.Ppou),
+        I_G2P=jnp.asarray(host.I_G2P),
+        M_G2P=jnp.asarray(host.M_G2P),
+        interp_idx=jnp.asarray(host.interp_idx),
+        hedgehog_wts=jnp.asarray(host.hedgehog_wts),
     )
 
 

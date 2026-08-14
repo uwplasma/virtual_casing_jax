@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import jax
 import jax.numpy as jnp
 
-from .utils import autotune_chunk_sizes, build_offsurface_levels
+from .utils import autotune_chunk_sizes, build_offsurface_levels, warn_if_x64_needed
 from .surface_ops import (
     complete_vec_field,
     resample,
@@ -18,6 +18,7 @@ from .surface_ops import (
     cross_prod,
 )
 from .integrals import (
+    curl_single_layer_gradient,
     laplace_fxd_u_eval_singular,
     laplace_fxd_u_eval_vec_singular,
     laplace_fxd2_u_eval,
@@ -48,25 +49,19 @@ class QuadSetup:
 
 @dataclass(frozen=True)
 class PrecisionPlan:
-    """Adaptive-precision choices for a virtual-casing evaluation.
+    """Frozen adaptive-precision choices for a virtual-casing B evaluation.
 
-    The quadrature grid sizes and the singular-patch indices are normally
-    auto-selected from the surface geometry inside the compute path, which
-    concretizes surface-derived values (``float(jnp.min(...))``, a
-    condition-number branch) and so cannot run under ``jax.grad``/``jit`` when
-    the surface is a traced array.  :meth:`VirtualCasingJAX.plan_precision`
-    performs that selection ONCE from a concrete surface and returns this plan
-    of static values; passing it back as ``precision=`` to
-    :meth:`compute_internal_B` / :meth:`compute_external_B` keeps the whole B
-    evaluation differentiable in the surface geometry (the precision is held
-    fixed, which is correct — these are numerical-accuracy knobs, robust to the
-    small surface perturbations of an optimization step).
+    Automatic quadrature and singular-patch selection depend on concrete
+    surface geometry.  Select them once with :meth:`plan_precision`, then pass
+    the resulting plan to :meth:`compute_external_B` or
+    :meth:`compute_internal_B` when differentiating with respect to the
+    surface coordinates.
     """
 
     quad_nt: int
     quad_np: int
     patch_dim0: int
-    patch_idx: jnp.ndarray
+    patch_idx: jax.Array
 
 
 class VirtualCasingJAX:
@@ -198,6 +193,29 @@ class VirtualCasingJAX:
         self._setup = True
         self._grad_setup = None
         self._b_setup = None
+        self._jit_cache.clear()
+        warn_if_x64_needed(self.digits, self.surface_coord.dtype)
+
+    def _validate_on_surface_targets(self, X_trg):
+        if X_trg is None:
+            return None
+        X_trg = jnp.asarray(X_trg)
+        expected = self.trg_nt * self.trg_np
+        valid = (
+            X_trg.ndim in (2, 3)
+            and X_trg.shape[0] == 3
+            and (
+                (X_trg.ndim == 3 and X_trg.shape[1] * X_trg.shape[2] == expected)
+                or (X_trg.ndim == 2 and X_trg.shape[1] == expected)
+            )
+        )
+        if not valid:
+            raise ValueError(
+                "on-surface X_trg must have shape "
+                f"(3, {self.trg_nt}, {self.trg_np}) or (3, {expected}); "
+                "use an off-surface API for arbitrary targets"
+            )
+        return X_trg
 
     def _select_quad_sizes(self, digits: int):
         surf_nt_full = int(self.surface_coord.shape[1])
@@ -257,7 +275,7 @@ class VirtualCasingJAX:
                 digits=digits,
                 chunk_size=1024,
             )
-            err = float(jnp.max(jnp.abs(jnp.asarray(U).reshape(-1) - 0.5)))
+            err = float(jnp.max(jnp.abs(jnp.asarray(U).reshape(-1) + 0.5)))
             if err <= 0:
                 break
             scal = max(1.0, (digits + 1) / (math.log(err) / math.log(0.1)))
@@ -285,11 +303,9 @@ class VirtualCasingJAX:
         )
         dX = grad2d(quad_coord, quad_nt, quad_np)
         normal, _, orient = surf_normal_area_elem(dX, quad_coord, return_orientation=True)
-        # ``orient`` is a discrete +/-1 sign (normal_orientation); ``float()`` it
-        # would concretize a surface-derived value and break tracing when the
-        # surface is differentiated.  Keep it as a stop-gradient jnp scalar: the
-        # sign is topologically stable under the small surface perturbations of
-        # an optimization step, so a zero gradient through it is correct.
+        # Orientation is a discrete topological sign. Converting it to a Python
+        # float would concretize traced surface geometry; its derivative is zero
+        # as long as an optimization step does not invert the surface.
         orient = jax.lax.stop_gradient(jnp.asarray(orient))
         return QuadSetup(
             quad_nt=quad_nt,
@@ -326,39 +342,38 @@ class VirtualCasingJAX:
         digits: int | None = None,
         quad_nt: int | None = None,
         quad_np: int | None = None,
-    ) -> "PrecisionPlan":
-        """Select the adaptive precision from the *concrete* surface, once.
+    ) -> PrecisionPlan:
+        """Freeze geometry-dependent precision choices for traced evaluations.
 
-        Returns a :class:`PrecisionPlan` (quadrature grid sizes + singular-patch
-        indices) of static values.  Pass it back as ``precision=`` to
-        :meth:`compute_internal_B` / :meth:`compute_external_B` so those calls
-        run with a fixed precision and stay differentiable in the surface
-        geometry.  Call this on a VC object built from a *concrete* surface (the
-        current optimization iterate); the auto-selection here concretizes
-        surface-derived quantities, which is exactly what must happen outside the
-        traced region.
-
-        Does not mutate the object's cached ``_b_setup`` — it builds a throwaway
-        setup solely to choose the patch indices.
+        Call this on a concrete surface, then reuse the returned plan for small
+        differentiable perturbations of that surface. The plan does not mutate
+        the object's stored B quadrature setup.
         """
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before plan_precision")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before plan_precision"
+            )
         digits = self.digits if digits is None else int(digits)
         if quad_nt is None or quad_np is None:
             quad_nt, quad_np = self._select_quad_sizes(digits)
-        quad_nt, quad_np = int(quad_nt), int(quad_np)
+        quad_nt = int(quad_nt)
+        quad_np = int(quad_np)
         scratch = self._build_quad_setup(quad_nt, quad_np)
         patch_dim0, patch_idx = self._get_patch_idx(scratch, digits)
         return PrecisionPlan(
-            quad_nt=quad_nt, quad_np=quad_np,
-            patch_dim0=int(patch_dim0), patch_idx=patch_idx,
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+            patch_dim0=int(patch_dim0),
+            patch_idx=patch_idx,
         )
 
     @staticmethod
     def _apply_precision(precision, quad_nt, quad_np, patch_dim0, patch_idx):
-        """Fill any unset quad/patch kwargs from a :class:`PrecisionPlan`."""
+        """Fill unspecified quadrature and patch arguments from a plan."""
         if precision is None:
             return quad_nt, quad_np, patch_dim0, patch_idx
+        if not isinstance(precision, PrecisionPlan):
+            raise TypeError("precision must be a PrecisionPlan or None")
         if quad_nt is None:
             quad_nt = precision.quad_nt
         if quad_np is None:
@@ -432,6 +447,7 @@ class VirtualCasingJAX:
         assert self._grad_setup is not None
 
         B0 = jnp.asarray(B0).reshape((3, self.src_nt, self.src_np))
+        warn_if_x64_needed(digits, B0.dtype)
 
         if remat is None:
             remat = True
@@ -467,11 +483,12 @@ class VirtualCasingJAX:
             self._grad_setup.quad_np,
         )
 
-        J = cross_prod(self._grad_setup.normal, B_quad)
+        J = cross_prod(B_quad, self._grad_setup.normal)
         BdotN = dot_prod(B_quad, self._grad_setup.normal)
 
         if patch_dim0 is None or patch_idx is None:
             patch_dim0, patch_idx = self._get_patch_idx(self._grad_setup, digits)
+        hedgehog_side = "interior" if sign > 0 else "exterior"
 
         gradG_J = laplace_fxd2_u_eval_vec_singular(
             self._grad_setup.quad_coord,
@@ -492,6 +509,7 @@ class VirtualCasingJAX:
             interp_block_size=interp_block_size,
             remat=remat,
             scan_targets=scan_targets,
+            hedgehog_side=hedgehog_side,
         )
         gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, self.trg_nt, self.trg_np))
 
@@ -514,18 +532,13 @@ class VirtualCasingJAX:
             interp_block_size=interp_block_size,
             remat=remat,
             scan_targets=scan_targets,
+            hedgehog_side=hedgehog_side,
         )
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape(
             (3, 3, self.trg_nt, self.trg_np)
         )
 
-        gradBvc = jnp.zeros((3, 3, self.trg_nt, self.trg_np), dtype=gradG_J.dtype)
-        for k in range(3):
-            k1 = (k + 1) % 3
-            k2 = (k + 2) % 3
-            gradBvc = gradBvc.at[k].set(gradG_J[k1, k2] - gradG_J[k2, k1])
-
-        gradBvc = gradBvc + gradgradG_BdotN
+        gradBvc = curl_single_layer_gradient(gradG_J) + gradgradG_BdotN
         return gradBvc * sign
 
     def compute_external_gradB(
@@ -621,6 +634,9 @@ class VirtualCasingJAX:
         quad_nt = kwargs.get("quad_nt")
         quad_np = kwargs.get("quad_np")
         self._ensure_grad_setup(quad_nt, quad_np, digits)
+        assert self._grad_setup is not None
+        quad_nt = self._grad_setup.quad_nt
+        quad_np = self._grad_setup.quad_np
         patch_dim0, patch_idx = self._get_patch_idx(self._grad_setup, digits)
 
         chunk_size = kwargs.get("chunk_size", "auto")
@@ -661,6 +677,8 @@ class VirtualCasingJAX:
             call_kwargs["pou_dtype"] = pou_dtype
             call_kwargs["patch_dtype"] = patch_dtype
             call_kwargs["interp_block_size"] = interp_block_size
+            call_kwargs["quad_nt"] = quad_nt
+            call_kwargs["quad_np"] = quad_np
             fn = jax.jit(
                 lambda B: self.compute_external_gradB(
                     B,
@@ -690,18 +708,21 @@ class VirtualCasingJAX:
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
-        precision=None,
+        precision: PrecisionPlan | None = None,
     ):
         if not self._setup:
             raise RuntimeError("VirtualCasingJAX.setup must be called before compute_B")
 
         quad_nt, quad_np, patch_dim0, patch_idx = self._apply_precision(
-            precision, quad_nt, quad_np, patch_dim0, patch_idx)
+            precision, quad_nt, quad_np, patch_dim0, patch_idx
+        )
         digits = self.digits if digits is None else int(digits)
         self._ensure_b_setup(quad_nt, quad_np, digits)
         assert self._b_setup is not None
 
         B0 = jnp.asarray(B0).reshape((3, self.src_nt, self.src_np))
+        warn_if_x64_needed(digits, B0.dtype)
+        X_trg = self._validate_on_surface_targets(X_trg)
 
         if remat is None:
             remat = False
@@ -746,7 +767,7 @@ class VirtualCasingJAX:
             self._b_setup.quad_np,
         )
 
-        J = cross_prod(self._b_setup.normal, B_quad)
+        J = cross_prod(B_quad, self._b_setup.normal)
         BdotN = dot_prod(B_quad, self._b_setup.normal)
 
         if patch_dim0 is None or patch_idx is None:
@@ -803,12 +824,7 @@ class VirtualCasingJAX:
         )
         B_on = B_on_trg[:, : self.trg_nt, :]
 
-        Bvc = jnp.zeros((3, self.trg_nt, self.trg_np), dtype=gradG_J.dtype)
-        for k in range(3):
-            k1 = (k + 1) % 3
-            k2 = (k + 2) % 3
-            Bvc = Bvc.at[k].set(gradG_J[k1, k2] - gradG_J[k2, k1])
-
+        Bvc = curl_single_layer_gradient(gradG_J)
         Bvc = sign * (Bvc + gradG_BdotN) + 0.5 * B_on
         return Bvc
 
@@ -828,7 +844,7 @@ class VirtualCasingJAX:
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
-        precision=None,
+        precision: PrecisionPlan | None = None,
     ):
         """Compute Bext from total B on the source grid."""
         return self._compute_B_signed(
@@ -865,7 +881,7 @@ class VirtualCasingJAX:
         remat: bool | None = None,
         patch_dim0: int | None = None,
         patch_idx=None,
-        precision=None,
+        precision: PrecisionPlan | None = None,
     ):
         """Compute Bint from total B on the source grid."""
         return self._compute_B_signed(
@@ -895,6 +911,9 @@ class VirtualCasingJAX:
         quad_nt = kwargs.get("quad_nt")
         quad_np = kwargs.get("quad_np")
         self._ensure_b_setup(quad_nt, quad_np, digits)
+        assert self._b_setup is not None
+        quad_nt = self._b_setup.quad_nt
+        quad_np = self._b_setup.quad_np
         patch_dim0, patch_idx = self._get_patch_idx(self._b_setup, digits)
 
         chunk_size = kwargs.get("chunk_size", "auto")
@@ -933,6 +952,8 @@ class VirtualCasingJAX:
             call_kwargs["pou_dtype"] = pou_dtype
             call_kwargs["patch_dtype"] = patch_dtype
             call_kwargs["interp_block_size"] = interp_block_size
+            call_kwargs["quad_nt"] = quad_nt
+            call_kwargs["quad_np"] = quad_np
             fn = jax.jit(
                 lambda B: self.compute_external_B(
                     B,
@@ -954,6 +975,9 @@ class VirtualCasingJAX:
         quad_nt = kwargs.get("quad_nt")
         quad_np = kwargs.get("quad_np")
         self._ensure_b_setup(quad_nt, quad_np, digits)
+        assert self._b_setup is not None
+        quad_nt = self._b_setup.quad_nt
+        quad_np = self._b_setup.quad_np
         patch_dim0, patch_idx = self._get_patch_idx(self._b_setup, digits)
 
         chunk_size = kwargs.get("chunk_size", "auto")
@@ -992,6 +1016,8 @@ class VirtualCasingJAX:
             call_kwargs["pou_dtype"] = pou_dtype
             call_kwargs["patch_dtype"] = patch_dtype
             call_kwargs["interp_block_size"] = interp_block_size
+            call_kwargs["quad_nt"] = quad_nt
+            call_kwargs["quad_np"] = quad_np
             fn = jax.jit(
                 lambda B: self.compute_internal_B(
                     B,
@@ -1006,22 +1032,46 @@ class VirtualCasingJAX:
 
     def compute_external_B_batch(self, B0_batch, *, X_trg=None, **kwargs):
         """Vectorized compute_external_B over a batch dimension."""
+        kwargs = dict(kwargs)
+        digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
+        self._ensure_b_setup(kwargs.get("quad_nt"), kwargs.get("quad_np"), digits)
+        assert self._b_setup is not None
+        kwargs["quad_nt"] = self._b_setup.quad_nt
+        kwargs["quad_np"] = self._b_setup.quad_np
         if X_trg is None:
             return jax.vmap(lambda b: self.compute_external_B(b, **kwargs), in_axes=0)(B0_batch)
         return jax.vmap(lambda b, xt: self.compute_external_B(b, X_trg=xt, **kwargs), in_axes=(0, 0))(B0_batch, X_trg)
 
     def compute_internal_B_batch(self, B0_batch, *, X_trg=None, **kwargs):
         """Vectorized compute_internal_B over a batch dimension."""
+        kwargs = dict(kwargs)
+        digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
+        self._ensure_b_setup(kwargs.get("quad_nt"), kwargs.get("quad_np"), digits)
+        assert self._b_setup is not None
+        kwargs["quad_nt"] = self._b_setup.quad_nt
+        kwargs["quad_np"] = self._b_setup.quad_np
         if X_trg is None:
             return jax.vmap(lambda b: self.compute_internal_B(b, **kwargs), in_axes=0)(B0_batch)
         return jax.vmap(lambda b, xt: self.compute_internal_B(b, X_trg=xt, **kwargs), in_axes=(0, 0))(B0_batch, X_trg)
 
     def compute_external_gradB_batch(self, B0_batch, **kwargs):
         """Vectorized compute_external_gradB over a batch dimension."""
+        kwargs = dict(kwargs)
+        digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
+        self._ensure_grad_setup(kwargs.get("quad_nt"), kwargs.get("quad_np"), digits)
+        assert self._grad_setup is not None
+        kwargs["quad_nt"] = self._grad_setup.quad_nt
+        kwargs["quad_np"] = self._grad_setup.quad_np
         return jax.vmap(lambda b: self.compute_external_gradB(b, **kwargs), in_axes=0)(B0_batch)
 
     def compute_internal_gradB_batch(self, B0_batch, **kwargs):
         """Vectorized compute_internal_gradB over a batch dimension."""
+        kwargs = dict(kwargs)
+        digits = self.digits if kwargs.get("digits") is None else int(kwargs["digits"])
+        self._ensure_grad_setup(kwargs.get("quad_nt"), kwargs.get("quad_np"), digits)
+        assert self._grad_setup is not None
+        kwargs["quad_nt"] = self._grad_setup.quad_nt
+        kwargs["quad_np"] = self._grad_setup.quad_np
         return jax.vmap(lambda b: self.compute_internal_gradB(b, **kwargs), in_axes=0)(B0_batch)
 
     def compute_internal_gradB_jit(self, B0, **kwargs):
@@ -1033,6 +1083,9 @@ class VirtualCasingJAX:
         quad_nt = kwargs.get("quad_nt")
         quad_np = kwargs.get("quad_np")
         self._ensure_grad_setup(quad_nt, quad_np, digits)
+        assert self._grad_setup is not None
+        quad_nt = self._grad_setup.quad_nt
+        quad_np = self._grad_setup.quad_np
         patch_dim0, patch_idx = self._get_patch_idx(self._grad_setup, digits)
 
         chunk_size = kwargs.get("chunk_size", "auto")
@@ -1073,6 +1126,8 @@ class VirtualCasingJAX:
             call_kwargs["pou_dtype"] = pou_dtype
             call_kwargs["patch_dtype"] = patch_dtype
             call_kwargs["interp_block_size"] = interp_block_size
+            call_kwargs["quad_nt"] = quad_nt
+            call_kwargs["quad_np"] = quad_np
             fn = jax.jit(
                 lambda B: self.compute_internal_gradB(
                     B,
@@ -1120,6 +1175,8 @@ class VirtualCasingJAX:
                 chunk_size=chunk_size,
                 target_chunk_size=target_chunk_size,
                 pou_dtype=pou_dtype,
+                patch_dtype=patch_dtype,
+                interp_block_size=interp_block_size,
                 remat=remat,
             )
 
@@ -1158,11 +1215,12 @@ class VirtualCasingJAX:
 
         return _eval(X_trg)
 
-    def _offsurface_densities(self, B0):
+    def _offsurface_densities(self, B0, digits: int | None = None):
         if not self._setup:
             raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
 
         B0 = jnp.asarray(B0).reshape((3, self.src_nt, self.src_np))
+        warn_if_x64_needed(self.digits if digits is None else digits, B0.dtype)
 
         surf_nt_full = int(self.surface_coord.shape[1])
         surf_np_full = int(self.surface_coord.shape[2])
@@ -1203,7 +1261,7 @@ class VirtualCasingJAX:
             base_np,
         )
 
-        J = cross_prod(normal, B_quad)
+        J = cross_prod(B_quad, normal)
         BdotN = dot_prod(B_quad, normal)
         return X_src, BdotN, J
 
@@ -1215,14 +1273,17 @@ class VirtualCasingJAX:
         digits: int | None = None,
         max_Nt: int = -1,
         max_Np: int = -1,
+        max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bext at off-surface targets using adaptive quadrature."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_src, BdotN, J = self._offsurface_densities(B0, digits)
         X_trg = jnp.asarray(X_trg)
         nsrc = X_src.shape[1] * X_src.shape[2]
         ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
@@ -1237,6 +1298,7 @@ class VirtualCasingJAX:
             digits=digits,
             max_Nt=max_Nt,
             max_Np=max_Np,
+            max_levels=max_levels,
             ext=True,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
@@ -1253,14 +1315,17 @@ class VirtualCasingJAX:
         digits: int | None = None,
         max_Nt: int = -1,
         max_Np: int = -1,
+        max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute Bint at off-surface targets using adaptive quadrature."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_src, BdotN, J = self._offsurface_densities(B0, digits)
         X_trg = jnp.asarray(X_trg)
         nsrc = X_src.shape[1] * X_src.shape[2]
         ntrg = X_trg.shape[1] * X_trg.shape[2] if X_trg.ndim == 3 else X_trg.shape[1]
@@ -1275,6 +1340,7 @@ class VirtualCasingJAX:
             digits=digits,
             max_Nt=max_Nt,
             max_Np=max_Np,
+            max_levels=max_levels,
             ext=False,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
@@ -1298,9 +1364,11 @@ class VirtualCasingJAX:
     ):
         """Compute Bext off-surface using a fixed adaptive refinement schedule."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_src, BdotN, J = self._offsurface_densities(B0, digits)
         levels = self._resolve_offsurface_levels(
             levels,
             nt0=int(X_src.shape[1]),
@@ -1346,9 +1414,11 @@ class VirtualCasingJAX:
     ):
         """JIT-compiled schedule-based off-surface Bext."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, _, _ = self._offsurface_densities(B0)
+        X_src, _, _ = self._offsurface_densities(B0, digits)
         levels = self._resolve_offsurface_levels(
             levels,
             nt0=int(X_src.shape[1]),
@@ -1406,9 +1476,11 @@ class VirtualCasingJAX:
     ):
         """Compute Bint off-surface using a fixed adaptive refinement schedule."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_src, BdotN, J = self._offsurface_densities(B0, digits)
         levels = self._resolve_offsurface_levels(
             levels,
             nt0=int(X_src.shape[1]),
@@ -1454,9 +1526,11 @@ class VirtualCasingJAX:
     ):
         """JIT-compiled schedule-based off-surface Bint."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, _, _ = self._offsurface_densities(B0)
+        X_src, _, _ = self._offsurface_densities(B0, digits)
         levels = self._resolve_offsurface_levels(
             levels,
             nt0=int(X_src.shape[1]),
@@ -1507,6 +1581,7 @@ class VirtualCasingJAX:
         digits: int | None = None,
         max_Nt: int = -1,
         max_Np: int = -1,
+        max_levels: int = 6,
         adaptive: bool = False,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
@@ -1517,13 +1592,15 @@ class VirtualCasingJAX:
         currently uses the base resampled grid (no adaptive refinement).
         """
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
         X_trg = jnp.asarray(X_trg)
         X_trg_flat = X_trg.reshape((3, -1)) if X_trg.ndim == 3 else X_trg
         ntrg = X_trg_flat.shape[1]
 
-        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_src, BdotN, J = self._offsurface_densities(B0, digits)
         nsrc = X_src.shape[1] * X_src.shape[2]
         chunk_size, target_chunk_size = self._resolve_chunk_sizes(
             "gradb_off", chunk_size, target_chunk_size, nsrc=nsrc, ntrg=ntrg
@@ -1537,6 +1614,7 @@ class VirtualCasingJAX:
                 digits=digits,
                 max_Nt=max_Nt,
                 max_Np=max_Np,
+                max_levels=max_levels,
                 chunk_size=chunk_size,
                 target_chunk_size=target_chunk_size,
             )
@@ -1564,12 +1642,7 @@ class VirtualCasingJAX:
         )
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, ntrg))
 
-        gradB = jnp.zeros((3, 3, ntrg), dtype=gradG_J.dtype)
-        for k in range(3):
-            k1 = (k + 1) % 3
-            k2 = (k + 2) % 3
-            gradB = gradB.at[k].set(gradG_J[k1, k2] - gradG_J[k2, k1])
-        gradB = gradB + gradgradG_BdotN
+        gradB = curl_single_layer_gradient(gradG_J) + gradgradG_BdotN
 
         if X_trg.ndim == 3:
             return gradB.reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
@@ -1583,19 +1656,23 @@ class VirtualCasingJAX:
         digits: int | None = None,
         max_Nt: int = -1,
         max_Np: int = -1,
+        max_levels: int = 6,
         adaptive: bool = False,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
     ):
         """Compute GradBint at off-surface targets using direct quadrature."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         gradB = self.compute_external_gradB_offsurf(
             B0,
             X_trg=X_trg,
             digits=digits,
             max_Nt=max_Nt,
             max_Np=max_Np,
+            max_levels=max_levels,
             adaptive=adaptive,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
@@ -1617,9 +1694,11 @@ class VirtualCasingJAX:
     ):
         """Compute GradBext off-surface using a fixed adaptive refinement schedule."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_src, BdotN, J = self._offsurface_densities(B0, digits)
         levels = self._resolve_offsurface_levels(
             levels,
             nt0=int(X_src.shape[1]),
@@ -1666,9 +1745,11 @@ class VirtualCasingJAX:
     ):
         """JIT-compiled schedule-based off-surface GradBext."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, _, _ = self._offsurface_densities(B0)
+        X_src, _, _ = self._offsurface_densities(B0, digits)
         levels = self._resolve_offsurface_levels(
             levels,
             nt0=int(X_src.shape[1]),
@@ -1726,9 +1807,11 @@ class VirtualCasingJAX:
     ):
         """Compute GradBint off-surface using a fixed adaptive refinement schedule."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, BdotN, J = self._offsurface_densities(B0)
+        X_src, BdotN, J = self._offsurface_densities(B0, digits)
         levels = self._resolve_offsurface_levels(
             levels,
             nt0=int(X_src.shape[1]),
@@ -1775,9 +1858,11 @@ class VirtualCasingJAX:
     ):
         """JIT-compiled schedule-based off-surface GradBint."""
         if not self._setup:
-            raise RuntimeError("VirtualCasingJAX.setup must be called before off-surface evaluation")
+            raise RuntimeError(
+                "VirtualCasingJAX.setup must be called before off-surface evaluation"
+            )
         digits = self.digits if digits is None else int(digits)
-        X_src, _, _ = self._offsurface_densities(B0)
+        X_src, _, _ = self._offsurface_densities(B0, digits)
         levels = self._resolve_offsurface_levels(
             levels,
             nt0=int(X_src.shape[1]),

@@ -1,21 +1,25 @@
 """Kernel functions matching BIEST scaling and conventions."""
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 
 FOUR_PI = 4.0 * jnp.pi
 
 
 def _safe_rinv(r2, eps=1e-30):
-    # Self-interaction points (r2 -> 0) are excluded from the singular
-    # quadrature, so the VALUE is 0 there.  But ``jnp.where`` differentiates
-    # BOTH branches, and ``1/sqrt(r2)`` has a -inf gradient at r2 = 0 which the
-    # VJP turns into ``nan * 0 = nan`` -- poisoning any gradient w.r.t. the
-    # surface geometry (which moves the quadrature points).  The double-``where``
-    # feeds a safe ``1.0`` into the differentiated branch wherever the result is
-    # masked to 0, so both the value AND the gradient stay finite and correct.
-    safe_r2 = jnp.where(r2 > eps, r2, 1.0)
-    return jnp.where(r2 > eps, 1.0 / jnp.sqrt(safe_r2), 0.0)
+    """Return ``1 / sqrt(r2)`` with a finite derivative at masked entries.
+
+    Applying ``where`` directly to ``1 / sqrt(r2)`` still traces the singular
+    branch.  In reverse mode this can produce ``0 * inf == nan`` at coincident
+    source and target points.  Replacing masked inputs before the reciprocal
+    square root keeps both the primal and all autodiff paths finite.
+    """
+    r2 = jnp.asarray(r2)
+    eps = jnp.asarray(eps, dtype=r2.dtype)
+    mask = r2 > eps
+    safe_r2 = jnp.where(mask, r2, jnp.ones_like(r2))
+    return jnp.where(mask, jax.lax.rsqrt(safe_r2), jnp.zeros_like(r2))
 
 
 def laplace_fx_u(dx, f):
@@ -63,17 +67,16 @@ def laplace_fxd2_u(dx, f):
 
 
 def laplace_dx_u(dx, n, f):
-    """Laplace double-layer kernel: (-(n·dx) * f) / (4*pi*r^3).
+    """Laplace double-layer kernel: ``(n·dx) f / (4 pi r^3)``.
 
-    dx: (..., 3)
-    n: (..., 3) source normals
-    f: (...,)
-    returns (...,)
+    This is the outward-normal convention used by SCTL and BIEST since
+    BIEST commit ``0bf9ddc``. For a closed surface, ``D[1]`` is ``-1``
+    inside, ``0`` outside, and ``-1/2`` on the surface.
     """
     r2 = jnp.sum(dx * dx, axis=-1)
     rinv = _safe_rinv(r2)
     rinv3 = rinv * rinv * rinv
-    ndotr = -jnp.sum(n * dx, axis=-1)
+    ndotr = jnp.sum(n * dx, axis=-1)
     return f * ndotr * rinv3 / FOUR_PI
 
 

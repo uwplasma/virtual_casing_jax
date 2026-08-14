@@ -19,3 +19,10 @@ docs/_build/
 htmlcov/
 .coverage
 coverage.xml
+/.cache/
+/tests/data/
+/tests/test_files/
+/input.*
+/wout_*.nc
+/threed1.*
+/parvmecinfo.txt

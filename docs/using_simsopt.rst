@@ -49,20 +49,18 @@ but swap the import to ``virtual_casing_jax``:
 - ``examples/simsopt_stage_two_optimization_finite_beta.py``
 - ``examples/simsopt_single_stage_optimization_finite_beta.py``
 
-Bundled Data
-------------
+Reference Data
+--------------
 
-To keep the SIMSOPT-flavored scripts self-contained, this repository
-ships a small subset of SIMSOPT test assets:
+The repository does not ship the larger SIMSOPT test assets. Fetch the
+checksummed validation archive when reproducing the parity suite:
 
-- ``tests/test_files/`` includes the W7-X/QH wout files and BNORM data
-  referenced by the SIMSOPT-style tests and stage-two example.
-- ``examples/inputs/input.QH_finitebeta`` is the VMEC input used by the
-  single-stage finite-beta example.
+.. code-block:: bash
 
-These files are sourced from SIMSOPT for validation and example runs.
-If you have a full SIMSOPT checkout, you can replace them with your own
-cases or point to alternative data by editing the example scripts.
+   python tools/fetch_reference_data.py
+
+This restores ``tests/test_files/`` for the SIMSOPT-style tests. The small
+``examples/inputs/input.QH_finitebeta`` file remains available directly.
 
 Direct JAX Usage
 ----------------

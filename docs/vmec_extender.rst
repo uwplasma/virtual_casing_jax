@@ -13,11 +13,12 @@ Physics model
 
 Let ``Gamma`` be the VMEC last closed flux surface with outward unit normal
 ``n``. VMEC supplies the boundary position ``x_b(theta, phi)`` and total field
-``B_Gamma(theta, phi)``. The virtual-casing densities are
+``B_Gamma(theta, phi)``. In the BIEST kernel convention used here, the
+virtual-casing densities are
 
 .. math::
 
-   \sigma = B_\Gamma \cdot n,\qquad K = n \times B_\Gamma .
+   \sigma = B_\Gamma \cdot n,\qquad J = B_\Gamma \times n .
 
 For targets away from the surface, this package follows the documented
 off-surface convention:
@@ -25,12 +26,12 @@ off-surface convention:
 .. math::
 
    B_\mathrm{ext}^\mathrm{VC}(x) =
-   \nabla G[\sigma](x) - \mathrm{BiotSavart}[K](x),
+   \nabla G[\sigma](x) + \mathrm{BiotSavart}[J](x),
 
 .. math::
 
    B_\mathrm{int}^\mathrm{VC}(x) =
-   -\nabla G[\sigma](x) + \mathrm{BiotSavart}[K](x).
+   -\nabla G[\sigma](x) - \mathrm{BiotSavart}[J](x).
 
 The plasma currents are inside the VMEC surface, so the exterior plasma field
 uses the **internal** branch:
@@ -73,6 +74,11 @@ Python workflow
 With VMEX installed, build the surface data directly from a ``wout`` file (or
 from a VMEX state via ``surface_field_data_from_state``):
 
+.. code-block:: console
+
+   $ python -m pip install --upgrade "vmex[freeb]"
+   $ python -c "from vmex.core.freeboundary_diff import have_virtual_casing_jax; assert have_virtual_casing_jax()"
+
 .. code-block:: python
 
    from vmex import read_wout
@@ -83,8 +89,17 @@ from a VMEX state via ``surface_field_data_from_state``):
    surface = surface_field_data_from_wout(wout, nphi=32, ntheta=32)
    field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
 
-   B_plasma = field.B_plasma_xyz([[1.8, 0.0, 0.0]])
+   points = [[1.8, 0.0, 0.0]]
+   B_plasma = field.B_plasma_xyz(points)
    B_cyl = field.B_cyl([[1.8, 0.0, 0.0]])
+
+VMEX provides the stateful magnetic-field interface used by applications.
+``virtual_casing_jax`` deliberately accepts explicit arrays and remains the
+stateless numerical backend.
+
+If VMEX reports that ``virtual_casing_jax`` is missing, run both commands with
+the exact interpreter used to start the VMEX script. Version ``0.0.4`` adds
+the differentiable VMEX exterior-field and fixed-schedule refinement API.
 
 Legacy ``vmec_jax`` bridge
 --------------------------

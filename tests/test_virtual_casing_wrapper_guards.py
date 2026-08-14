@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import jax.numpy as jnp
+from types import SimpleNamespace
 
 from virtual_casing_jax.virtual_casing import VirtualCasingJAX
 
@@ -119,19 +120,24 @@ def test_public_methods_fail_fast_before_setup_or_without_targets():
 
 def test_batch_methods_route_over_field_and_target_batch_axes():
     vc = VirtualCasingJAX()
+    vc.digits = 2
+    vc._b_setup = SimpleNamespace(quad_nt=3, quad_np=4)
+    vc._grad_setup = SimpleNamespace(quad_nt=3, quad_np=4)
+    vc._ensure_b_setup = lambda *args, **kwargs: None
+    vc._ensure_grad_setup = lambda *args, **kwargs: None
     B0_batch = jnp.arange(24.0, dtype=jnp.float64).reshape((2, 3, 4))
     X_trg_batch = 100.0 + B0_batch
 
-    def external_B(b, *, X_trg=None, scale=1.0):
+    def external_B(b, *, X_trg=None, scale=1.0, **kwargs):
         return scale * b if X_trg is None else scale * b + X_trg
 
-    def internal_B(b, *, X_trg=None, offset=0.0):
+    def internal_B(b, *, X_trg=None, offset=0.0, **kwargs):
         return -b + offset if X_trg is None else -b + X_trg + offset
 
-    def external_gradB(b, *, offset=0.0):
+    def external_gradB(b, *, offset=0.0, **kwargs):
         return b[:, None, :] + offset
 
-    def internal_gradB(b, *, offset=0.0):
+    def internal_gradB(b, *, offset=0.0, **kwargs):
         return -b[:, None, :] + offset
 
     vc.compute_external_B = external_B

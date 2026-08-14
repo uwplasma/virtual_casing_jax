@@ -85,17 +85,15 @@ on-surface targets.
 Internal Field Variants
 -----------------------
 
-Internal fields are derived by sign flips relative to the external
-formulation:
+Internal fields use the complementary virtual-casing branch:
 
 .. math::
 
    \mathbf{B}_{\mathrm{int}} = \frac{1}{2}\mathbf{B} -
    \nabla G[\sigma] - \nabla \times G[\mathbf{K}],
 
-.. math::
-
-   \nabla \mathbf{B}_{\mathrm{int}} = - \nabla \mathbf{B}_{\mathrm{ext}}.
+For on-surface gradients the external and internal branches require opposite
+one-sided Hedgehog limits. They cannot be obtained by a sign flip alone.
 
 The JAX implementation exposes:
 
@@ -114,7 +112,7 @@ evaluates:
 
 .. math::
 
-   \mathbf{B}_{\mathrm{ext}}(x) = \\nabla G[B\\cdot n](x) - \\text{BiotSavart}[J](x)
+   \mathbf{B}_{\mathrm{ext}}(x) = \nabla G[B\cdot n](x) + \text{BiotSavart}[B\times n](x)
 
 and the corresponding field gradient:
 

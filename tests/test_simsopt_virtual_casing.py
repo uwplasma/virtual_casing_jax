@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 
 from virtual_casing_jax import VirtualCasing
-from virtual_casing_jax.simsopt_virtual_casing import _3d_from_soa, _soa_from_3d
+from virtual_casing_jax.simsopt_virtual_casing import (
+    _3d_from_soa,
+    _extend_normal_field,
+    _soa_from_3d,
+)
+import virtual_casing_jax.simsopt_virtual_casing as simsopt_vc
 
 try:  # optional deps
     from mpi4py import MPI  # noqa: F401
@@ -83,6 +88,7 @@ VARIABLES = [
     "src_phi",
     "src_theta",
     "trgt_nphi",
+    "trgt_nphi_extended",
     "trgt_ntheta",
     "trgt_phi",
     "trgt_theta",
@@ -102,6 +108,7 @@ def _small_virtual_casing_result():
     vc.src_phi = np.array([0.0, 1.0 / 3.0, 2.0 / 3.0])
     vc.trgt_ntheta = 2
     vc.trgt_nphi = 3
+    vc.trgt_nphi_extended = 12
     vc.trgt_theta = np.array([0.125, 0.625])
     vc.trgt_phi = np.array([0.05, 0.35, 0.65])
     vc.nfp = 2
@@ -125,6 +132,119 @@ def test_simsopt_layout_conversions_round_trip_vector_components():
     assert soa.shape == (3, 4, 2)
     np.testing.assert_allclose(restored, aos)
     np.testing.assert_allclose(soa[:, 1, 0], aos[1, 0, :])
+
+
+def test_extend_normal_field_matches_stellarator_symmetry_and_full_period():
+    Bnormal = np.arange(12.0).reshape((3, 4))
+    theta_reverse = np.array([0, 3, 2, 1])
+
+    stellsym_period = np.concatenate(
+        (Bnormal, -Bnormal[::-1][:, theta_reverse])
+    )
+    np.testing.assert_array_equal(
+        _extend_normal_field(Bnormal, nfp=2, stellsym=True),
+        np.tile(stellsym_period, (2, 1)),
+    )
+    np.testing.assert_array_equal(
+        _extend_normal_field(Bnormal, nfp=2, stellsym=False),
+        np.tile(Bnormal, (2, 1)),
+    )
+
+
+def test_from_vmec_follows_simsopt_surface_contract(monkeypatch):
+    """Exercise the optional SIMSOPT adapter without a VMEC executable."""
+    modules = {
+        name: types.ModuleType(name)
+        for name in (
+            "simsopt",
+            "simsopt.mhd",
+            "simsopt.mhd.vmec",
+            "simsopt.mhd.vmec_diagnostics",
+            "simsopt.geo",
+            "simsopt.geo.surface",
+            "simsopt.geo.surfacerzfourier",
+        )
+    }
+    modules["simsopt"].__path__ = []
+    modules["simsopt.mhd"].__path__ = []
+    modules["simsopt.geo"].__path__ = []
+
+    class FakeVmec:
+        def __init__(self, _):
+            self.output_file = "/tmp/wout_fake.nc"
+            self.boundary = object()
+            self.wout = types.SimpleNamespace(
+                nfp=2,
+                lasym=False,
+                mpol=1,
+                ntor=0,
+                mnmax=1,
+                xm=np.array([0]),
+                xn=np.array([0]),
+                rmnc=np.array([[2.0]]),
+                zmns=np.array([[0.0]]),
+            )
+
+        def run(self):
+            self.ran = True
+
+    class FakeSurface:
+        def __init__(self, nphi, ntheta):
+            self.nphi = nphi
+            self.ntheta = ntheta
+            self.quadpoints_phi = np.arange(nphi) / nphi
+            self.quadpoints_theta = np.arange(ntheta) / ntheta
+            self.x = np.zeros(2)
+
+        @classmethod
+        def from_nphi_ntheta(cls, *, nphi, ntheta, **_):
+            return cls(nphi, ntheta)
+
+        def set_rc(self, *_):
+            pass
+
+        def set_zs(self, *_):
+            pass
+
+        def gamma(self):
+            return np.zeros((self.nphi, self.ntheta, 3))
+
+        def unitnormal(self):
+            normal = np.zeros((self.nphi, self.ntheta, 3))
+            normal[..., 0] = 1.0
+            return normal
+
+    class FakeVirtualCasingJAX:
+        def setup(self, *args):
+            self.shape = (args[8], args[9])
+
+        def compute_external_B(self, B_total, *, digits):
+            assert digits == 3
+            return 2.0 * B_total
+
+    def B_cartesian(_, *, nphi, ntheta, range):
+        assert range == "half period"
+        return np.ones((3, nphi, ntheta))
+
+    modules["simsopt.mhd.vmec"].Vmec = FakeVmec
+    modules["simsopt.mhd.vmec_diagnostics"].B_cartesian = B_cartesian
+    modules["simsopt.geo.surfacerzfourier"].SurfaceRZFourier = FakeSurface
+    modules["simsopt.geo.surface"].best_nphi_over_ntheta = lambda _: 2.0
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(simsopt_vc, "VirtualCasingJAX", FakeVirtualCasingJAX)
+
+    saved = []
+    monkeypatch.setattr(VirtualCasing, "save", lambda self, path: saved.append(path))
+    vc = VirtualCasing.from_vmec(
+        "input.fake", src_nphi=3, digits=3, filename="auto"
+    )
+
+    assert vc.src_ntheta == 6
+    assert vc.trgt_nphi_extended == 12
+    assert vc.B_external_normal.shape == (3, 6)
+    assert vc.B_external_normal_extended.shape == (12, 6)
+    assert saved == ["/tmp/vcasing_fake.nc"]
 
 
 def test_virtual_casing_save_load_roundtrip_without_simsopt_runtime(tmp_path):
