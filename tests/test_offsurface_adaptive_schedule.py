@@ -1,6 +1,8 @@
 import numpy as np
 import jax.numpy as jnp
+import pytest
 
+from virtual_casing_jax import OffsurfaceConvergenceError
 from virtual_casing_jax.virtual_casing import VirtualCasingJAX
 
 
@@ -118,3 +120,28 @@ def test_offsurface_adaptive_schedule_jit_auto():
         max_levels=4,
     )
     np.testing.assert_allclose(np.asarray(grad_jit), np.asarray(grad_py), rtol=5e-5, atol=5e-7)
+
+
+def test_eager_adaptive_refinement_has_finite_failure_budget():
+    X = _torus(6, 5)
+    B0 = X * 0.03 + 0.08
+    vc = VirtualCasingJAX()
+    vc.setup(5, 1, False, 6, 5, X, 6, 5, 6, 5)
+
+    # A target exactly on the boundary makes the off-surface self-test tend to
+    # the jump value 1/2, so it cannot satisfy the requested classification.
+    X_src, _, _ = vc._offsurface_densities(B0)
+    X_on_surface = X_src[:, :1, :1].reshape(3, 1)
+    with pytest.raises(OffsurfaceConvergenceError) as excinfo:
+        vc.compute_external_B_offsurf(
+            B0,
+            X_trg=X_on_surface,
+            digits=5,
+            max_levels=1,
+        )
+
+    error = excinfo.value
+    assert error.levels == 1
+    assert error.nt > 0 and error.np > 0
+    assert error.achieved_error > error.tolerance
+    assert "final_grid" in str(error)

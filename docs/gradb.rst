@@ -26,7 +26,7 @@ operator needed in single-stage optimization when objectives depend on
 Equations (from the BIEST formulation)
 --------------------------------------
 
-Let ``\sigma = \mathbf{B}\cdot\mathbf{n}`` and ``\mathbf{K} = \mathbf{n}\times\mathbf{B}``.
+Let ``\sigma = \mathbf{B}\cdot\mathbf{n}`` and ``\mathbf{K} = \mathbf{B}\times\mathbf{n}``.
 For targets on ``Gamma`` the virtual casing formula gives [MCO2019]_:
 
 .. math::
@@ -76,7 +76,7 @@ The high-level call ``VirtualCasingJAX.compute_external_gradB`` implements:
 
    .. math::
 
-      \mathbf{K} = \mathbf{n} \times \mathbf{B}, \qquad
+      \mathbf{K} = \mathbf{B} \times \mathbf{n}, \qquad
       \sigma = \mathbf{B} \cdot \mathbf{n}.
 
 3. **Evaluate hypersingular operators**:
@@ -95,8 +95,11 @@ The high-level call ``VirtualCasingJAX.compute_external_gradB`` implements:
 
    with cyclic indices ``(k, k_1, k_2)``.
 
-The implementation mirrors the C++ ``ComputeGradB`` path, including the
-**same quadrature order**, **patch selection**, and **singular corrections**.
+The external implementation mirrors the C++ ``ComputeGradB`` path, including
+the **same quadrature order**, **patch selection**, and **singular
+corrections**. The internal limit uses Hedgehog targets displaced to the
+exterior side of the surface. A sign change alone is not sufficient because
+the two one-sided hypersingular limits differ.
 
 Reference Mapping
 -----------------
@@ -105,8 +108,9 @@ The following functions align with the reference C++ API:
 
 - ``VirtualCasingJAX.compute_external_gradB`` →
   ``VirtualCasing::ComputeGradBext`` (C++)
-- ``VirtualCasingJAX.compute_internal_gradB`` →
-  ``VirtualCasing::ComputeGradBint`` (C++)
+- ``VirtualCasingJAX.compute_internal_gradB`` implements the corrected
+  exterior-side internal limit. Upstream C++ currently does not provide an
+  independent production oracle for this path.
 - ``VirtualCasingJAX.compute_external_gradB_offsurf`` →
   ``VirtualCasing::ComputeGradBOffSurf`` (C++ local parity extension)
 
@@ -157,6 +161,11 @@ This provides **exact on-surface derivatives** consistent with the C++
 ``ComputeGradB`` operator, and it avoids differentiating through the
 singular correction machinery.
 
+``X_trg`` in the on-surface API is limited to a one-to-one perturbation of the
+configured target grid. It must contain exactly ``trg_nt * trg_np`` points.
+Use the off-surface API for arbitrary target sets. The ``B/2`` jump term stays
+anchored to the configured surface nodes.
+
 For off-surface GradB, no custom JVP is used. The kernels are smooth
 off the surface, so JAX can differentiate through the direct quadrature
 if needed, though this is currently not JIT-friendly when adaptive
@@ -187,17 +196,10 @@ These options are available on ``compute_external_gradB`` /
 Internal and Off-Surface GradB
 ------------------------------
 
-The internal gradient uses the same on-surface hypersingular operators,
-but with the **sign flipped**:
-
-.. math::
-
-   \nabla \mathbf{B}_{\mathrm{int}} = -\nabla \mathbf{B}_{\mathrm{ext}}.
-
-This matches the reference implementation in ``virtual-casing`` and is
-validated in parity tests. Note that the on-surface hypersingular evaluation
-uses the same quadrature orientation for internal and external limits, which
-is consistent with the C++ behavior.
+The internal gradient uses the same densities but the opposite one-sided
+Hedgehog limit. A sign flip alone is incorrect on the surface. Analytic loop
+fields, curl-free/divergence-free identities, and one-sided off-surface limits
+validate both branches independently.
 
 For **off-surface targets**, the jump term is absent and the gradient is
 evaluated using direct quadrature (no singular correction):
@@ -208,7 +210,7 @@ evaluated using direct quadrature (no singular correction):
    = \varepsilon_{k \ell m}\,\partial_i\partial_\ell G[K_m]
    + \partial_i\partial_k G[\sigma],
 
-with ``\mathbf{K} = \mathbf{n}\times\mathbf{B}`` and
+with ``\mathbf{K} = \mathbf{B}\times\mathbf{n}`` and
 ``\sigma = \mathbf{B}\cdot\mathbf{n}`` defined on the source surface.
 The JAX implementation optionally upsamples the source grid using the
 same ``LaplaceDxU`` self-test used by the adaptive off-surface field

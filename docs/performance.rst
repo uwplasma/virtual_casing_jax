@@ -178,7 +178,9 @@ Precompute Reuse
 ~~~~~~~~~~~~~~~~
 
 The polar quadrature tables and interpolation weights are cached via
-``precompute_singular``. Patch index maps are cached per quadrature
+``precompute_singular``. The bounded cache stores only host NumPy arrays;
+JAX conversion occurs outside the cache so tracers cannot escape a JIT trace.
+Patch index maps are cached per quadrature
 setup inside ``VirtualCasingJAX`` to avoid recomputing the patch gather
 indices on each call. Patch indices are stored as int32 to reduce memory
 traffic during gathers.

@@ -330,6 +330,31 @@ def magnetic_field_data_offsurf(
     return Bext.reshape(ref_shape), Bint.reshape(ref_shape)
 
 
+def magnetic_field_grad_data_offsurf(
+    nfp: int,
+    half_period: bool,
+    surf_nt: int,
+    surf_np: int,
+    X,
+    X_trg,
+    *,
+    rng: Drand48 | None = None,
+    chunk_size: int = 512,
+):
+    """Generate analytic GradB at arbitrary targets from synthetic loops."""
+    X_trg_arr = _reshape_soa(X_trg)
+    source0, density0, source1, density1 = _build_source_loops(
+        nfp, half_period, surf_nt, surf_np, X, rng
+    )
+    grad_int = _eval_biot_savart_grad(
+        X_trg_arr, source0, density0, chunk_size=chunk_size
+    )
+    grad_ext = _eval_biot_savart_grad(
+        X_trg_arr, source1, density1, chunk_size=chunk_size
+    )
+    return grad_ext, grad_int
+
+
 def magnetic_field_data(
     nfp: int,
     half_period: bool,
@@ -461,3 +486,16 @@ class VirtualCasingTestData:
         X_trg,
     ):
         return magnetic_field_data_offsurf(nfp, half_period, nt, npol, X, X_trg)
+
+    @staticmethod
+    def magnetic_field_grad_data_offsurf(
+        nfp: int,
+        half_period: bool,
+        nt: int,
+        npol: int,
+        X,
+        X_trg,
+    ):
+        return magnetic_field_grad_data_offsurf(
+            nfp, half_period, nt, npol, X, X_trg
+        )

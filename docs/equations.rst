@@ -19,7 +19,7 @@ The virtual casing principle provides an explicit expression for
 
    \mathbf{B}_{\mathrm{ext}}(\mathbf{r}) = \frac{1}{2}\mathbf{B}(\mathbf{r})
    + \nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
-   + \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}),
+   + \nabla \times G[\mathbf{B}\times\mathbf{n}](\mathbf{r}),
 
 where ``G`` denotes the Laplace single-layer potential:
 
@@ -35,7 +35,7 @@ The interior field is obtained by reversing the signs:
 
    \mathbf{B}_{\mathrm{int}}(\mathbf{r}) = \frac{1}{2}\mathbf{B}(\mathbf{r})
    - \nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
-   - \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}).
+   - \nabla \times G[\mathbf{B}\times\mathbf{n}](\mathbf{r}).
 
 Internal vs External Off-Surface
 --------------------------------
@@ -47,13 +47,13 @@ internal fields are:
 
    \mathbf{B}_{\mathrm{ext}}(\mathbf{r}) =
    \nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
-   - \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}),
+   + \nabla \times G[\mathbf{B}\times\mathbf{n}](\mathbf{r}),
 
 .. math::
 
    \mathbf{B}_{\mathrm{int}}(\mathbf{r}) =
    -\nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
-   + \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}).
+   - \nabla \times G[\mathbf{B}\times\mathbf{n}](\mathbf{r}).
 
 The off-surface gradients are obtained by differentiating these
 expressions and using the second-derivative Laplace kernel.
@@ -118,7 +118,7 @@ For off-surface targets ``r``:
 .. math::
 
    \mathbf{B}_{\mathrm{ext}}(\mathbf{r}) = \nabla G[\mathbf{B}\cdot\mathbf{n}](\mathbf{r})
-   - \nabla \times G[\mathbf{n}\times\mathbf{B}](\mathbf{r}).
+   + \nabla \times G[\mathbf{B}\times\mathbf{n}](\mathbf{r}).
 
 The singular ``+1/2`` jump term is absent off the surface.
 

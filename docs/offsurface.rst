@@ -16,7 +16,7 @@ surface densities:
 .. math::
 
    \sigma = \mathbf{B}\cdot\mathbf{n}, \qquad
-   \mathbf{K} = \mathbf{n}\times\mathbf{B}.
+   \mathbf{K} = \mathbf{B}\times\mathbf{n}.
 
 For off-surface targets ``x``, the jump term is absent. The external and
 internal fields are
@@ -24,12 +24,12 @@ internal fields are
 .. math::
 
    \mathbf{B}_{\mathrm{ext}}(x)
-   = \nabla G[\sigma](x) - \mathrm{BiotSavart}[\mathbf{K}](x),
+   = \nabla G[\sigma](x) + \mathrm{BiotSavart}[\mathbf{K}](x),
 
 .. math::
 
    \mathbf{B}_{\mathrm{int}}(x)
-   = -\nabla G[\sigma](x) + \mathrm{BiotSavart}[\mathbf{K}](x),
+   = -\nabla G[\sigma](x) - \mathrm{BiotSavart}[\mathbf{K}](x),
 
 which matches the reference BIEST implementation [MCO2019]_ and
 ``virtual-casing`` C++ API.
@@ -82,13 +82,19 @@ the strategy in BIEST:
   outward-normal SCTL/BIEST convention, the exact values are ``-1`` inside and
   ``0`` outside the surface.
 - Refine the source grid by doubling ``(Nt, Np)`` until
-  ``\epsilon \le 10^{-digits}`` or the optional ``max_Nt/max_Np`` caps
-  are reached.
+  ``\epsilon \le 10^{-digits}``, a ``max_Nt/max_Np`` cap is reached, or
+  ``max_levels`` (six by default) is exhausted.
 
 This logic is implemented in
 ``virtual_casing_jax.integrals.computeB_offsurface_adaptive`` and
 ``_offsurface_adapt_grid``, mirroring
 ``ExtVacuumField::EvalOffSurface`` in the C++ code.
+
+The eager adaptive methods raise ``OffsurfaceConvergenceError`` instead of
+silently returning an unconverged value. The exception reports the requested
+tolerance, achieved error, final grid, and attempted level count. Fixed
+schedule methods remain finite by construction and return the best result
+from the supplied schedule.
 
 JIT-Friendly Schedule
 ---------------------

@@ -2,8 +2,30 @@
 from __future__ import annotations
 
 import os
+import warnings
 import jax
 import jax.numpy as jnp
+
+_precision_warning_emitted = False
+
+
+def warn_if_x64_needed(digits: int, dtype) -> None:
+    """Warn once when requested accuracy is not credible in float32."""
+    global _precision_warning_emitted
+    if (
+        not _precision_warning_emitted
+        and int(digits) > 5
+        and jnp.dtype(dtype) == jnp.dtype(jnp.float32)
+        and not jax.config.x64_enabled
+    ):
+        warnings.warn(
+            "digits > 5 requested while JAX x64 is disabled; float32 may not "
+            "provide the requested virtual-casing accuracy. Set "
+            "JAX_ENABLE_X64=1 before importing JAX for high-accuracy work.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        _precision_warning_emitted = True
 
 
 def soa_to_array(vec, dof: int, nt: int, npol: int):

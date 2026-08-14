@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 
-from .utils import autotune_chunk_sizes
+from .utils import autotune_chunk_sizes, warn_if_x64_needed
 from .surface_ops import (
     complete_vec_field,
     resample,
@@ -18,6 +18,7 @@ from .surface_ops import (
     cross_prod,
 )
 from .integrals import (
+    curl_single_layer_gradient,
     laplace_fxd_u_eval_singular,
     laplace_fxd_u_eval_vec_singular,
     laplace_fxd2_u_eval_singular,
@@ -52,6 +53,28 @@ class FunctionalSetup:
     patch_dim0: int
     patch_idx: jnp.ndarray
     orient: float
+
+
+def _validate_on_surface_targets(X_trg, trg_nt: int, trg_np: int):
+    if X_trg is None:
+        return None
+    X_trg = jnp.asarray(X_trg)
+    expected = trg_nt * trg_np
+    valid = (
+        X_trg.ndim in (2, 3)
+        and X_trg.shape[0] == 3
+        and (
+            (X_trg.ndim == 3 and X_trg.shape[1] * X_trg.shape[2] == expected)
+            or (X_trg.ndim == 2 and X_trg.shape[1] == expected)
+        )
+    )
+    if not valid:
+        raise ValueError(
+            "on-surface X_trg must have shape "
+            f"(3, {trg_nt}, {trg_np}) or (3, {expected}); "
+            "use an off-surface API for arbitrary targets"
+        )
+    return X_trg
 
 
 def _resolve_chunk_sizes(op: str, chunk_size, target_chunk_size, *, nsrc: int, ntrg: int):
@@ -280,6 +303,8 @@ def _compute_B_signed(
     if remat is None:
         remat = False
     value_dtype = jnp.asarray(B0).dtype
+    warn_if_x64_needed(digits, value_dtype)
+    X_trg = _validate_on_surface_targets(X_trg, trg_nt, trg_np)
     pou_dtype = _resolve_pou_dtype(pou_dtype, value_dtype)
     patch_dtype = _resolve_patch_dtype(patch_dtype, value_dtype)
     nsrc = quad_nt * quad_np
@@ -305,7 +330,7 @@ def _compute_B_signed(
     B0_complete = _complete_b0(B0, nfp, half_period, src_nt, src_np, dtheta)
     B_quad = resample(B0_complete, nfp_eff * src_nt, src_np, quad_nt, quad_np)
 
-    J = cross_prod(normal, B_quad)
+    J = cross_prod(B_quad, normal)
     BdotN = dot_prod(B_quad, normal)
 
     gradG_J = laplace_fxd_u_eval_vec_singular(
@@ -353,12 +378,7 @@ def _compute_B_signed(
     B_on_trg = resample(B0_complete, nfp_eff * src_nt, src_np, nfp_eff * trg_nt, trg_np)
     B_on = B_on_trg[:, :trg_nt, :]
 
-    Bvc = jnp.zeros((3, trg_nt, trg_np), dtype=gradG_J.dtype)
-    for k in range(3):
-        k1 = (k + 1) % 3
-        k2 = (k + 2) % 3
-        Bvc = Bvc.at[k].set(gradG_J[k1, k2] - gradG_J[k2, k1])
-
+    Bvc = curl_single_layer_gradient(gradG_J)
     return sign * (Bvc + gradG_BdotN) + 0.5 * B_on
 
 
@@ -713,6 +733,7 @@ def _compute_gradB_signed(
     if remat is None:
         remat = True
     value_dtype = jnp.asarray(B0).dtype
+    warn_if_x64_needed(digits, value_dtype)
     pou_dtype = _resolve_pou_dtype(pou_dtype, value_dtype)
     patch_dtype = _resolve_patch_dtype(patch_dtype, value_dtype)
     nsrc = quad_nt * quad_np
@@ -724,12 +745,13 @@ def _compute_gradB_signed(
         patch_dim0 = select_patch_dim_from_geom(dX, quad_nt, quad_np, digits)
     if patch_idx is None:
         patch_idx = build_patch_idx(quad_nt, quad_np, trg_nt, trg_np, nfp_eff, patch_dim0)
+    hedgehog_side = "interior" if sign > 0 else "exterior"
 
     dtheta = _compute_dtheta(nfp, half_period, trg_nt, src_nt)
     B0_complete = _complete_b0(B0, nfp, half_period, src_nt, src_np, dtheta)
     B_quad = resample(B0_complete, nfp_eff * src_nt, src_np, quad_nt, quad_np)
 
-    J = cross_prod(normal, B_quad)
+    J = cross_prod(B_quad, normal)
     BdotN = dot_prod(B_quad, normal)
 
     gradG_J = laplace_fxd2_u_eval_vec_singular(
@@ -750,6 +772,7 @@ def _compute_gradB_signed(
         patch_dtype=patch_dtype,
         interp_block_size=interp_block_size,
         remat=remat,
+        hedgehog_side=hedgehog_side,
     )
     gradG_J = jnp.asarray(gradG_J).reshape((3, 3, 3, trg_nt, trg_np))
 
@@ -771,15 +794,11 @@ def _compute_gradB_signed(
         patch_dtype=patch_dtype,
         interp_block_size=interp_block_size,
         remat=remat,
+        hedgehog_side=hedgehog_side,
     )
     gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, trg_nt, trg_np))
 
-    gradBvc = jnp.zeros((3, 3, trg_nt, trg_np), dtype=gradG_J.dtype)
-    for k in range(3):
-        k1 = (k + 1) % 3
-        k2 = (k + 2) % 3
-        gradBvc = gradBvc.at[k].set(gradG_J[k1, k2] - gradG_J[k2, k1])
-
+    gradBvc = curl_single_layer_gradient(gradG_J)
     return (gradBvc + gradgradG_BdotN) * sign
 
 
@@ -909,11 +928,13 @@ def compute_external_B_offsurf_functional(
     trg_np: int,
     max_Nt: int = -1,
     max_Np: int = -1,
+    max_levels: int = 6,
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     adaptive: bool = True,
 ):
     """Compute off-surface Bext with differentiable geometry inputs."""
+    warn_if_x64_needed(digits, jnp.asarray(B0).dtype)
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
     surf_nt_full = int(surface_coord.shape[1])
     surf_np_full = int(surface_coord.shape[2])
@@ -928,7 +949,7 @@ def compute_external_B_offsurf_functional(
     dtheta = _compute_dtheta(nfp, half_period, trg_nt, src_nt)
     B0_complete = _complete_b0(B0, nfp, half_period, src_nt, src_np, dtheta)
     B_quad = resample(B0_complete, nfp_eff * src_nt, src_np, base_nt, base_np)
-    J = cross_prod(normal, B_quad)
+    J = cross_prod(B_quad, normal)
     BdotN = dot_prod(B_quad, normal)
 
     X_trg = jnp.asarray(X_trg)
@@ -946,6 +967,7 @@ def compute_external_B_offsurf_functional(
             digits=digits,
             max_Nt=max_Nt,
             max_Np=max_Np,
+            max_levels=max_levels,
             ext=True,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
@@ -958,7 +980,7 @@ def compute_external_B_offsurf_functional(
         bs = biotsavart_fx_u_eval(
             X_src, X_trg, J, area_elem, chunk_size=chunk_size, target_chunk_size=target_chunk_size
         )
-        out = gradG - bs
+        out = gradG + bs
     return out
 
 
@@ -978,11 +1000,13 @@ def compute_external_gradB_offsurf_functional(
     trg_np: int,
     max_Nt: int = -1,
     max_Np: int = -1,
+    max_levels: int = 6,
     chunk_size: int | str | None = "auto",
     target_chunk_size: int | str | None = "auto",
     adaptive: bool = False,
 ):
     """Compute off-surface GradBext with differentiable geometry inputs."""
+    warn_if_x64_needed(digits, jnp.asarray(B0).dtype)
     surface_coord, nfp_eff = build_surface_coord(X, nfp, half_period, surf_nt, surf_np, trg_nt)
     surf_nt_full = int(surface_coord.shape[1])
     surf_np_full = int(surface_coord.shape[2])
@@ -997,7 +1021,7 @@ def compute_external_gradB_offsurf_functional(
     dtheta = _compute_dtheta(nfp, half_period, trg_nt, src_nt)
     B0_complete = _complete_b0(B0, nfp, half_period, src_nt, src_np, dtheta)
     B_quad = resample(B0_complete, nfp_eff * src_nt, src_np, base_nt, base_np)
-    J = cross_prod(normal, B_quad)
+    J = cross_prod(B_quad, normal)
     BdotN = dot_prod(B_quad, normal)
 
     X_trg = jnp.asarray(X_trg)
@@ -1017,6 +1041,7 @@ def compute_external_gradB_offsurf_functional(
             digits=digits,
             max_Nt=max_Nt,
             max_Np=max_Np,
+            max_levels=max_levels,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
         )
@@ -1041,13 +1066,7 @@ def compute_external_gradB_offsurf_functional(
     )
     gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, X_trg_flat.shape[1]))
 
-    gradB = jnp.zeros((3, 3, X_trg_flat.shape[1]), dtype=gradG_J.dtype)
-    for k in range(3):
-        k1 = (k + 1) % 3
-        k2 = (k + 2) % 3
-        gradB = gradB.at[k].set(gradG_J[k1, k2] - gradG_J[k2, k1])
-
-    gradB = gradB + gradgradG_BdotN
+    gradB = curl_single_layer_gradient(gradG_J) + gradgradG_BdotN
     if X_trg.ndim == 3:
         return gradB.reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
     return gradB

@@ -1,4 +1,5 @@
 import numpy as np
+import jax
 import jax.numpy as jnp
 
 from virtual_casing_jax.kernels import (
@@ -59,6 +60,30 @@ def test_laplace_fxd2_u():
 
     out = np.asarray(laplace_fxd2_u(jnp.asarray(dx), jnp.asarray(f)))
     np.testing.assert_allclose(out, ref, rtol=1e-12, atol=1e-12)
+
+
+def test_coincident_kernels_have_finite_reverse_and_second_derivatives():
+    density = jnp.array([1.25])
+    vector_density = jnp.array([[0.2, -0.4, 0.7]])
+
+    scalar_functions = (
+        lambda x: jnp.sum(laplace_fx_u(x[None, :], density)),
+        lambda x: jnp.sum(laplace_fxd_u(x[None, :], density)),
+        lambda x: jnp.sum(laplace_fxd2_u(x[None, :], density)),
+        lambda x: jnp.sum(biotsavart_fx_u(x[None, :], vector_density)),
+        lambda x: jnp.sum(biotsavart_fxd_u(x[None, :], vector_density)),
+    )
+    origin = jnp.zeros(3)
+    tangent = jnp.array([0.3, -0.2, 0.1])
+
+    for fn in scalar_functions:
+        value, jvp = jax.jvp(fn, (origin,), (tangent,))
+        grad = jax.grad(fn)(origin)
+        hessian = jax.jacfwd(jax.grad(fn))(origin)
+        _, pullback = jax.vjp(fn, origin)
+        vjp = pullback(jnp.ones_like(value))[0]
+        for result in (value, jvp, grad, hessian, vjp):
+            assert np.all(np.isfinite(np.asarray(result)))
 
 
 def test_biotsavart_fx_u():

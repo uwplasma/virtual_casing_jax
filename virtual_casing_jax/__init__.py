@@ -38,6 +38,7 @@ from .integrals import (
     computeB_offsurface_adaptive_schedule,
     computeGradB_offsurface_adaptive_schedule,
     laplace_dx_u_eval_singular,
+    OffsurfaceConvergenceError,
 )
 from .virtual_casing import PrecisionPlan, VirtualCasingJAX
 from .simsopt_virtual_casing import VirtualCasing
@@ -51,7 +52,11 @@ from .exterior_field import (
     xyz_vec_to_cyl_vec,
 )
 from .vmec_jax_bridge import surface_field_from_vmec_jax
-from .grid_export import evaluate_on_rphiz_grid, write_extended_field_netcdf, write_mgrid_like
+from .grid_export import (
+    evaluate_on_rphiz_grid,
+    write_extended_field_netcdf,
+    write_mgrid_like,
+)
 from .objectives import (
     boundary_normal_residual,
     exterior_B_magnitude_squared,
@@ -79,7 +84,14 @@ from .functional import (
 )
 from . import singular_quadrature
 from . import testdata
-from .testdata import SurfType, VirtualCasingTestData, surface_coordinates, magnetic_field_data, magnetic_field_grad_data
+from .testdata import (
+    SurfType,
+    VirtualCasingTestData,
+    surface_coordinates,
+    magnetic_field_data,
+    magnetic_field_grad_data,
+    magnetic_field_grad_data_offsurf,
+)
 
 __all__ = [
     "surface_ops",
@@ -115,6 +127,7 @@ __all__ = [
     "computeB_offsurface_adaptive_schedule",
     "computeGradB_offsurface_adaptive_schedule",
     "laplace_dx_u_eval_singular",
+    "OffsurfaceConvergenceError",
     "VirtualCasingJAX",
     "PrecisionPlan",
     "VirtualCasing",
@@ -157,4 +170,5 @@ __all__ = [
     "surface_coordinates",
     "magnetic_field_data",
     "magnetic_field_grad_data",
+    "magnetic_field_grad_data_offsurf",
 ]

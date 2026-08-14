@@ -70,4 +70,19 @@ To ensure each prefix is honored, run:
 
    python tools/make_parity_dumps.py --subprocess
 
+Reference commit IDs are mandatory:
+
+.. code-block:: bash
+
+   python tools/make_parity_dumps.py --subprocess \
+     --virtual-casing-commit 6a3898add7324125a938fded698ac145479e823e \
+     --simsopt-commit 377cf665158f47a9bed4a8b03a00352457ea27c8
+
+Generation writes ``tests/data/provenance.json`` with the reference and
+generator commits, command, UTC timestamp, environment, and SHA-256/size of
+every dump. If the reference implementation needed uncommitted dump
+instrumentation, pass its hash with ``--instrumentation-patch-sha256``.
+Legacy dumps without this manifest remain explicitly unverified; commit IDs
+must not be inferred retroactively.
+
 This spawns a fresh process per case and avoids prefix caching issues.

@@ -93,3 +93,8 @@ Guidelines
   appropriate quadrature sizes.
 * ``orient`` is treated as a fixed sign (``±1``) computed from the input
   geometry. This is a topological choice that should not be differentiated.
+* On-surface ``X_trg`` must contain exactly the configured
+  ``trg_nt * trg_np`` points. Arbitrary targets belong to the off-surface
+  functions.
+* Requests above five digits with x64 disabled emit a one-time
+  ``RuntimeWarning``. Enable x64 before importing JAX for high-accuracy work.

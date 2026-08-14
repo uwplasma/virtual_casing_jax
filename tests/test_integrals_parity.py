@@ -53,6 +53,11 @@ def _load_offsurf_case(prefix: str):
     return X, BdotN, J, Xt, Bvc
 
 
+def _b_cross_n_from_archive(J):
+    """Convert legacy ``n x B`` dumps to the current BIEST ``B x n`` density."""
+    return -jnp.asarray(J)
+
+
 def _load_gradb_case(prefix: str):
     X = load_dump(DATA_DIR / f"{prefix}_computeGradB_quad_coord")
     dX = load_dump(DATA_DIR / f"{prefix}_computeGradB_dX")
@@ -357,7 +362,7 @@ def test_baseline_computeBOff_parity_case_vc():
         computeB_offsurface_baseline(
             jnp.asarray(X),
             jnp.asarray(BdotN),
-            jnp.asarray(J),
+            _b_cross_n_from_archive(J),
             jnp.asarray(Xt),
             upsample_factor=4,
             chunk_size=2048,
@@ -380,7 +385,7 @@ def test_adaptive_computeBOff_parity_case_vc():
         computeB_offsurface_adaptive(
             jnp.asarray(X),
             jnp.asarray(BdotN),
-            jnp.asarray(J),
+            _b_cross_n_from_archive(J),
             jnp.asarray(Xt),
             digits=5,
             max_Nt=-1,
