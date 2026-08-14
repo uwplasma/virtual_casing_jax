@@ -13,11 +13,12 @@ Physics model
 
 Let ``Gamma`` be the VMEC last closed flux surface with outward unit normal
 ``n``. VMEC supplies the boundary position ``x_b(theta, phi)`` and total field
-``B_Gamma(theta, phi)``. The virtual-casing densities are
+``B_Gamma(theta, phi)``. In the BIEST kernel convention used here, the
+virtual-casing densities are
 
 .. math::
 
-   \sigma = B_\Gamma \cdot n,\qquad K = n \times B_\Gamma .
+   \sigma = B_\Gamma \cdot n,\qquad J = B_\Gamma \times n .
 
 For targets away from the surface, this package follows the documented
 off-surface convention:
@@ -25,12 +26,12 @@ off-surface convention:
 .. math::
 
    B_\mathrm{ext}^\mathrm{VC}(x) =
-   \nabla G[\sigma](x) - \mathrm{BiotSavart}[K](x),
+   \nabla G[\sigma](x) + \mathrm{BiotSavart}[J](x),
 
 .. math::
 
    B_\mathrm{int}^\mathrm{VC}(x) =
-   -\nabla G[\sigma](x) + \mathrm{BiotSavart}[K](x).
+   -\nabla G[\sigma](x) - \mathrm{BiotSavart}[J](x).
 
 The plasma currents are inside the VMEC surface, so the exterior plasma field
 uses the **internal** branch:
@@ -97,8 +98,8 @@ VMEX provides the stateful magnetic-field interface used by applications.
 stateless numerical backend.
 
 If VMEX reports that ``virtual_casing_jax`` is missing, run both commands with
-the exact interpreter used to start the VMEX script. Version ``0.0.3`` is the
-first PyPI release with the API VMEX consumes.
+the exact interpreter used to start the VMEX script. Version ``0.0.4`` adds
+the differentiable VMEX exterior-field and fixed-schedule refinement API.
 
 Legacy ``vmec_jax`` bridge
 --------------------------
