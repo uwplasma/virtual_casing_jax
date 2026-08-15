@@ -457,7 +457,7 @@ class VirtualCasingExteriorField:
         original_size = points.shape[0]
         padding = (-original_size) % len(devices)
         if padding:
-            points = jnp.pad(points, ((0, padding), (0, 0)), mode="edge")
+            points = np.pad(points, ((0, padding), (0, 0)), mode="edge")
         local_size = points.shape[0] // len(devices)
         key = (tuple((device.platform, device.id) for device in devices), local_size)
         compiled = self._sharded_cache.get(key)

@@ -194,8 +194,13 @@ def test_sharded_target_api_has_single_device_fallback_and_validation():
         field.B_xyz_sharded(points, devices=[jax.devices()[0]]),
         field.B_xyz(points))
     np.testing.assert_allclose(field.B_xyz_sharded(points), field.B_xyz(points))
+    padded = jnp.vstack((points, jnp.asarray([[2.0, 3.0, 4.0]])))
+    np.testing.assert_allclose(field.B_xyz_sharded(padded), field.B_xyz(padded))
+    np.testing.assert_allclose(field.B_xyz_sharded(points), field.B_xyz(points))
     with pytest.raises(ValueError, match="at least one"):
         field.B_xyz_sharded(points, devices=[])
+    with pytest.raises(ValueError, match="shape"):
+        field.B_xyz_sharded(jnp.ones((2, 2)))
 
 
 def test_exterior_field_reuses_prepared_geometry_for_surface_quadrature():
@@ -216,10 +221,10 @@ def test_near_surface_plan_reuses_precision_for_gradient_quadrature():
     field, recorder = _field()
     precision = SimpleNamespace(
         quad_nt=9, quad_np=7, patch_dim0=4, patch_idx=jnp.arange(3))
-    plan = field.plan_near_surface(
-        digits=4, precision=precision, B_surface=field.B_total)
+    plan = field.plan_near_surface(digits=4, precision=precision)
 
     assert plan.gradB_surface.shape == (3, 3) + field.B_total.shape[1:]
+    assert recorder.calls[-2][0] == "internal_B_surface"
     name, kwargs = recorder.calls[-1]
     assert name == "internal_gradB_surface"
     assert kwargs["quad_nt"] == 9 and kwargs["quad_np"] == 7
@@ -248,6 +253,8 @@ def test_near_surface_plan_projects_smoothly_and_rotates_field_periods():
     expected = jnp.array([[-2.0 * jnp.sin(target_phi), 2.0 * jnp.cos(target_phi), 0.0]])
     expected = expected + 0.05 * 0.3 * radial
     np.testing.assert_allclose(got, expected, rtol=1e-11, atol=1e-11)
+    with pytest.raises(ValueError, match="gradB_surface"):
+        build_near_surface_taylor_plan(data, B_surface, jnp.zeros((3, 3, 2, 2)))
 
 
 def test_exterior_field_uses_nonjit_direct_paths_and_external_callbacks():
