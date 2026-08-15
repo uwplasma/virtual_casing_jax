@@ -193,6 +193,7 @@ def test_sharded_target_api_has_single_device_fallback_and_validation():
     np.testing.assert_allclose(
         field.B_xyz_sharded(points, devices=[jax.devices()[0]]),
         field.B_xyz(points))
+    np.testing.assert_allclose(field.B_xyz_sharded(points), field.B_xyz(points))
     with pytest.raises(ValueError, match="at least one"):
         field.B_xyz_sharded(points, devices=[])
 

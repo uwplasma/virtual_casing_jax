@@ -6,8 +6,6 @@ from typing import Callable, Literal
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-from jax.sharding import Mesh, NamedSharding, PartitionSpec
 
 from .virtual_casing import VirtualCasingJAX
 
@@ -456,18 +454,13 @@ class VirtualCasingExteriorField:
         padding = (-original_size) % len(devices)
         if padding:
             points = jnp.pad(points, ((0, padding), (0, 0)), mode="edge")
-        key = (tuple((device.platform, device.id) for device in devices), points.shape)
+        local_size = points.shape[0] // len(devices)
+        key = (tuple((device.platform, device.id) for device in devices), local_size)
         compiled = self._sharded_cache.get(key)
         if compiled is None:
-            mesh = Mesh(np.asarray(devices, dtype=object), ("targets",))
-            sharding = NamedSharding(mesh, PartitionSpec("targets", None))
-            compiled = (
-                jax.jit(self.B_xyz, in_shardings=sharding, out_shardings=sharding),
-                sharding,
-            )
+            compiled = jax.pmap(self.B_xyz, devices=devices)
             self._sharded_cache[key] = compiled
-        function, sharding = compiled
-        result = function(jax.device_put(points, sharding))
+        result = compiled(points.reshape((len(devices), local_size, 3))).reshape((-1, 3))
         return result[:original_size] if padding else result
 
     def gradB_plasma_xyz(self, xyz, *, branch: Branch | None = None):
