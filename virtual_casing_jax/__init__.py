@@ -45,9 +45,11 @@ from .simsopt_virtual_casing import VirtualCasing
 from .utils import build_offsurface_levels
 from .exterior_field import (
     ExteriorFieldConfig,
+    NearSurfaceTaylorPlan,
     VirtualCasingExteriorField,
     VmecSurfaceFieldData,
     B_cyl_from_B_xyz,
+    build_near_surface_taylor_plan,
     cyl_to_xyz,
     xyz_vec_to_cyl_vec,
 )
@@ -133,9 +135,11 @@ __all__ = [
     "VirtualCasing",
     "build_offsurface_levels",
     "ExteriorFieldConfig",
+    "NearSurfaceTaylorPlan",
     "VirtualCasingExteriorField",
     "VmecSurfaceFieldData",
     "B_cyl_from_B_xyz",
+    "build_near_surface_taylor_plan",
     "cyl_to_xyz",
     "xyz_vec_to_cyl_vec",
     "surface_field_from_vmec_jax",

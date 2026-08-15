@@ -1,11 +1,15 @@
+from types import SimpleNamespace
+
+import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
-import jax.numpy as jnp
 
 from virtual_casing_jax import (
     ExteriorFieldConfig,
     VirtualCasingExteriorField,
     VmecSurfaceFieldData,
+    build_near_surface_taylor_plan,
     cyl_to_xyz,
     xyz_vec_to_cyl_vec,
 )
@@ -52,6 +56,18 @@ class _RecordingVC:
     def compute_internal_B_offsurf_schedule(self, B_total, **kwargs):
         self.calls.append(("internal_B_schedule", kwargs))
         return 2.0 * kwargs["X_trg"] + 0.5
+
+    def plan_precision(self, **kwargs):
+        self.calls.append(("plan_precision", kwargs))
+        return (kwargs["digits"], kwargs["quad_nt"], kwargs["quad_np"])
+
+    def compute_internal_B(self, B_total, **kwargs):
+        self.calls.append(("internal_B_surface", kwargs))
+        return 4.0 * B_total
+
+    def compute_internal_gradB(self, B_total, **kwargs):
+        self.calls.append(("internal_gradB_surface", kwargs))
+        return jnp.zeros((3, 3) + B_total.shape[1:], dtype=B_total.dtype)
 
     def compute_external_B_offsurf_schedule(self, B_total, **kwargs):
         self.calls.append(("external_B_schedule", kwargs))
@@ -169,6 +185,68 @@ def test_exterior_field_restores_point_layouts_and_routes_scheduled_branches():
 
     with pytest.raises(ValueError, match="branch"):
         field.B_plasma_xyz(point, branch="bad")
+
+
+def test_sharded_target_api_has_single_device_fallback_and_validation():
+    field, _ = _field(external_B_fn=lambda xyz: jnp.ones_like(xyz))
+    points = jnp.asarray([[1.0, 2.0, 3.0], [1.5, 2.5, 3.5]])
+    np.testing.assert_allclose(
+        field.B_xyz_sharded(points, devices=[jax.devices()[0]]),
+        field.B_xyz(points))
+    with pytest.raises(ValueError, match="at least one"):
+        field.B_xyz_sharded(points, devices=[])
+
+
+def test_exterior_field_reuses_prepared_geometry_for_surface_quadrature():
+    field, recorder = _field()
+    plan = field.plan_surface_precision(digits=4, quad_nt=9, quad_np=7)
+    assert plan == (4, 9, 7)
+    np.testing.assert_allclose(
+        field.B_plasma_on_surface(digits=4, precision=plan),
+        4.0 * field.B_total,
+    )
+    assert [call[0] for call in recorder.calls] == [
+        "plan_precision", "internal_B_surface"
+    ]
+    assert recorder.calls[-1][1]["precision"] == plan
+
+
+def test_near_surface_plan_reuses_precision_for_gradient_quadrature():
+    field, recorder = _field()
+    precision = SimpleNamespace(
+        quad_nt=9, quad_np=7, patch_dim0=4, patch_idx=jnp.arange(3))
+    plan = field.plan_near_surface(
+        digits=4, precision=precision, B_surface=field.B_total)
+
+    assert plan.gradB_surface.shape == (3, 3) + field.B_total.shape[1:]
+    name, kwargs = recorder.calls[-1]
+    assert name == "internal_gradB_surface"
+    assert kwargs["quad_nt"] == 9 and kwargs["quad_np"] == 7
+    assert kwargs["patch_dim0"] == 4
+    np.testing.assert_array_equal(kwargs["patch_idx"], precision.patch_idx)
+
+
+def test_near_surface_plan_projects_smoothly_and_rotates_field_periods():
+    data = _surface_data(nfp=2)
+    phi = data.phi[:, None]
+    B_surface = jnp.broadcast_to(jnp.stack((
+        -2.0 * jnp.sin(phi), 2.0 * jnp.cos(phi), jnp.zeros_like(phi))),
+        data.gamma.shape)
+    gradB_surface = jnp.zeros((3, 3) + data.gamma.shape[1:])
+    gradB_surface = gradB_surface.at[0, 0].set(0.3 * jnp.cos(phi) ** 2)
+    gradB_surface = gradB_surface.at[0, 1].set(0.3 * jnp.cos(phi) * jnp.sin(phi))
+    gradB_surface = gradB_surface.at[1, 0].set(0.3 * jnp.cos(phi) * jnp.sin(phi))
+    gradB_surface = gradB_surface.at[1, 1].set(0.3 * jnp.sin(phi) ** 2)
+    plan = build_near_surface_taylor_plan(data, B_surface, gradB_surface)
+    field, _ = _field(nfp=2)
+    target_phi = 1.5 * jnp.pi
+    points = jnp.array([[2.25 * jnp.cos(target_phi), 2.25 * jnp.sin(target_phi), 0.0]])
+
+    got = field.B_plasma_near_surface_xyz(points, plan)
+    radial = jnp.array([jnp.cos(target_phi), jnp.sin(target_phi), 0.0])
+    expected = jnp.array([[-2.0 * jnp.sin(target_phi), 2.0 * jnp.cos(target_phi), 0.0]])
+    expected = expected + 0.05 * 0.3 * radial
+    np.testing.assert_allclose(got, expected, rtol=1e-11, atol=1e-11)
 
 
 def test_exterior_field_uses_nonjit_direct_paths_and_external_callbacks():

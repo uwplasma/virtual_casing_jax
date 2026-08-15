@@ -73,6 +73,20 @@ def test_resolution_helpers_resolve_auto_dtypes_and_schedules():
     assert all(nt <= 52 and npol <= 56 for nt, npol in auto)
 
 
+def test_field_and_gradient_reuse_matching_quadrature_geometry():
+    vc = VirtualCasingJAX()
+    vc._setup = True
+    setup = SimpleNamespace(quad_nt=12, quad_np=10)
+    vc._b_setup = setup
+
+    vc._ensure_grad_setup(12, 10, 3)
+    assert vc._grad_setup is setup
+
+    vc._b_setup = None
+    vc._ensure_b_setup(12, 10, 3)
+    assert vc._b_setup is setup
+
+
 def test_public_methods_fail_fast_before_setup_or_without_targets():
     vc = VirtualCasingJAX()
     B0 = jnp.zeros((3, 4, 5))

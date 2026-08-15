@@ -6,6 +6,8 @@ from typing import Callable, Literal
 
 import jax
 import jax.numpy as jnp
+import numpy as np
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
 
 from .virtual_casing import VirtualCasingJAX
 
@@ -31,6 +33,17 @@ class VmecSurfaceFieldData:
     stellsym: bool
     signgs: int
     source_convention: str = "vmec_jax"
+
+
+@dataclass(frozen=True)
+class NearSurfaceTaylorPlan:
+    """Reusable interpolation data for first-order near-surface continuation."""
+
+    center_rz: jax.Array
+    surface_rz: jax.Array
+    B_surface: jax.Array
+    gradB_surface: jax.Array
+    nfp: int
 
 
 @dataclass(frozen=True)
@@ -157,6 +170,103 @@ def _align_schedule_levels_to_nfp(levels, nfp: int):
     return tuple(aligned)
 
 
+def _periodic_linear(values, coordinate, period):
+    count = values.shape[-1]
+    scaled = jnp.mod(coordinate, period) * count / period
+    lower = jnp.floor(scaled).astype(int) % count
+    fraction = scaled - jnp.floor(scaled)
+    return (1.0 - fraction) * values[..., lower] + fraction * values[..., (lower + 1) % count]
+
+
+def _periodic_bilinear(values, first, second, first_period, second_period):
+    nfirst, nsecond = values.shape[-2:]
+    u = jnp.mod(first, first_period) * nfirst / first_period
+    v = jnp.mod(second, second_period) * nsecond / second_period
+    i0, j0 = jnp.floor(u).astype(int) % nfirst, jnp.floor(v).astype(int) % nsecond
+    du, dv = u - jnp.floor(u), v - jnp.floor(v)
+    i1, j1 = (i0 + 1) % nfirst, (j0 + 1) % nsecond
+    return ((1.0 - du) * (1.0 - dv) * values[..., i0, j0]
+            + du * (1.0 - dv) * values[..., i1, j0]
+            + (1.0 - du) * dv * values[..., i0, j1]
+            + du * dv * values[..., i1, j1])
+
+
+def build_near_surface_taylor_plan(surface_data, B_surface, gradB_surface):
+    """Build a smooth first-order near-surface continuation plan.
+
+    Vector and gradient components are stored in the local cylindrical basis,
+    making their Fourier representation periodic over one field period.
+    """
+    gamma = _check_soa3("surface_data.gamma", surface_data.gamma)
+    B_surface = _check_soa3("B_surface", B_surface)
+    gradB_surface = jnp.asarray(gradB_surface)
+    if gradB_surface.shape != (3, 3) + gamma.shape[1:]:
+        raise ValueError(
+            "gradB_surface must have shape (3, 3, nphi, ntheta), got "
+            f"{gradB_surface.shape}")
+
+    phi = jnp.asarray(surface_data.phi)
+    cphi, sphi = jnp.cos(phi), jnp.sin(phi)
+    rotation = jnp.stack((
+        jnp.stack((cphi, -sphi, jnp.zeros_like(phi)), axis=1),
+        jnp.stack((sphi, cphi, jnp.zeros_like(phi)), axis=1),
+        jnp.stack((jnp.zeros_like(phi), jnp.zeros_like(phi), jnp.ones_like(phi)), axis=1),
+    ), axis=1)
+    B_pt = jnp.moveaxis(B_surface, (0, 1, 2), (2, 0, 1))
+    gradB_pt = jnp.moveaxis(gradB_surface, (0, 1, 2, 3), (2, 3, 0, 1))
+    B_cyl = jnp.einsum("pia,pti->pta", rotation, B_pt)
+    gradB_cyl = jnp.einsum("pia,ptij,pjb->ptab", rotation, gradB_pt, rotation)
+    rz = jnp.stack((jnp.hypot(gamma[0], gamma[1]), gamma[2]))
+    center_rz = jnp.mean(rz, axis=-1)
+    geometric_angle = jnp.mod(jnp.arctan2(
+        rz[1] - center_rz[1, :, None], rz[0] - center_rz[0, :, None]),
+        2.0 * jnp.pi)
+    alpha_grid = jnp.linspace(0.0, 2.0 * jnp.pi, gamma.shape[2], endpoint=False)
+
+    def resample_to_geometric_angle(values):
+        values_by_phi = jnp.moveaxis(values, -2, 0)
+
+        def resample_row(alpha, row):
+            flat = row.reshape((-1, row.shape[-1]))
+            resampled = jax.vmap(
+                lambda component: jnp.interp(
+                    alpha_grid, alpha, component, period=2.0 * jnp.pi))(flat)
+            return resampled.reshape(row.shape)
+
+        return jnp.moveaxis(jax.vmap(resample_row)(
+            geometric_angle, values_by_phi), 0, -2)
+
+    return NearSurfaceTaylorPlan(
+        center_rz=center_rz,
+        surface_rz=resample_to_geometric_angle(rz),
+        B_surface=resample_to_geometric_angle(jnp.moveaxis(B_cyl, -1, 0)),
+        gradB_surface=resample_to_geometric_angle(
+            jnp.moveaxis(gradB_cyl, (-2, -1), (0, 1))),
+        nfp=int(surface_data.nfp),
+    )
+
+
+def _near_surface_taylor_B(plan: NearSurfaceTaylorPlan, point):
+    x, y, z = jnp.asarray(point)
+    radius, phi = jnp.hypot(x, y), jnp.arctan2(y, x)
+    period = 2.0 * jnp.pi / plan.nfp
+    reduced_phi = jnp.mod(phi, period)
+    center = _periodic_linear(plan.center_rz, reduced_phi, period)
+    alpha = jnp.arctan2(z - center[1], radius - center[0])
+    rz = _periodic_bilinear(
+        plan.surface_rz, reduced_phi, alpha, period, 2.0 * jnp.pi)
+    B_cyl = _periodic_bilinear(
+        plan.B_surface, reduced_phi, alpha, period, 2.0 * jnp.pi)
+    gradB_cyl = _periodic_bilinear(
+        plan.gradB_surface, reduced_phi, alpha, period, 2.0 * jnp.pi)
+    cphi, sphi = jnp.cos(phi), jnp.sin(phi)
+    rotation = jnp.asarray(((cphi, -sphi, 0.0), (sphi, cphi, 0.0), (0.0, 0.0, 1.0)))
+    surface_point = jnp.asarray((rz[0] * cphi, rz[0] * sphi, rz[1]))
+    B_surface = rotation @ B_cyl
+    gradB_surface = rotation @ gradB_cyl @ rotation.T
+    return B_surface + gradB_surface @ (point - surface_point)
+
+
 class VirtualCasingExteriorField:
     """JAX-native exterior field from VMEC-surface virtual-casing data.
 
@@ -211,6 +321,69 @@ class VirtualCasingExteriorField:
             nphi,
             ntheta,
         )
+        self._sharded_cache = {}
+
+    def plan_surface_precision(self, *, digits=None, quad_nt=None, quad_np=None):
+        """Plan on-surface singular quadrature using this prepared geometry."""
+        return self._vc.plan_precision(
+            digits=int(self.config.digits if digits is None else digits),
+            quad_nt=quad_nt,
+            quad_np=quad_np,
+        )
+
+    def B_plasma_on_surface(
+        self, *, digits=None, chunk_size=None, quad_nt=None, quad_np=None,
+        precision=None,
+    ):
+        """Return the internal-current plasma field on the source surface.
+
+        This reuses the geometry prepared by the exterior field, avoiding a
+        second quadrature setup when boundary diagnostics and off-surface
+        evaluations are needed together.
+        """
+        kwargs = {
+            "digits": int(self.config.digits if digits is None else digits),
+            "chunk_size": self.config.chunk_size if chunk_size is None else chunk_size,
+        }
+        if quad_nt is not None:
+            kwargs["quad_nt"] = int(quad_nt)
+        if quad_np is not None:
+            kwargs["quad_np"] = int(quad_np)
+        if precision is not None:
+            kwargs["precision"] = precision
+        return self._vc.compute_internal_B(self.B_total, **kwargs)
+
+    def plan_near_surface(self, *, digits=None, precision=None, B_surface=None):
+        """Prepare a smooth first-order field continuation near the surface.
+
+        The singular on-surface field and gradient are computed once. Reusing
+        the returned plan avoids increasingly fine direct quadrature for every
+        nearby target in a field-line or grid evaluation.
+        """
+        digits = int(self.config.digits if digits is None else digits)
+        if B_surface is None:
+            B_surface = self.B_plasma_on_surface(digits=digits, precision=precision)
+        precision_kwargs = {}
+        if precision is not None:
+            precision_kwargs = dict(
+                quad_nt=precision.quad_nt, quad_np=precision.quad_np,
+                patch_dim0=precision.patch_dim0, patch_idx=precision.patch_idx)
+        gradB_surface = self._vc.compute_internal_gradB(
+            self.B_total, digits=digits, chunk_size=self.config.chunk_size,
+            target_chunk_size=self.config.target_chunk_size, **precision_kwargs)
+        return build_near_surface_taylor_plan(
+            self.surface_data, B_surface, gradB_surface)
+
+    def B_plasma_near_surface_xyz(self, xyz, plan: NearSurfaceTaylorPlan):
+        """Evaluate a first-order continuation of the plasma field.
+
+        This path is intended for targets close enough to the source surface
+        that direct periodic trapezoidal quadrature would require prohibitive
+        refinement. Returned vectors are Cartesian and batched over ``xyz``.
+        """
+        xyz_soa, restore = _points_to_soa(xyz)
+        values = jax.vmap(lambda point: _near_surface_taylor_B(plan, point))(xyz_soa.T)
+        return restore(values.T)
 
     def _call_vc_B(self, xyz_soa, branch: Branch):
         kwargs = dict(
@@ -263,6 +436,39 @@ class VirtualCasingExteriorField:
         if self.external_B_fn is None:
             return B
         return B + self.external_B_fn(xyz)
+
+    def B_xyz_sharded(self, xyz, *, devices=None):
+        """Evaluate a large ``(n, 3)`` target batch across JAX devices.
+
+        Surface data are replicated while the independent target axis is
+        partitioned. A single-device process follows :meth:`B_xyz` directly.
+        """
+        points = jnp.asarray(xyz)
+        if points.ndim != 2 or points.shape[1] != 3:
+            raise ValueError(f"xyz must have shape (n, 3), got {points.shape}")
+        devices = tuple(jax.devices() if devices is None else devices)
+        if not devices:
+            raise ValueError("devices must contain at least one JAX device")
+        if len(devices) == 1 or points.shape[0] < len(devices):
+            return self.B_xyz(points)
+
+        original_size = points.shape[0]
+        padding = (-original_size) % len(devices)
+        if padding:
+            points = jnp.pad(points, ((0, padding), (0, 0)), mode="edge")
+        key = (tuple((device.platform, device.id) for device in devices), points.shape)
+        compiled = self._sharded_cache.get(key)
+        if compiled is None:
+            mesh = Mesh(np.asarray(devices, dtype=object), ("targets",))
+            sharding = NamedSharding(mesh, PartitionSpec("targets", None))
+            compiled = (
+                jax.jit(self.B_xyz, in_shardings=sharding, out_shardings=sharding),
+                sharding,
+            )
+            self._sharded_cache[key] = compiled
+        function, sharding = compiled
+        result = function(jax.device_put(points, sharding))
+        return result[:original_size] if padding else result
 
     def gradB_plasma_xyz(self, xyz, *, branch: Branch | None = None):
         """Return ``dB_i/dx_j`` for the virtual-casing plasma field."""

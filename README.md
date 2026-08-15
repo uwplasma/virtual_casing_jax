@@ -178,6 +178,13 @@ field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
 
 points = [[1.8, 0.0, 0.0]]
 B_plasma = field.B_plasma_xyz(points)
+
+# Reuse accurate on-surface data for many targets close to the LCFS.
+near = field.plan_near_surface(digits=4)
+B_near = field.B_plasma_near_surface_xyz(points, near)
+
+# Large target batches can use every visible JAX device.
+B_total = field.B_xyz_sharded(points)
 ```
 
 The explicit field functions and their derivatives are JAX differentiable.
