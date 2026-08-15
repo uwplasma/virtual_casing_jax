@@ -147,7 +147,10 @@ For many target points of one exterior field, pass an ``(n, 3)`` array to
 process, ``B_xyz_sharded(points)`` additionally partitions the target axis
 over all visible JAX devices while replicating the much smaller surface data.
 Pass ``devices=[...]`` to select a subset. Sharding one-point ODE calls adds
-overhead and is intentionally not automatic.
+overhead and is intentionally not automatic. The convenience method stages
+target coordinates through host memory for correctness on systems without GPU
+peer-to-peer access; use ``B_xyz`` directly inside an existing jitted device
+graph.
 
 Off-surface Schedule + JIT
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

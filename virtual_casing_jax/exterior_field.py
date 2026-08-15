@@ -6,6 +6,7 @@ from typing import Callable, Literal
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from .virtual_casing import VirtualCasingJAX
 
@@ -441,7 +442,9 @@ class VirtualCasingExteriorField:
         Surface data are replicated while the independent target axis is
         partitioned. A single-device process follows :meth:`B_xyz` directly.
         """
-        points = jnp.asarray(xyz)
+        # Stage target coordinates through host memory so systems without
+        # GPU peer-to-peer copies still transfer the correct shard to each device.
+        points = np.asarray(xyz)
         if points.ndim != 2 or points.shape[1] != 3:
             raise ValueError(f"xyz must have shape (n, 3), got {points.shape}")
         devices = tuple(jax.devices() if devices is None else devices)
