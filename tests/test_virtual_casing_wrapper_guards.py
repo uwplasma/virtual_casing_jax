@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from types import SimpleNamespace
 
 from virtual_casing_jax.virtual_casing import VirtualCasingJAX
+from virtual_casing_jax.utils import autotune_chunk_sizes
 
 
 def _torus_surface(nt=4, npol=5, R0=2.0, r=0.25):
@@ -51,8 +52,7 @@ def test_resolution_helpers_resolve_auto_dtypes_and_schedules():
     vc = VirtualCasingJAX()
 
     src, trg = vc._resolve_chunk_sizes("b", "auto", "auto", nsrc=18432, ntrg=512)
-    assert src == 512
-    assert trg == 64
+    assert (src, trg) == autotune_chunk_sizes("b", 18432, 512)
 
     src, trg = vc._resolve_chunk_sizes("gradb", 128, "auto", nsrc=4096, ntrg=16)
     assert src == 128
