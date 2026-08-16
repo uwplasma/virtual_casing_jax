@@ -169,7 +169,7 @@ field. The current downstream integration is
 
 ```python
 from vmex import read_wout
-from vmex.core.freeboundary_diff import surface_field_data_from_wout
+from vmex.core.virtual_casing import surface_field_data_from_wout
 from virtual_casing_jax import ExteriorFieldConfig, VirtualCasingExteriorField
 
 wout = read_wout("wout_circular_tokamak.nc")
@@ -186,6 +186,10 @@ B_near = field.B_plasma_near_surface_xyz(points, near)
 # Large target batches can use every visible JAX device.
 B_total = field.B_xyz_sharded(points)
 ```
+
+`plan_near_surface` is a first-order local continuation. Bound field-line
+traces by distance from the LCFS, and use a converged direct off-surface
+schedule before interpreting farther targets or magnetic topology.
 
 The explicit field functions and their derivatives are JAX differentiable.
 VMEX owns the user-facing magnetic-field object and SIMSOPT-compatible
