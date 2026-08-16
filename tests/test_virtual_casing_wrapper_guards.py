@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from types import SimpleNamespace
 
 from virtual_casing_jax.virtual_casing import VirtualCasingJAX
+from virtual_casing_jax.utils import autotune_chunk_sizes
 
 
 def _torus_surface(nt=4, npol=5, R0=2.0, r=0.25):
@@ -51,8 +52,7 @@ def test_resolution_helpers_resolve_auto_dtypes_and_schedules():
     vc = VirtualCasingJAX()
 
     src, trg = vc._resolve_chunk_sizes("b", "auto", "auto", nsrc=18432, ntrg=512)
-    assert src == 512
-    assert trg == 64
+    assert (src, trg) == autotune_chunk_sizes("b", 18432, 512)
 
     src, trg = vc._resolve_chunk_sizes("gradb", 128, "auto", nsrc=4096, ntrg=16)
     assert src == 128
@@ -71,6 +71,20 @@ def test_resolution_helpers_resolve_auto_dtypes_and_schedules():
     assert auto[0] == (13, 14)
     assert len(auto) <= 3
     assert all(nt <= 52 and npol <= 56 for nt, npol in auto)
+
+
+def test_field_and_gradient_reuse_matching_quadrature_geometry():
+    vc = VirtualCasingJAX()
+    vc._setup = True
+    setup = SimpleNamespace(quad_nt=12, quad_np=10)
+    vc._b_setup = setup
+
+    vc._ensure_grad_setup(12, 10, 3)
+    assert vc._grad_setup is setup
+
+    vc._b_setup = None
+    vc._ensure_b_setup(12, 10, 3)
+    assert vc._b_setup is setup
 
 
 def test_public_methods_fail_fast_before_setup_or_without_targets():

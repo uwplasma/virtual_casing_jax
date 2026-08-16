@@ -55,6 +55,7 @@ jobs:
         env:
           JAX_ENABLE_X64: "1"
           JAX_PLATFORMS: cpu
+          XLA_FLAGS: --xla_force_host_platform_device_count=2
         run: |
           python -m pytest -q -m "not large" \
             --cov=virtual_casing_jax \

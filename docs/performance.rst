@@ -142,6 +142,16 @@ Use ``compute_external_B_batch`` or ``compute_external_gradB_batch`` when
 evaluating many fields in parallel (e.g., multiple VMEC surfaces or
 Monte Carlo samples). These functions use ``vmap`` to avoid Python loops.
 
+For many target points of one exterior field, pass an ``(n, 3)`` array to
+``B_xyz`` so source geometry and quadrature plans are reused. On a multi-GPU
+process, ``B_xyz_sharded(points)`` additionally partitions the target axis
+over all visible JAX devices while replicating the much smaller surface data.
+Pass ``devices=[...]`` to select a subset. Sharding one-point ODE calls adds
+overhead and is intentionally not automatic. The convenience method stages
+target coordinates through host memory for correctness on systems without GPU
+peer-to-peer access; use ``B_xyz`` directly inside an existing jitted device
+graph.
+
 Off-surface Schedule + JIT
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -184,6 +194,10 @@ Patch index maps are cached per quadrature
 setup inside ``VirtualCasingJAX`` to avoid recomputing the patch gather
 indices on each call. Patch indices are stored as int32 to reduce memory
 traffic during gathers.
+The high-level exterior wrapper also reuses one matching quadrature geometry
+for on-surface ``B`` and ``gradB`` and accepts the same ``PrecisionPlan`` for
+both. ``plan_near_surface`` then amortizes the singular work across all nearby
+field-line or grid targets.
 
 Profiling and Diagnostics
 -------------------------

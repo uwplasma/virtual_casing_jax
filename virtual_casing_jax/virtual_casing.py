@@ -400,6 +400,14 @@ class VirtualCasingJAX:
         ):
             return
 
+        if (
+            self._b_setup is not None
+            and self._b_setup.quad_nt == quad_nt
+            and self._b_setup.quad_np == quad_np
+        ):
+            self._grad_setup = self._b_setup
+            return
+
         self._grad_setup = self._build_quad_setup(quad_nt, quad_np)
 
     def _ensure_b_setup(self, quad_nt: int | None, quad_np: int | None, digits: int):
@@ -416,6 +424,14 @@ class VirtualCasingJAX:
             and self._b_setup.quad_nt == quad_nt
             and self._b_setup.quad_np == quad_np
         ):
+            return
+
+        if (
+            self._grad_setup is not None
+            and self._grad_setup.quad_nt == quad_nt
+            and self._grad_setup.quad_np == quad_np
+        ):
+            self._b_setup = self._grad_setup
             return
 
         self._b_setup = self._build_quad_setup(quad_nt, quad_np)

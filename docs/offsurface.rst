@@ -159,6 +159,32 @@ Performance Notes
 - Off-surface GradB is more expensive than off-surface B because it
   evaluates second-derivative kernels.
 
+Near-surface continuation
+-------------------------
+
+Periodic trapezoidal quadrature becomes prohibitively fine when a target is
+very close to the source surface. For dense near-LCFS grids and field-line
+tracing, :class:`~virtual_casing_jax.exterior_field.VirtualCasingExteriorField`
+can instead prepare the accurate singular on-surface field and gradient once::
+
+   plan = field.plan_near_surface(digits=4)
+   B = field.B_plasma_near_surface_xyz(points, plan)
+
+The plan reparameterizes each star-shaped poloidal section by its geometric
+angle and evaluates the first-order continuation
+
+.. math::
+
+   \mathbf B(\mathbf x_\Gamma+\delta\mathbf x)
+   = \mathbf B_\Gamma + \nabla\mathbf B_\Gamma\,\delta\mathbf x
+   + O(|\delta\mathbf x|^2).
+
+The on-surface values use the same POU/polar and one-sided Hedgehog
+quadratures as the parity-tested boundary API. Target evaluation is then a
+batched periodic interpolation with constant memory per point. Use direct
+off-surface quadrature farther from the LCFS or whenever a case-specific
+convergence check shows that the neglected quadratic term is material.
+
 Implementation Mapping
 ----------------------
 
