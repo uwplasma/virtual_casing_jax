@@ -688,6 +688,20 @@ def source_field_scale(BdotN, J):
     )
 
 
+def _level_densities(BdotN, J, normal_base, normal_lvl, nt0, np0, nt, npol):
+    """Layer densities ``(B . n, B x n)`` on a schedule level.
+
+    Interpolating the products themselves from the base grid leaves a floor of
+    about 1e-8 under every finer level: they are exact at the base nodes but
+    not band-limited between them.  Recover the field pointwise on the base
+    grid, ``B = (B . n) n + n x (B x n)``, interpolate that, and form the
+    products with the level's own normal.
+    """
+    B_base = BdotN[None] * normal_base + jnp.cross(normal_base, J, axis=0)
+    B_lvl = resample(B_base, nt0, np0, nt, npol)
+    return jnp.sum(B_lvl * normal_lvl, axis=0), jnp.cross(B_lvl, normal_lvl, axis=0)
+
+
 def _refine_by_estimate(level_result, level_potential, levels, tol, scale_fn):
     """Refine while a calibrated error estimate, not a self-test, exceeds ``tol``.
 
@@ -811,10 +825,13 @@ def computeB_offsurface_adaptive_schedule(
         )
         return jnp.asarray(U).reshape(-1)
 
+    normal_base = level_geometry(nt0, np0)[1]
+
     def level_result(nt, npol):
-        X_lvl, _, area_elem = level_geometry(nt, npol)
-        BdotN_lvl = resample(BdotN[None, ...], nt0, np0, nt, npol)[0]
-        J_lvl = resample(J, nt0, np0, nt, npol)
+        X_lvl, normal_lvl, area_elem = level_geometry(nt, npol)
+        BdotN_lvl, J_lvl = _level_densities(
+            BdotN, J, normal_base, normal_lvl, nt0, np0, nt, npol
+        )
 
         gradG = laplace_fxd_u_eval(
             X_lvl,
@@ -896,10 +913,13 @@ def computeGradB_offsurface_adaptive_schedule(
         )
         return jnp.asarray(U).reshape(-1)
 
+    normal_base = level_geometry(nt0, np0)[1]
+
     def level_result(nt, npol):
-        X_lvl, _, area_elem = level_geometry(nt, npol)
-        BdotN_lvl = resample(BdotN[None, ...], nt0, np0, nt, npol)[0]
-        J_lvl = resample(J, nt0, np0, nt, npol)
+        X_lvl, normal_lvl, area_elem = level_geometry(nt, npol)
+        BdotN_lvl, J_lvl = _level_densities(
+            BdotN, J, normal_base, normal_lvl, nt0, np0, nt, npol
+        )
 
         gradG_J = laplace_fxd2_u_eval_vec(
             X_lvl,

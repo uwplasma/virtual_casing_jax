@@ -41,7 +41,7 @@ def _z_axis_field(points):
                             np.zeros_like(x)], axis=1)
 
 
-def _rotating_ellipse(nphi, ntheta, nfp):
+def _rotating_ellipse(nphi, ntheta, nfp, tangent_field=False):
     theta = jnp.linspace(0.0, 2 * jnp.pi, ntheta, endpoint=False)
     phi = jnp.linspace(0.0, 2 * jnp.pi / nfp, nphi, endpoint=False)
     ph, th = jnp.meshgrid(phi, theta, indexing="ij")
@@ -56,10 +56,15 @@ def _rotating_ellipse(nphi, ntheta, nfp):
     e_th = jnp.stack([Rt * c, Rt * s, Zt], axis=0)
     e_ph = jnp.stack([Rp * c - R * s, Rp * s + R * c, Zp], axis=0)
     area = jnp.cross(e_th, e_ph, axis=0)
-    points = np.asarray(gamma).reshape(3, -1).T
-    B = _z_axis_field(points) + _ring_field(points)
+    if tangent_field:
+        # a trigonometric polynomial in both angles, as a VMEC boundary field is
+        B_total = 0.3 * e_th + e_ph
+    else:
+        points = np.asarray(gamma).reshape(3, -1).T
+        B = _z_axis_field(points) + _ring_field(points)
+        B_total = jnp.asarray(B.T.reshape(gamma.shape))
     return VmecSurfaceFieldData(
-        gamma=gamma, B_total=jnp.asarray(B.T.reshape(gamma.shape)),
+        gamma=gamma, B_total=B_total,
         normal=area / jnp.linalg.norm(area, axis=0), area_vector=area,
         theta=theta, phi=phi, nfp=nfp, stellsym=False, signgs=1,
         source_convention="synthetic")
@@ -269,3 +274,45 @@ def test_return_estimate_needs_the_jitted_schedule():
                                      src_nphi=8, src_ntheta=8))
     with pytest.raises(ValueError, match="use_jit_schedule"):
         field.B_plasma_error_estimate(_offsets(surface, 0.2, count=2))
+
+
+def test_level_densities_recover_the_inputs_on_the_base_grid():
+    """The field is rebuilt with the same normal the densities were formed with."""
+    from virtual_casing_jax.integrals import _level_densities
+    from virtual_casing_jax.surface_ops import grad2d, surf_normal_area_elem
+
+    surface = _rotating_ellipse(8, 8, 3)
+    field = _field(surface, 3)
+    X_src, BdotN, J = field._vc._offsurface_densities(field.B_total, 3)
+    nt0, np0 = int(X_src.shape[1]), int(X_src.shape[2])
+    normal, _ = surf_normal_area_elem(grad2d(X_src, nt0, np0), X_src)
+    BdotN_again, J_again = _level_densities(BdotN, J, normal, normal, nt0, np0, nt0, np0)
+    np.testing.assert_allclose(np.asarray(BdotN_again), np.asarray(BdotN), rtol=0.0, atol=1e-13)
+    np.testing.assert_allclose(np.asarray(J_again), np.asarray(J), rtol=0.0, atol=1e-13)
+
+
+def test_a_finer_level_has_no_interpolation_floor():
+    """A level finer than the source grid must not sit on a 1e-8 floor.
+
+    With a field the source grid resolves, the fine level has to agree with the
+    same field sampled natively on a grid that needs no interpolation at all.
+    Interpolating the products ``B x n`` and ``B . n`` instead of ``B`` broke
+    this at about 1e-8, at every distance, because the unit normal is not
+    band-limited.
+    """
+    nfp = 3
+    angle = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
+    # a ring well outside the torus, where every quadrature here has converged
+    points = np.stack([(R0 + 1.5) * np.cos(angle), (R0 + 1.5) * np.sin(angle),
+                       0.3 * np.cos(3.0 * angle)], axis=1)
+
+    surface = _rotating_ellipse(12, 12, nfp, tangent_field=True)
+    fine = _field(surface, 8).schedule_levels[-1]
+    value = np.asarray(_field(surface, 8, (fine,)).B_plasma_xyz(points))
+
+    native = _rotating_ellipse(24, 24, nfp, tangent_field=True)
+    assert (nfp * 24, 24) == fine
+    reference = np.asarray(_field(native, 8, (fine,)).B_plasma_xyz(points))
+
+    error = np.linalg.norm(value - reference, axis=1) / np.linalg.norm(reference, axis=1)
+    assert error.max() <= 1e-11, error.max()
