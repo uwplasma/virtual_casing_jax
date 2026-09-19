@@ -54,6 +54,14 @@ from .exterior_field import (
     default_schedule_levels,
     xyz_vec_to_cyl_vec,
 )
+from .error_estimate import (
+    BoundarySeries,
+    GridSizeError,
+    boundary_series_from_gamma,
+    density_magnitude_from_surface,
+    kst_error_estimate,
+    required_levels,
+)
 from .vmec_jax_bridge import surface_field_from_vmec_jax
 from .grid_export import (
     evaluate_on_rphiz_grid,
@@ -137,6 +145,12 @@ __all__ = [
     "build_offsurface_levels",
     "ExteriorFieldConfig",
     "default_schedule_levels",
+    "BoundarySeries",
+    "GridSizeError",
+    "boundary_series_from_gamma",
+    "density_magnitude_from_surface",
+    "kst_error_estimate",
+    "required_levels",
     "NearSurfaceTaylorPlan",
     "VirtualCasingExteriorField",
     "VmecSurfaceFieldData",
