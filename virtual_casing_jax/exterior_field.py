@@ -53,7 +53,7 @@ class ExteriorFieldConfig:
     digits: int = 8
     src_nphi: int = 64
     src_ntheta: int = 64
-    levels: tuple[tuple[int, int], ...] = ((64, 64), (128, 128), (256, 256))
+    levels: tuple[tuple[int, int], ...] | None = None
     chunk_size: int | str = "auto"
     target_chunk_size: int | str = "auto"
     branch: Branch = "internal"
@@ -155,6 +155,25 @@ def B_cyl_from_B_xyz(field_fn: Callable, R_phi_Z):
     """Evaluate a Cartesian field callback and return cylindrical components."""
     xyz = cyl_to_xyz(R_phi_Z)
     return xyz_vec_to_cyl_vec(R_phi_Z, field_fn(xyz))
+
+
+def default_schedule_levels(nphi: int, ntheta: int, nfp: int):
+    """Two-level schedule sized from the source grid, in full-torus counts.
+
+    ``surface_data`` is sampled on ONE field period, while a schedule level
+    counts the WHOLE torus, so the toroidal entries carry the ``nfp`` factor.
+    Without it an nfp = 5 boundary sampled at 32 points per period was resolved
+    by a finest level of 64 over the torus -- 13 points per period -- and the
+    achieved error one minor radius off the boundary was 2.5e-02 against a
+    requested 1e-6.
+
+    Two levels are enough: the coarse level exists only to supply the
+    Richardson term of the error estimate, and it costs a quarter of the fine
+    one.  A schedule of one level is accepted and reports ``|U|`` alone.
+    """
+    full = max(int(nphi), 1) * max(int(nfp), 1)
+    ntheta = max(int(ntheta), 1)
+    return ((full, ntheta), (2 * full, 2 * ntheta))
 
 
 def _align_schedule_levels_to_nfp(levels, nfp: int):
@@ -304,7 +323,9 @@ class VirtualCasingExteriorField:
         self.external_B_fn = external_B_fn
         self.external_gradB_fn = external_gradB_fn
         self.schedule_levels = _align_schedule_levels_to_nfp(
-            self.config.levels,
+            self.config.levels
+            if self.config.levels is not None
+            else default_schedule_levels(nphi, ntheta, int(surface_data.nfp)),
             int(surface_data.nfp),
         )
 
@@ -385,7 +406,7 @@ class VirtualCasingExteriorField:
         values = jax.vmap(lambda point: _near_surface_taylor_B(plan, point))(xyz_soa.T)
         return restore(values.T)
 
-    def _call_vc_B(self, xyz_soa, branch: Branch):
+    def _call_vc_B(self, xyz_soa, branch: Branch, return_estimate: bool = False):
         kwargs = dict(
             X_trg=xyz_soa,
             digits=int(self.config.digits),
@@ -394,9 +415,12 @@ class VirtualCasingExteriorField:
         )
         if self.config.use_jit_schedule:
             kwargs["levels"] = self.schedule_levels
+            kwargs["return_estimate"] = return_estimate
             if branch == "internal":
                 return self._vc.compute_internal_B_offsurf_schedule(self.B_total, **kwargs)
             return self._vc.compute_external_B_offsurf_schedule(self.B_total, **kwargs)
+        if return_estimate:
+            raise ValueError("return_estimate requires use_jit_schedule=True")
         if branch == "internal":
             return self._vc.compute_internal_B_offsurf(self.B_total, **kwargs)
         return self._vc.compute_external_B_offsurf(self.B_total, **kwargs)
@@ -417,14 +441,33 @@ class VirtualCasingExteriorField:
             return self._vc.compute_internal_gradB_offsurf(self.B_total, **kwargs)
         return self._vc.compute_external_gradB_offsurf(self.B_total, **kwargs)
 
-    def B_plasma_xyz(self, xyz, *, branch: Branch | None = None):
-        """Return the virtual-casing plasma-current field in Cartesian components."""
+    def B_plasma_xyz(self, xyz, *, branch: Branch | None = None, return_estimate: bool = False):
+        """Return the virtual-casing plasma-current field in Cartesian components.
+
+        With ``return_estimate`` also return the schedule's achieved relative
+        error per target, dimensionless and comparable with ``10**-digits``, so
+        an unconverged schedule reports what it achieved instead of silently
+        handing back its last level.  See :func:`B_plasma_error_estimate`.
+        """
         branch = self.config.branch if branch is None else branch
         if branch not in ("internal", "external"):
             raise ValueError("branch must be 'internal' or 'external'")
         xyz_soa, restore = _points_to_soa(xyz)
         xyz_soa = xyz_soa.astype(self.gamma.dtype)
-        return restore(self._call_vc_B(xyz_soa, branch))
+        if not return_estimate:
+            return restore(self._call_vc_B(xyz_soa, branch))
+        value, estimate = self._call_vc_B(xyz_soa, branch, return_estimate=True)
+        return restore(value), estimate
+
+    def B_plasma_error_estimate(self, xyz, *, branch: Branch | None = None):
+        """Achieved relative error of :func:`B_plasma_xyz`, per target.
+
+        Compare with ``10**-config.digits``.  Targets inside the source surface,
+        or closer to it than about two source-grid spacings, report an error of
+        order one: the periodic trapezoid rule is near-singular there and the
+        direct schedule is not the right tool, whatever level it reaches.
+        """
+        return self.B_plasma_xyz(xyz, branch=branch, return_estimate=True)[1]
 
     def B_external_xyz(self, xyz):
         """Return the diagnostic external-branch virtual-casing field."""

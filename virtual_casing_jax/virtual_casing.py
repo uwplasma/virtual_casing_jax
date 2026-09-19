@@ -1377,6 +1377,7 @@ class VirtualCasingJAX:
         max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
+        return_estimate: bool = False,
     ):
         """Compute Bext off-surface using a fixed adaptive refinement schedule."""
         if not self._setup:
@@ -1409,10 +1410,14 @@ class VirtualCasingJAX:
             ext=True,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
+            return_estimate=return_estimate,
         )
+        estimate = None
+        if return_estimate:
+            out, estimate = out
         if X_trg.ndim == 3:
-            return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
-        return out
+            out = jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
+        return (out, estimate) if return_estimate else out
 
     def compute_external_B_offsurf_schedule_jit(
         self,
@@ -1489,6 +1494,7 @@ class VirtualCasingJAX:
         max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
+        return_estimate: bool = False,
     ):
         """Compute Bint off-surface using a fixed adaptive refinement schedule."""
         if not self._setup:
@@ -1521,10 +1527,14 @@ class VirtualCasingJAX:
             ext=False,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
+            return_estimate=return_estimate,
         )
+        estimate = None
+        if return_estimate:
+            out, estimate = out
         if X_trg.ndim == 3:
-            return jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
-        return out
+            out = jnp.asarray(out).reshape((3, X_trg.shape[1], X_trg.shape[2]))
+        return (out, estimate) if return_estimate else out
 
     def compute_internal_B_offsurf_schedule_jit(
         self,
@@ -1707,6 +1717,7 @@ class VirtualCasingJAX:
         max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
+        return_estimate: bool = False,
     ):
         """Compute GradBext off-surface using a fixed adaptive refinement schedule."""
         if not self._setup:
@@ -1740,10 +1751,14 @@ class VirtualCasingJAX:
             ext=True,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
+            return_estimate=return_estimate,
         )
+        estimate = None
+        if return_estimate:
+            gradB, estimate = gradB
         if X_trg.ndim == 3:
-            return jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
-        return gradB
+            gradB = jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
+        return (gradB, estimate) if return_estimate else gradB
 
     def compute_external_gradB_offsurf_schedule_jit(
         self,
@@ -1820,6 +1835,7 @@ class VirtualCasingJAX:
         max_levels: int = 6,
         chunk_size: int | str | None = "auto",
         target_chunk_size: int | str | None = "auto",
+        return_estimate: bool = False,
     ):
         """Compute GradBint off-surface using a fixed adaptive refinement schedule."""
         if not self._setup:
@@ -1853,10 +1869,14 @@ class VirtualCasingJAX:
             ext=False,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
+            return_estimate=return_estimate,
         )
+        estimate = None
+        if return_estimate:
+            gradB, estimate = gradB
         if X_trg.ndim == 3:
-            return jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
-        return gradB
+            gradB = jnp.asarray(gradB).reshape((3, 3, X_trg.shape[1], X_trg.shape[2]))
+        return (gradB, estimate) if return_estimate else gradB
 
     def compute_internal_gradB_offsurf_schedule_jit(
         self,

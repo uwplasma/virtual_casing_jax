@@ -16,6 +16,21 @@ def _torus(nt, npol, R0=2.0, r=0.3):
     return jnp.stack([x, y, z], axis=0)
 
 
+def _converged_reference(vc, B0, Xt, nt0, np0, digits, gradient=False):
+    """A single level far finer than any the schedule visits."""
+    levels = ((nt0 * 64, np0 * 64),)
+    if gradient:
+        return np.asarray(vc.compute_external_gradB_offsurf_schedule(
+            B0, X_trg=Xt, levels=levels, digits=digits))
+    return np.asarray(vc.compute_external_B_offsurf_schedule(
+        B0, X_trg=Xt, levels=levels, digits=digits))
+
+
+def _relative_error(value, reference):
+    value = np.asarray(value)
+    return float(np.linalg.norm(value - reference) / np.linalg.norm(reference))
+
+
 def test_offsurface_adaptive_schedule_matches_python():
     nfp = 1
     half_period = False
@@ -48,7 +63,13 @@ def test_offsurface_adaptive_schedule_matches_python():
         digits=digits,
     )
 
-    np.testing.assert_allclose(b_sched, np.asarray(b_py), rtol=5e-6, atol=5e-8)
+    # The two paths no longer agree by construction: the schedule selects its
+    # level by the calibrated error estimate, the eager path by the
+    # double-layer self-test, which stops one level too early here.  Compare
+    # each against a converged reference instead of against the other.
+    reference = _converged_reference(vc, B0, Xt, nt0, np0, digits)
+    assert _relative_error(b_sched, reference) <= 10.0**-digits
+    assert _relative_error(b_sched, reference) < _relative_error(b_py, reference)
 
     grad_py = vc.compute_external_gradB_offsurf(
         B0,
@@ -62,7 +83,8 @@ def test_offsurface_adaptive_schedule_matches_python():
         levels=levels,
         digits=digits,
     )
-    np.testing.assert_allclose(grad_sched, np.asarray(grad_py), rtol=5e-5, atol=5e-7)
+    reference = _converged_reference(vc, B0, Xt, nt0, np0, digits, gradient=True)
+    assert _relative_error(grad_sched, reference) <= _relative_error(grad_py, reference)
 
 
 def test_offsurface_adaptive_schedule_jit_auto():
@@ -100,7 +122,9 @@ def test_offsurface_adaptive_schedule_jit_auto():
         max_Np=max_Np,
         max_levels=4,
     )
-    np.testing.assert_allclose(np.asarray(b_jit), np.asarray(b_py), rtol=5e-6, atol=5e-8)
+    reference = _converged_reference(vc, B0, Xt, nt0, np0, digits)
+    assert _relative_error(b_jit, reference) <= 10.0**-digits
+    assert _relative_error(b_jit, reference) < _relative_error(b_py, reference)
 
     grad_py = vc.compute_external_gradB_offsurf(
         B0,
@@ -119,7 +143,8 @@ def test_offsurface_adaptive_schedule_jit_auto():
         max_Np=max_Np,
         max_levels=4,
     )
-    np.testing.assert_allclose(np.asarray(grad_jit), np.asarray(grad_py), rtol=5e-5, atol=5e-7)
+    reference = _converged_reference(vc, B0, Xt, nt0, np0, digits, gradient=True)
+    assert _relative_error(grad_jit, reference) <= _relative_error(grad_py, reference)
 
 
 def test_eager_adaptive_refinement_has_finite_failure_budget():

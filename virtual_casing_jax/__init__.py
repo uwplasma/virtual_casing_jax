@@ -51,6 +51,7 @@ from .exterior_field import (
     B_cyl_from_B_xyz,
     build_near_surface_taylor_plan,
     cyl_to_xyz,
+    default_schedule_levels,
     xyz_vec_to_cyl_vec,
 )
 from .vmec_jax_bridge import surface_field_from_vmec_jax
@@ -135,6 +136,7 @@ __all__ = [
     "VirtualCasing",
     "build_offsurface_levels",
     "ExteriorFieldConfig",
+    "default_schedule_levels",
     "NearSurfaceTaylorPlan",
     "VirtualCasingExteriorField",
     "VmecSurfaceFieldData",

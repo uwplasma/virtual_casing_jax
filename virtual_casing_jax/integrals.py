@@ -676,6 +676,81 @@ def computeB_offsurface_adaptive(
     return sign * (gradG + bs)
 
 
+def source_field_scale(BdotN, J):
+    """RMS field magnitude on the source surface.
+
+    ``J = B x n`` and ``BdotN = B . n`` with a unit normal, so
+    ``|J|^2 + BdotN^2 = |B|^2``.  Off-surface field differences are divided by
+    this to give a dimensionless error estimate comparable with ``10**-digits``.
+    """
+    return jnp.sqrt(
+        jnp.mean(jnp.sum(jnp.asarray(J) ** 2, axis=0) + jnp.asarray(BdotN) ** 2)
+    )
+
+
+def _refine_by_estimate(level_result, level_potential, levels, tol, scale_fn):
+    """Refine while a calibrated error estimate, not a self-test, exceeds ``tol``.
+
+    The estimate of the level-``k`` result is
+    ``max(|U_k|, (|F_k - F_(k-1)| / scale) ** 2)``.  ``U_k`` is the single-layer
+    potential of a unit density, exactly zero at a target outside the surface,
+    so ``|U_k|`` measures the quadrature error directly; halving the spacing
+    squares the periodic-trapezoid error factor ``exp(-2 pi d / h)``, so the
+    squared relative change between two levels extrapolates the finer level's
+    error from the coarser one.  ``scale_fn(result)`` supplies the denominator
+    that makes the change dimensionless: the field schedule divides by the RMS
+    field on the source surface, the scale this estimate was calibrated
+    against, while the gradient schedule, for which no such absolute scale
+    exists, divides by the RMS of its own result over the targets.
+
+    This replaces the double-layer self-test ``min(|1 + U|, |U|)`` that chose
+    the level before.  That test is blind to the resolution of the layer
+    densities and accepts ``U`` near either ``0`` or ``-1``, and was measured
+    keeping a level whose relative error reached 0.3 against a 1e-4 tolerance.
+
+    Derivatives: with a two-level schedule the loop below is empty, so the
+    result is unconditionally the finest level -- a fixed function of the
+    inputs, whose JVP and VJP are exactly those of that level's quadrature.
+    Only schedules of three or more levels introduce an input-dependent branch;
+    there the tangent is the selected level's, with no contribution from the
+    switching set, and the selection is taken under ``stop_gradient`` so it can
+    never pick up a spurious tangent.
+
+    Returns ``(result, estimate)``; the caller reports the estimate instead of
+    silently returning the last level when the schedule has not converged.
+    """
+    previous = level_result(*levels[0])
+    if len(levels) == 1:
+        return previous, jnp.abs(level_potential(*levels[0]))
+
+    def advance(prior, level):
+        current = level_result(*level)
+        axes = tuple(range(current.ndim - 1))
+        change = jnp.sqrt(jnp.sum((current - prior) ** 2, axis=axes)) / scale_fn(current)
+        return current, jnp.maximum(jnp.abs(level_potential(*level)), change**2)
+
+    best, estimate = advance(previous, levels[1])
+    for level in levels[2:]:
+
+        def update(state, level=level):
+            current, current_estimate = state
+            candidate, candidate_estimate = advance(current, level)
+            refine = jax.lax.stop_gradient(current_estimate) > tol
+            mask = refine.reshape((1,) * (candidate.ndim - 1) + refine.shape)
+            return (
+                jnp.where(mask, candidate, current),
+                jnp.where(refine, candidate_estimate, current_estimate),
+            )
+
+        best, estimate = jax.lax.cond(
+            jnp.any(jax.lax.stop_gradient(estimate) > tol),
+            update,
+            lambda state: state,
+            (best, estimate),
+        )
+    return best, estimate
+
+
 def computeB_offsurface_adaptive_schedule(
     X_src,
     BdotN,
@@ -687,13 +762,15 @@ def computeB_offsurface_adaptive_schedule(
     ext: bool = True,
     chunk_size: int = 1024,
     target_chunk_size: int | None = None,
+    return_estimate: bool = False,
 ):
     """JIT-friendly adaptive off-surface evaluation with fixed refinement schedule.
 
     The refinement schedule is provided as a static tuple of (Nt, Np) pairs.
     Shapes are static per-level, so this function can be JIT-compiled with
-    ``levels`` marked static. The method updates the result only while the
-    double-layer self-test error exceeds the tolerance.
+    ``levels`` marked static.  The level is chosen by the calibrated estimate of
+    :func:`_refine_by_estimate`; ``return_estimate`` also returns that estimate,
+    per target and dimensionless, to compare with ``10**-digits``.
     """
     X_src = jnp.asarray(X_src)
     BdotN = jnp.asarray(BdotN)
@@ -708,26 +785,29 @@ def computeB_offsurface_adaptive_schedule(
     tol = 10.0 ** (-digits)
     sign = 1.0 if ext else -1.0
 
-    def eval_level(nt, npol):
+    def level_geometry(nt, npol):
         X_lvl = resample(X_src, nt0, np0, nt, npol)
-        BdotN_lvl = resample(BdotN[None, ...], nt0, np0, nt, npol)[0]
-        J_lvl = resample(J, nt0, np0, nt, npol)
-
         dX = grad2d(X_lvl, nt, npol)
         normal, area_elem = surf_normal_area_elem(dX, X_lvl)
+        return X_lvl, normal, area_elem
 
-        ones = jnp.ones((nt, npol), dtype=X_lvl.dtype)
+    def level_potential(nt, npol):
+        X_lvl, normal, area_elem = level_geometry(nt, npol)
         U = laplace_dx_u_eval(
             X_lvl,
             normal,
             Xt,
-            ones,
+            jnp.ones((nt, npol), dtype=X_lvl.dtype),
             area_elem,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
         )
-        U = jnp.asarray(U).reshape(-1)
-        err = jnp.minimum(jnp.abs(1.0 + U), jnp.abs(U))
+        return jnp.asarray(U).reshape(-1)
+
+    def level_result(nt, npol):
+        X_lvl, _, area_elem = level_geometry(nt, npol)
+        BdotN_lvl = resample(BdotN[None, ...], nt0, np0, nt, npol)[0]
+        J_lvl = resample(J, nt0, np0, nt, npol)
 
         gradG = laplace_fxd_u_eval(
             X_lvl,
@@ -745,35 +825,17 @@ def computeB_offsurface_adaptive_schedule(
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
         )
-        return sign * (gradG + bs), err
+        return sign * (gradG + bs)
 
-    nt_init, np_init = levels[0]
-    B_best, err_best = eval_level(int(nt_init), int(np_init))
-
-    for nt, npol in levels[1:]:
-        nt_i = int(nt)
-        np_i = int(npol)
-
-        def update(state):
-            B_prev, err_prev = state
-            B_level, err_level = eval_level(nt_i, np_i)
-            refine = err_prev > tol
-            return (
-                jnp.where(refine[None, :], B_level, B_prev),
-                jnp.where(refine, err_level, err_prev),
-            )
-
-        def keep(state):
-            return state
-
-        B_best, err_best = jax.lax.cond(
-            jnp.any(err_best > tol),
-            update,
-            keep,
-            operand=(B_best, err_best),
-        )
-
-    return B_best
+    field_scale = source_field_scale(BdotN, J)
+    B_best, estimate = _refine_by_estimate(
+        level_result,
+        level_potential,
+        tuple((int(nt), int(npol)) for nt, npol in levels),
+        tol,
+        lambda _: field_scale,
+    )
+    return (B_best, estimate) if return_estimate else B_best
 
 
 def computeGradB_offsurface_adaptive_schedule(
@@ -787,8 +849,14 @@ def computeGradB_offsurface_adaptive_schedule(
     ext: bool = True,
     chunk_size: int = 1024,
     target_chunk_size: int | None = None,
+    return_estimate: bool = False,
 ):
-    """JIT-friendly adaptive off-surface GradB evaluation with fixed schedule."""
+    """JIT-friendly adaptive off-surface GradB evaluation with fixed schedule.
+
+    The level is chosen by the calibrated estimate of
+    :func:`_refine_by_estimate`; ``return_estimate`` also returns that estimate,
+    per target and dimensionless, to compare with ``10**-digits``.
+    """
     X_src = jnp.asarray(X_src)
     BdotN = jnp.asarray(BdotN)
     J = jnp.asarray(J)
@@ -802,26 +870,29 @@ def computeGradB_offsurface_adaptive_schedule(
     tol = 10.0 ** (-digits)
     sign = 1.0 if ext else -1.0
 
-    def eval_level(nt, npol):
+    def level_geometry(nt, npol):
         X_lvl = resample(X_src, nt0, np0, nt, npol)
-        BdotN_lvl = resample(BdotN[None, ...], nt0, np0, nt, npol)[0]
-        J_lvl = resample(J, nt0, np0, nt, npol)
-
         dX = grad2d(X_lvl, nt, npol)
         normal, area_elem = surf_normal_area_elem(dX, X_lvl)
+        return X_lvl, normal, area_elem
 
-        ones = jnp.ones((nt, npol), dtype=X_lvl.dtype)
+    def level_potential(nt, npol):
+        X_lvl, normal, area_elem = level_geometry(nt, npol)
         U = laplace_dx_u_eval(
             X_lvl,
             normal,
             Xt,
-            ones,
+            jnp.ones((nt, npol), dtype=X_lvl.dtype),
             area_elem,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
         )
-        U = jnp.asarray(U).reshape(-1)
-        err = jnp.minimum(jnp.abs(1.0 + U), jnp.abs(U))
+        return jnp.asarray(U).reshape(-1)
+
+    def level_result(nt, npol):
+        X_lvl, _, area_elem = level_geometry(nt, npol)
+        BdotN_lvl = resample(BdotN[None, ...], nt0, np0, nt, npol)[0]
+        J_lvl = resample(J, nt0, np0, nt, npol)
 
         gradG_J = laplace_fxd2_u_eval_vec(
             X_lvl,
@@ -844,35 +915,20 @@ def computeGradB_offsurface_adaptive_schedule(
         gradgradG_BdotN = jnp.asarray(gradgradG_BdotN).reshape((3, 3, Xt.shape[1]))
 
         gradB = curl_single_layer_gradient(gradG_J) + gradgradG_BdotN
-        return gradB * sign, err
+        return gradB * sign
 
-    nt_init, np_init = levels[0]
-    grad_best, err_best = eval_level(int(nt_init), int(np_init))
+    def gradient_scale(gradB):
+        rms = jnp.sqrt(jnp.mean(jnp.sum(gradB**2, axis=(0, 1))))
+        return jnp.where(rms > 0.0, rms, 1.0)
 
-    for nt, npol in levels[1:]:
-        nt_i = int(nt)
-        np_i = int(npol)
-
-        def update(state):
-            grad_prev, err_prev = state
-            grad_level, err_level = eval_level(nt_i, np_i)
-            refine = err_prev > tol
-            return (
-                jnp.where(refine[None, None, :], grad_level, grad_prev),
-                jnp.where(refine, err_level, err_prev),
-            )
-
-        def keep(state):
-            return state
-
-        grad_best, err_best = jax.lax.cond(
-            jnp.any(err_best > tol),
-            update,
-            keep,
-            operand=(grad_best, err_best),
-        )
-
-    return grad_best
+    grad_best, estimate = _refine_by_estimate(
+        level_result,
+        level_potential,
+        tuple((int(nt), int(npol)) for nt, npol in levels),
+        tol,
+        gradient_scale,
+    )
+    return (grad_best, estimate) if return_estimate else grad_best
 
 
 def _offsurface_adapt_grid(
