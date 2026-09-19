@@ -123,10 +123,13 @@ def test_identities_hold_outside_and_inside_at_the_default_schedule(nfp, nphi):
     assert error.max() <= tol, error.max()
     assert np.asarray(estimate).max() <= tol
 
+    # the double-layer potential is -1 inside, not 0: the estimate must be
+    # side-agnostic, or every interior target reports an error of order one
     inside = _offsets(surface, -2.0 * h)
-    value = np.asarray(field.B_plasma_xyz(inside))
-    error = np.linalg.norm(value + _z_axis_field(inside), axis=1) / scale
+    value, estimate = field.B_plasma_xyz(inside, return_estimate=True)
+    error = np.linalg.norm(np.asarray(value) + _z_axis_field(inside), axis=1) / scale
     assert error.max() <= tol, error.max()
+    assert np.asarray(estimate).max() <= tol, np.asarray(estimate).max()
 
 
 def test_the_schedule_does_not_stop_at_an_unresolved_level():
@@ -156,6 +159,28 @@ def test_the_schedule_does_not_stop_at_an_unresolved_level():
         rtol=1e-12, atol=1e-14)
 
 
+@pytest.mark.parametrize("side", [1.0, -1.0])
+def test_an_under_resolved_schedule_says_so_on_both_sides(side):
+    """Coarse levels miss the digits outside and inside, and the estimate reports it."""
+    digits = 4
+    surface = _rotating_ellipse(13, 16, 5)
+    resolved = _field(surface, digits)
+    coarse = resolved.schedule_levels[0]
+    field = _field(surface, digits, ((coarse[0] // 2, coarse[1] // 2), coarse))
+    points = _offsets(surface, side * 2.0 * _spacing(resolved))
+    exact = _ring_field(points) if side > 0 else -_z_axis_field(points)
+
+    value, estimate = field.B_plasma_xyz(points, return_estimate=True)
+    error = np.linalg.norm(np.asarray(value) - exact, axis=1) / _scale(surface)
+    assert error.max() > 10.0**-digits
+    assert np.asarray(estimate).max() > 10.0**-digits
+    # while the resolved schedule passes on the same targets, with a small estimate
+    value, estimate = resolved.B_plasma_xyz(points, return_estimate=True)
+    error = np.linalg.norm(np.asarray(value) - exact, axis=1) / _scale(surface)
+    assert error.max() <= 10.0**-digits, error.max()
+    assert np.asarray(estimate).max() <= 10.0**-digits, np.asarray(estimate).max()
+
+
 def test_two_level_schedule_is_branch_free_and_differentiable():
     """With two levels the result is always the finest, so the VJP is exact."""
     surface = _rotating_ellipse(8, 8, 3)
@@ -179,7 +204,8 @@ def test_unconverged_targets_report_their_achieved_error():
     """A target the schedule cannot resolve reports it instead of staying silent."""
     surface = _rotating_ellipse(12, 12, 3)
     field = _field(surface, 6)
-    near = _offsets(surface, 0.25 * _spacing(field))
+    h = _spacing(field)
+    near = np.concatenate([_offsets(surface, 0.25 * h), _offsets(surface, -0.25 * h)])
     value, estimate = field.B_plasma_xyz(near, return_estimate=True)
     assert np.all(np.asarray(estimate) > 1e-6)
     assert np.all(np.isfinite(np.asarray(value)))

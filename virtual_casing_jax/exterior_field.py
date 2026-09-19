@@ -169,7 +169,8 @@ def default_schedule_levels(nphi: int, ntheta: int, nfp: int):
 
     Two levels are enough: the coarse level exists only to supply the
     Richardson term of the error estimate, and it costs a quarter of the fine
-    one.  A schedule of one level is accepted and reports ``|U|`` alone.
+    one.  A schedule of one level is accepted and reports the double-layer
+    quadrature error alone.
     """
     full = max(int(nphi), 1) * max(int(nfp), 1)
     ntheta = max(int(ntheta), 1)
@@ -462,10 +463,11 @@ class VirtualCasingExteriorField:
     def B_plasma_error_estimate(self, xyz, *, branch: Branch | None = None):
         """Achieved relative error of :func:`B_plasma_xyz`, per target.
 
-        Compare with ``10**-config.digits``.  Targets inside the source surface,
-        or closer to it than about two source-grid spacings, report an error of
-        order one: the periodic trapezoid rule is near-singular there and the
-        direct schedule is not the right tool, whatever level it reaches.
+        Compare with ``10**-config.digits``.  Valid on either side of the
+        source surface.  A target closer to it than about two source-grid
+        spacings reports a large error: the periodic trapezoid rule is
+        near-singular there and the direct schedule is not the right tool,
+        whatever level it reaches.
         """
         return self.B_plasma_xyz(xyz, branch=branch, return_estimate=True)[1]
 

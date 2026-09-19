@@ -692,21 +692,24 @@ def _refine_by_estimate(level_result, level_potential, levels, tol, scale_fn):
     """Refine while a calibrated error estimate, not a self-test, exceeds ``tol``.
 
     The estimate of the level-``k`` result is
-    ``max(|U_k|, (|F_k - F_(k-1)| / scale) ** 2)``.  ``U_k`` is the single-layer
-    potential of a unit density, exactly zero at a target outside the surface,
-    so ``|U_k|`` measures the quadrature error directly; halving the spacing
-    squares the periodic-trapezoid error factor ``exp(-2 pi d / h)``, so the
-    squared relative change between two levels extrapolates the finer level's
-    error from the coarser one.  ``scale_fn(result)`` supplies the denominator
-    that makes the change dimensionless: the field schedule divides by the RMS
-    field on the source surface, the scale this estimate was calibrated
-    against, while the gradient schedule, for which no such absolute scale
-    exists, divides by the RMS of its own result over the targets.
+    ``max(q_k, (|F_k - F_(k-1)| / scale) ** 2)`` with
+    ``q_k = min(|U_k|, |1 + U_k|)``.  ``U_k`` is the double-layer potential of
+    a unit density, exactly ``0`` at a target outside the surface and ``-1``
+    inside it, so ``q_k`` measures the quadrature error directly on either
+    side.  Halving the spacing squares the periodic-trapezoid error factor
+    ``exp(-2 pi d / h)``, so the squared relative change between two levels
+    extrapolates the finer level's error from the coarser one; it is this term
+    that sees how well the layer densities themselves are resolved.
+    ``scale_fn(result)`` supplies the denominator that makes the change
+    dimensionless: the field schedule divides by the RMS field on the source
+    surface, the scale this estimate was calibrated against, while the
+    gradient schedule, for which no such absolute scale exists, divides by the
+    RMS of its own result over the targets.
 
-    This replaces the double-layer self-test ``min(|1 + U|, |U|)`` that chose
-    the level before.  That test is blind to the resolution of the layer
-    densities and accepts ``U`` near either ``0`` or ``-1``, and was measured
-    keeping a level whose relative error reached 0.3 against a 1e-4 tolerance.
+    ``q_k`` alone is the double-layer self-test that chose the level before.
+    Being side-agnostic is right; relying on it alone was not: it is blind to
+    the resolution of the layer densities, and was measured keeping a level
+    whose relative error reached 0.3 against a 1e-4 tolerance.
 
     Derivatives: with a two-level schedule the loop below is empty, so the
     result is unconditionally the finest level -- a fixed function of the
@@ -719,15 +722,19 @@ def _refine_by_estimate(level_result, level_potential, levels, tol, scale_fn):
     Returns ``(result, estimate)``; the caller reports the estimate instead of
     silently returning the last level when the schedule has not converged.
     """
+    def quadrature_error(level):
+        potential = level_potential(*level)
+        return jnp.minimum(jnp.abs(potential), jnp.abs(1.0 + potential))
+
     previous = level_result(*levels[0])
     if len(levels) == 1:
-        return previous, jnp.abs(level_potential(*levels[0]))
+        return previous, quadrature_error(levels[0])
 
     def advance(prior, level):
         current = level_result(*level)
         axes = tuple(range(current.ndim - 1))
         change = jnp.sqrt(jnp.sum((current - prior) ** 2, axis=axes)) / scale_fn(current)
-        return current, jnp.maximum(jnp.abs(level_potential(*level)), change**2)
+        return current, jnp.maximum(quadrature_error(level), change**2)
 
     best, estimate = advance(previous, levels[1])
     for level in levels[2:]:
