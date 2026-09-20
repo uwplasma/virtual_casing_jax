@@ -21,7 +21,7 @@ from virtual_casing_jax.error_estimate import (
 )
 
 from test_offsurface_level_choice import (  # noqa: E402
-    _field, _offsets, _rotating_ellipse, _scale,
+    _field, _offsets, _ring_field, _rotating_ellipse, _scale,
 )
 
 NFP, NPHI, NTHETA = 3, 32, 32
@@ -299,3 +299,79 @@ def test_evaluate_matches_an_explicit_mode_sum(setup):
     # derivatives=False returns the position alone, unchanged
     np.testing.assert_allclose(series.evaluate(theta, phi, derivatives=False),
                                position, rtol=0.0, atol=0.0)
+
+
+# ---------------------------------------------------------------------------
+# plan_levels: the grid the estimate picks must deliver, judged by the known
+# answer rather than by the estimate that chose it.
+# ---------------------------------------------------------------------------
+
+
+def _identity_error(surface, levels, points, digits=12):
+    """Relative error of the exterior identity: outside, B_plasma is the ring field."""
+    value = np.asarray(_field(surface, digits, levels).B_plasma_xyz(points))
+    exact = _ring_field(points)
+    return float(np.max(np.linalg.norm(value - exact, axis=1) / _scale(surface)))
+
+
+def test_a_planned_grid_meets_the_identity_it_was_sized_for():
+    """End-to-end: size for 5 digits, then check the KNOWN answer, not the estimate.
+
+    Letting the estimate certify the grid it chose would be circular; the
+    rotating-ellipse oracle has an exact answer outside, so the achieved error
+    is measurable independently.
+    """
+    from virtual_casing_jax.error_estimate import plan_levels
+
+    surface = _rotating_ellipse(24, 24, 3)
+    points = _offsets(surface, 0.30, count=12)
+    levels, reported = plan_levels(surface, points, digits=5, order=0)
+
+    assert len(levels) == 1, levels
+    assert reported <= 1e-5
+    assert _identity_error(surface, levels, points) <= 1e-5
+
+
+def test_planning_from_a_subset_matches_planning_from_all(setup):
+    """The worst target sets the grid, so the closest few give the same answer."""
+    from virtual_casing_jax.error_estimate import plan_levels
+
+    surface = _rotating_ellipse(24, 24, 3)
+    spread = np.concatenate([_offsets(surface, d, count=8)
+                             for d in (0.08, 0.15, 0.3, 0.6)])
+    everything, _ = plan_levels(surface, spread, digits=5, order=0, subset=None)
+    closest, _ = plan_levels(surface, spread, digits=5, order=0, subset=8)
+    assert closest == everything, (closest, everything)
+
+
+def test_a_higher_derivative_order_asks_for_a_finer_grid(setup):
+    """Sizing for the field alone does not deliver the same digits for its curvature."""
+    from virtual_casing_jax.error_estimate import plan_levels
+
+    surface = _rotating_ellipse(24, 24, 3)
+    points = _offsets(surface, 0.25, count=8)
+    for_field, _ = plan_levels(surface, points, digits=5, order=0)
+    for_curvature, _ = plan_levels(surface, points, digits=5, order=2)
+    assert for_curvature[0][0] >= for_field[0][0]
+    assert for_curvature[0][1] >= for_field[0][1]
+
+
+def test_a_planned_level_leaves_no_branch_in_the_schedule():
+    """One level means no lax.cond, so the VJP is that grid's and nothing else."""
+    from virtual_casing_jax.error_estimate import plan_levels
+
+    surface = _rotating_ellipse(12, 12, 3)
+    points = _offsets(surface, 0.35, count=4)
+    levels, _ = plan_levels(surface, points, digits=4, order=0)
+    field = _field(surface, 12, levels)
+    pinned = _field(surface, 12, (levels[0],))
+
+    def total(scale, target):
+        return jnp.sum(target.B_plasma_xyz(jnp.asarray(points) * scale))
+
+    np.testing.assert_allclose(float(jax.grad(total)(1.0, field)),
+                               float(jax.grad(total)(1.0, pinned)), rtol=1e-12)
+    step = 1e-6
+    finite = (total(1.0 + step, field) - total(1.0 - step, field)) / (2.0 * step)
+    np.testing.assert_allclose(float(jax.grad(total)(1.0, field)), float(finite),
+                               rtol=2e-5)
