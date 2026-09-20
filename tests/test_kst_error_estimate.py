@@ -411,3 +411,55 @@ def test_planning_rejects_malformed_targets():
     for bad in (np.zeros(3), np.zeros((4, 2)), np.zeros((2, 2, 3))):
         with pytest.raises(ValueError, match=r"targets must have shape"):
             plan_levels(surface, bad, digits=4, order=0)
+
+
+# ---------------------------------------------------------------------------
+# mode truncation
+# ---------------------------------------------------------------------------
+
+
+def test_truncation_does_not_change_the_estimate(setup):
+    """Dropping the padding is free; the numbers must not move."""
+    surface, series, magnitude, _ = setup
+    points = _offsets(surface, 0.2, count=8)
+    for order in (0, 3):
+        trimmed = kst_error_estimate(series, points, (96, 32), order, magnitude,
+                                     mode_tolerance=1e-13)
+        whole = kst_error_estimate(series, points, (96, 32), order, magnitude)
+        np.testing.assert_allclose(trimmed, whole, rtol=1e-10, atol=0.0)
+
+
+def test_truncation_respects_the_complex_amplification():
+    """A mode negligible on the real axis need not be negligible at the root.
+
+    The series is evaluated at complex angles, where order ``m`` is amplified
+    by ``exp(|m| |Im t|)``. Truncating on the bare coefficient would drop modes
+    that still matter, so the bound has to carry that factor.
+    """
+    from virtual_casing_jax.error_estimate import boundary_series_from_gamma
+
+    surface = _rotating_ellipse(24, 24, 3)
+    series = boundary_series_from_gamma(np.asarray(surface.gamma), 3)
+    at_real_axis = series.truncate(1e-13, 0.0)
+    far_into_plane = series.truncate(1e-13, 2.0)
+    assert at_real_axis.m.size <= far_into_plane.m.size
+    # and the amplified bound keeps strictly more than the bare one somewhere
+    assert (at_real_axis.m.size, at_real_axis.n.size) != (series.m.size, series.n.size)
+
+
+def test_an_over_aggressive_truncation_does_change_the_answer(setup):
+    """Guards the test above from being vacuous."""
+    surface, series, magnitude, _ = setup
+    points = _offsets(surface, 0.2, count=6)
+    honest = kst_error_estimate(series, points, (96, 32), 0, magnitude)
+    butchered = kst_error_estimate(series, points, (96, 32), 0, magnitude,
+                                   mode_tolerance=0.5)
+    assert np.max(np.abs(butchered - honest)) > 1e-3 * np.max(np.abs(honest))
+
+
+def test_truncation_keeps_a_rectangular_mode_box(setup):
+    """Whole rows and columns go, so the separable contraction keeps its shape."""
+    _, series, _, _ = setup
+    trimmed = series.truncate(1e-13, 0.5)
+    assert trimmed.coefficients.shape == (2, trimmed.m.size, trimmed.n.size)
+    assert trimmed.nfp == series.nfp

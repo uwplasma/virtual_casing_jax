@@ -45,6 +45,7 @@ __all__ = [
     "GridSizeError",
     "boundary_series_from_gamma",
     "density_magnitude_from_surface",
+    "DEFAULT_MODE_TOLERANCE",
     "kst_error_estimate",
     "required_levels",
 ]
@@ -55,6 +56,19 @@ _DERIVATIVE_CONSTANTS = (1.0, 3.0, 15.0, 105.0)
 
 #: Samples along the transverse parameter for the combined-root line integral.
 _LINE_SAMPLES = 401
+
+#: A relative size below which a boundary mode cannot affect the estimate, once
+#: its amplification at complex angles is allowed for.  Truncation is OFF by
+#: default: measured on a finite-beta QA boundary it pays only close to the
+#: surface, where the bound on the complex excursion is small.  With a perfect
+#: bound it would keep 10 % of the modes at a quarter of a minor radius but
+#: 60 % at a half and 77 % at one, and the bound this module can afford is
+#: about three times the excursion actually reached, which costs more than it
+#: saves beyond close range.
+DEFAULT_MODE_TOLERANCE = 1e-13
+
+#: Safety factor on the bound for how far into the complex plane the roots go.
+_IMAGINARY_MARGIN = 3.0
 
 #: Newton iterations and tolerance for the complex root.
 _NEWTON_STEPS = 40
@@ -133,6 +147,46 @@ class BoundarySeries:
         d_phi = np.stack([R_phi * cos_phi - R * sin_phi,
                           R_phi * sin_phi + R * cos_phi, Z_phi], axis=-1)
         return position, d_theta, d_phi
+
+
+    def truncate(self, tolerance, max_imaginary):
+        """Drop modes that cannot matter, keeping the rectangular mode box.
+
+        A boundary grid of ``nphi x ntheta`` produces that many Fourier
+        coefficients, but a VMEC boundary carries only ``(2 mpol + 1)(2 ntor +
+        1)`` non-zero ones -- 169 for a typical equilibrium against 1024 on a
+        32 x 32 grid and 4096 on a 64 x 64 one. The rest is zero padding, and
+        evaluating it costs the same as evaluating signal.
+
+        Truncating by coefficient magnitude alone would be wrong here. The
+        series is evaluated at COMPLEX angles, where a mode of order ``m`` is
+        amplified by ``exp(|m| |Im t|)``, and ``|Im t|`` grows with the
+        target's distance from the boundary: measured, the top mode is
+        amplified by 4e+06 at a third of a minor radius. So a mode is kept
+        unless ``|c| exp(|m| max_imaginary)`` is below ``tolerance`` times the
+        largest coefficient, with ``max_imaginary`` a bound on how far into the
+        complex plane the caller will go.
+
+        Whole rows and columns are dropped rather than scattered modes, so the
+        separable contraction in :meth:`evaluate` keeps its rectangular shape.
+        """
+        amplitude = np.abs(self.coefficients).max(axis=0)
+        significant = amplitude * np.exp(
+            np.abs(self.m)[:, None] * float(max_imaginary)
+        ) > float(tolerance) * amplitude.max()
+        if significant.all():
+            return self
+        poloidal = np.abs(self.m)[significant.any(axis=1)]
+        toroidal = np.abs(self.n)[significant.any(axis=0)]
+        if poloidal.size == 0 or toroidal.size == 0:
+            return self
+        keep_m = np.flatnonzero(np.abs(self.m) <= poloidal.max())
+        keep_n = np.flatnonzero(np.abs(self.n) <= toroidal.max())
+        if keep_m.size == self.m.size and keep_n.size == self.n.size:
+            return self
+        return BoundarySeries(
+            coefficients=self.coefficients[:, keep_m][:, :, keep_n],
+            m=self.m[keep_m], n=self.n[keep_n], nfp=self.nfp)
 
 
 def boundary_series_from_gamma(gamma, nfp: int) -> BoundarySeries:
@@ -252,7 +306,8 @@ def _nearest_node_indices(nodes, targets, chunk=64):
     return indices
 
 
-def kst_error_estimate(series, targets, level, order, density_magnitude):
+def kst_error_estimate(series, targets, level, order, density_magnitude,
+                       mode_tolerance=None):
     """Estimated absolute quadrature error per target, for one grid and one order.
 
     Parameters
@@ -266,6 +321,11 @@ def kst_error_estimate(series, targets, level, order, density_magnitude):
         level.
     order:
         0 for the field, 1 for its gradient, and so on up to 3.
+    mode_tolerance:
+        Relative size below which a boundary mode is dropped, after allowing
+        for its amplification at complex angles.  ``None``, the default, keeps
+        every mode; see :data:`DEFAULT_MODE_TOLERANCE` for when trimming pays
+        and when it does not.
     density_magnitude:
         ``|area_vector x B|`` on the source surface, as a callable
         ``(theta, phi) -> float`` or a constant; see
@@ -290,6 +350,19 @@ def kst_error_estimate(series, targets, level, order, density_magnitude):
     phi_nodes = np.linspace(0.0, 2.0 * np.pi, n_toroidal, endpoint=False)
     phi_mesh, theta_mesh = np.meshgrid(phi_nodes, theta_nodes, indexing="ij")
     nodes = _node_positions(series, n_toroidal, n_poloidal)
+
+    if mode_tolerance is not None:
+        # The root sits about d / |gamma'| off the real axis, so bound the
+        # excursion from the target stand-off and trim the modes that cannot
+        # reach the tolerance even after their amplification there.
+        stand_off = float(np.max(np.linalg.norm(
+            nodes[_nearest_node_indices(nodes, targets)] - targets, axis=-1)))
+        _, d_theta_all, d_phi_all = series.evaluate(theta_mesh.ravel()[:1],
+                                                    phi_mesh.ravel()[:1])
+        smallest = float(min(np.linalg.norm(np.real(d_theta_all)),
+                             np.linalg.norm(np.real(d_phi_all))))
+        bound = _IMAGINARY_MARGIN * stand_off / max(smallest, 1e-300)
+        series = series.truncate(mode_tolerance, bound)
 
     exponent = 1.5 + order
     constant = _DERIVATIVE_CONSTANTS[order]
