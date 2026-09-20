@@ -60,6 +60,7 @@ from .error_estimate import (
     boundary_series_from_gamma,
     density_magnitude_from_surface,
     kst_error_estimate,
+    plan_levels,
     required_levels,
 )
 from .vmec_jax_bridge import surface_field_from_vmec_jax
@@ -150,6 +151,7 @@ __all__ = [
     "boundary_series_from_gamma",
     "density_magnitude_from_surface",
     "kst_error_estimate",
+    "plan_levels",
     "required_levels",
     "NearSurfaceTaylorPlan",
     "VirtualCasingExteriorField",

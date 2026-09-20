@@ -386,3 +386,79 @@ def required_levels(series, targets, *, digits, order, density_magnitude, scale,
             raise GridSizeError(tolerance, order, cap, achieved, n_toroidal, n_poloidal)
         n_toroidal *= growth
         n_poloidal *= growth
+
+
+def plan_levels(surface_data, targets, *, digits, order=0, subset=64, cap=4096,
+                growth=2, safety=DEFAULT_SAFETY, base_level=None):
+    """Size the source grid for a batch of targets, once, before tracing.
+
+    Returns a one-level schedule to hand to ``ExteriorFieldConfig(levels=...)``.
+    Because the level is then fixed, the quadrature is a plain function of its
+    inputs: no ``lax.cond`` anywhere in the schedule, and the JVP and VJP of the
+    returned field are exactly that grid's, for a schedule of any length rather
+    than only the two-level default.
+
+    **Call this once per target batch, never per evaluation.** It runs on
+    concrete geometry outside any trace, like
+    :meth:`VirtualCasingJAX.plan_precision`, and it costs far more than a field
+    evaluation: sizing from 64 targets takes about 0.1 s against 0.04 s for a
+    512-target field call. Planning inside an evaluation loop, or inside an
+    optimiser iteration, would dominate the run and would also re-concretize
+    geometry that the caller has gone to some trouble to keep traced.
+
+    **The grid is set by the worst target, which is the one closest to the
+    boundary.** The estimate falls monotonically with distance, so sizing from
+    the ``subset`` targets nearest the surface gives the same answer as sizing
+    from all of them, at a fraction of the cost; ``subset=None`` uses every
+    target and is equivalent, merely more expensive. The default is deliberately
+    conservative in the sense that matters: it keeps the *closest* targets, not
+    a random sample.
+
+    Parameters
+    ----------
+    surface_data:
+        The boundary the exterior field will be built from.
+    targets:
+        ``(n, 3)`` Cartesian points the caller intends to evaluate at. Only
+        their geometry is used, so a representative batch is enough.
+    digits, order:
+        The accuracy wanted, and the highest derivative order that will be
+        taken of the result. ``order`` matters: each spatial derivative
+        multiplies the quadrature error by roughly the grid count, so a grid
+        sized for the field alone will not deliver the same digits for
+        ``gradgradB``.
+    subset:
+        How many of the closest targets to size from, or ``None`` for all.
+
+    Raises
+    ------
+    GridSizeError
+        When the requested accuracy needs a grid beyond ``cap``, rather than
+        returning ``cap`` and letting the caller believe the tolerance was met.
+    """
+    from .exterior_field import default_schedule_levels
+
+    gamma = np.asarray(surface_data.gamma)
+    nfp = max(int(surface_data.nfp), 1)
+    series = boundary_series_from_gamma(gamma, nfp)
+    magnitude = density_magnitude_from_surface(surface_data)
+    field = np.asarray(surface_data.B_total)
+    scale = float(np.sqrt(np.mean(np.sum(field**2, axis=0))))
+
+    if base_level is None:
+        base_level = default_schedule_levels(
+            int(gamma.shape[1]), int(gamma.shape[2]), nfp)[0]
+
+    targets = np.asarray(targets, dtype=float)
+    if targets.ndim != 2 or targets.shape[1] != 3:
+        raise ValueError(f"targets must have shape (n, 3), got {targets.shape}")
+    if subset is not None and len(targets) > int(subset):
+        nodes = _node_positions(series, int(base_level[0]), int(base_level[1]))
+        nearest = _nearest_node_indices(nodes, targets)
+        distance = np.linalg.norm(nodes[nearest] - targets, axis=-1)
+        targets = targets[np.argsort(distance)[: int(subset)]]
+
+    return required_levels(
+        series, targets, digits=digits, order=order,
+        density_magnitude=magnitude, scale=scale, base_level=base_level,
+        cap=cap, growth=growth, safety=safety)
