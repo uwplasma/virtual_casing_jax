@@ -375,3 +375,29 @@ def test_a_planned_level_leaves_no_branch_in_the_schedule():
     finite = (total(1.0 + step, field) - total(1.0 - step, field)) / (2.0 * step)
     np.testing.assert_allclose(float(jax.grad(total)(1.0, field)), float(finite),
                                rtol=2e-5)
+
+
+def test_planning_is_opt_in_and_the_accuracy_request_is_mandatory():
+    """No default `digits`, and the default schedule is untouched by this module.
+
+    A caller who never plans gets exactly today's behaviour. Giving `digits` a
+    default would silently re-decide the accuracy of everyone who adopts
+    planning without stating a request; on the nfp 2/3/5 oracles the smallest
+    default that never degrades today's achieved error is 5, and it costs about
+    1.7x the default schedule on average, so the choice is not free and should
+    not be made on a caller's behalf.
+    """
+    import inspect
+
+    from virtual_casing_jax.error_estimate import plan_levels
+
+    parameter = inspect.signature(plan_levels).parameters["digits"]
+    assert parameter.default is inspect.Parameter.empty
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+    surface = _rotating_ellipse(12, 12, 3)
+    with pytest.raises(TypeError):
+        plan_levels(surface, _offsets(surface, 0.3, count=2))
+
+    # and the unplanned schedule is still the nfp-sized two-level default
+    assert _field(surface, 4).schedule_levels == ((36, 12), (72, 24))
