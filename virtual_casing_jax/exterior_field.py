@@ -442,6 +442,82 @@ class VirtualCasingExteriorField:
             return self._vc.compute_internal_gradB_offsurf(self.B_total, **kwargs)
         return self._vc.compute_external_gradB_offsurf(self.B_total, **kwargs)
 
+    def level_sources(self, level=None):
+        """Quadrature nodes and layer densities of one schedule level.
+
+        Returns ``(nodes, sheet_current, charge)`` with shapes ``(m, 3)``,
+        ``(m, 3)`` and ``(m,)``, the densities already carrying the quadrature
+        weight, ready for
+        :func:`~virtual_casing_jax.derivative_kernels.layer_derivatives`.
+
+        ``level`` defaults to the finest of the schedule -- the one the
+        two-level default returns unconditionally.  The densities are built the
+        way the schedule builds them: the field is recovered pointwise on the
+        base grid and interpolated, and the products are formed on the level
+        with the level's own normal, so these nodes reproduce
+        :meth:`B_plasma_xyz` rather than approximating it.
+        """
+        from .integrals import _level_densities
+        from .surface_ops import grad2d, resample, surf_normal_area_elem
+
+        level = self.schedule_levels[-1] if level is None else level
+        n_toroidal, n_poloidal = int(level[0]), int(level[1])
+        # The sources depend only on B_total and the level, both fixed for a
+        # given field, while rebuilding them costs about one field evaluation --
+        # enough to make a single closed-form call look slower than the nested
+        # derivative it replaces.  Cache them, except under tracing, where
+        # holding a tracer past its trace would be worse than recomputing.
+        key = (n_toroidal, n_poloidal)
+        cached = getattr(self, "_level_source_cache", None)
+        if cached is None:
+            cached = self._level_source_cache = {}
+        traced = isinstance(jnp.asarray(self.B_total), jax.core.Tracer)
+        if not traced and key in cached:
+            return cached[key]
+        source, charge_base, current_base = self._vc._offsurface_densities(
+            self.B_total, int(self.config.digits))
+        nt0, np0 = int(source.shape[1]), int(source.shape[2])
+        normal_base = surf_normal_area_elem(grad2d(source, nt0, np0), source)[0]
+
+        nodes = resample(source, nt0, np0, n_toroidal, n_poloidal)
+        normal, area = surf_normal_area_elem(
+            grad2d(nodes, n_toroidal, n_poloidal), nodes)
+        charge, current = _level_densities(
+            charge_base, current_base, normal_base, normal,
+            nt0, np0, n_toroidal, n_poloidal)
+
+        # the package stores J = B x n; the sheet current is n x B
+        sheet_current = -jnp.asarray(current)
+        weight = jnp.asarray(area).reshape(-1)
+        result = (jnp.asarray(nodes).reshape(3, -1).T,
+                  sheet_current.reshape(3, -1).T * weight[:, None],
+                  jnp.asarray(charge).reshape(-1) * weight)
+        if not traced:
+            cached[key] = result
+        return result
+
+    def B_and_derivatives_xyz(self, xyz, *, order=0, level=None, source_chunk=4096):
+        """``B`` and its spatial derivatives at ``xyz``, from the closed forms.
+
+        One traversal of the source sum returns every order up to ``order``,
+        where nesting ``jacfwd`` over :meth:`B_plasma_xyz` costs one traversal
+        per order and differentiates the quadrature rather than the field.
+
+        Returns a tuple of ``order + 1`` arrays, the ``k``-th with shape
+        ``xyz.shape[:-1] + (3,) * (k + 1)``.
+        """
+        from .derivative_kernels import layer_derivatives
+
+        points = jnp.asarray(xyz)
+        if points.ndim == 1:
+            points = points[None, :]
+        flat = points.reshape((-1, 3)).astype(self.gamma.dtype)
+        nodes, sheet_current, charge = self.level_sources(level)
+        values = layer_derivatives(flat, nodes, sheet_current, charge,
+                                   order=int(order), source_chunk=int(source_chunk))
+        leading = jnp.asarray(xyz).shape[:-1]
+        return tuple(v.reshape(leading + v.shape[1:]) for v in values)
+
     def B_plasma_xyz(self, xyz, *, branch: Branch | None = None, return_estimate: bool = False):
         """Return the virtual-casing plasma-current field in Cartesian components.
 
