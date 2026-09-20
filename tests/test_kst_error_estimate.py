@@ -401,3 +401,13 @@ def test_planning_is_opt_in_and_the_accuracy_request_is_mandatory():
 
     # and the unplanned schedule is still the nfp-sized two-level default
     assert _field(surface, 4).schedule_levels == ((36, 12), (72, 24))
+
+
+def test_planning_rejects_malformed_targets():
+    """The one branch in `plan_levels` its other tests never reach."""
+    from virtual_casing_jax.error_estimate import plan_levels
+
+    surface = _rotating_ellipse(12, 12, 3)
+    for bad in (np.zeros(3), np.zeros((4, 2)), np.zeros((2, 2, 3))):
+        with pytest.raises(ValueError, match=r"targets must have shape"):
+            plan_levels(surface, bad, digits=4, order=0)
