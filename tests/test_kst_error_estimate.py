@@ -140,3 +140,162 @@ def test_an_impossible_request_is_refused_not_silently_capped(setup):
     assert info.value.cap == 256
     assert info.value.achieved > 1e-10
     assert "raise the cap" in str(info.value)
+
+
+# ---------------------------------------------------------------------------
+# The readable transcription of the paper, kept as the reference the fast
+# implementation is checked against.  It is deliberately a line-by-line
+# rendering of Error estimate 4 and eqs. 101-104, one target at a time, so the
+# correspondence with arXiv:2012.06870 can be read off it directly.  The shipped
+# code is vectorised over targets; this is what says the vectorisation did not
+# change the numerics.
+# ---------------------------------------------------------------------------
+
+
+def _reference_root(series, target, theta, phi, direction, guess):
+    variable = (phi if direction == "phi" else theta) + 1j * guess
+    for _ in range(40):
+        if direction == "phi":
+            position, _, derivative = series.evaluate(theta, variable)
+        else:
+            position, derivative, _ = series.evaluate(variable, phi)
+        separation = position - target
+        value = np.sum(separation * separation)
+        slope = 2.0 * np.sum(separation * derivative)
+        if slope == 0.0:
+            break
+        step = value / slope
+        variable = variable - step
+        if abs(step) < 1e-13:
+            break
+    if direction == "phi":
+        position, _, derivative = series.evaluate(theta, variable)
+    else:
+        position, derivative, _ = series.evaluate(variable, phi)
+    separation = position - target
+    denominator = 2.0 * np.sum(separation * derivative)
+    factor = np.inf if denominator == 0.0 else 1.0 / denominator
+    return variable, factor, float(np.sqrt(np.sum(np.abs(separation) ** 2)))
+
+
+def _reference_line_integral(count, separation, parallel, transverse, imaginary_part):
+    s = np.linspace(-np.pi, np.pi, 401)
+    a = ((separation @ separation) + 2.0 * (separation @ transverse) * s
+         + (transverse @ transverse) * s**2)
+    b = 2.0 * (separation @ parallel) + 2.0 * (transverse @ parallel) * s
+    c = parallel @ parallel
+    imaginary = np.sqrt(np.maximum(4.0 * a * c - b**2, 0.0)) / (2.0 * c)
+    shifted = imaginary_part - imaginary[200] + imaginary
+    return float(np.trapezoid(np.exp(-count * shifted), s))
+
+
+def _reference_estimate(series, targets, level, order, density_magnitude):
+    """One target at a time, exactly as the paper writes it."""
+    import math
+
+    n_toroidal, n_poloidal = int(level[0]), int(level[1])
+    targets = np.asarray(targets, dtype=float)
+    theta_nodes = np.linspace(0.0, 2.0 * np.pi, n_poloidal, endpoint=False)
+    phi_nodes = np.linspace(0.0, 2.0 * np.pi, n_toroidal, endpoint=False)
+    phi_mesh, theta_mesh = np.meshgrid(phi_nodes, theta_nodes, indexing="ij")
+    nodes = np.real(series.evaluate(theta_mesh.ravel(), phi_mesh.ravel())[0])
+
+    exponent = 1.5 + order
+    constant = (1.0, 3.0, 15.0, 105.0)[order]
+    estimates = np.empty(len(targets))
+    for index, target in enumerate(targets):
+        nearest = int(np.argmin(((nodes - target) ** 2).sum(axis=1)))
+        theta_star = float(theta_mesh.ravel()[nearest])
+        phi_star = float(phi_mesh.ravel()[nearest])
+        position, d_theta, d_phi = series.evaluate(theta_star, phi_star)
+        separation = np.real(position) - target
+        distance = float(np.linalg.norm(separation))
+        magnitude = (density_magnitude(theta_star, phi_star)
+                     if callable(density_magnitude) else float(density_magnitude))
+        total = 0.0
+        for direction, count, parallel, transverse in (
+            ("phi", n_toroidal, np.real(d_phi), np.real(d_theta)),
+            ("theta", n_poloidal, np.real(d_theta), np.real(d_phi)),
+        ):
+            guess = distance / max(np.linalg.norm(parallel), 1e-300)
+            root, factor, root_distance = _reference_root(
+                series, target, theta_star, phi_star, direction, guess)
+            numerator = constant * magnitude * root_distance ** (order + 1) / (4.0 * np.pi)
+            total += (numerator * abs(factor) ** exponent
+                      * 4.0 * np.pi * count ** (exponent - 1.0) / math.gamma(exponent)
+                      * _reference_line_integral(
+                          count, separation, parallel, transverse, abs(root.imag)))
+        estimates[index] = total
+    return estimates
+
+
+@pytest.mark.parametrize("order", [0, 1, 2, 3])
+def test_the_vectorised_estimate_matches_the_paper_transcription(setup, order):
+    """The fast path is the same numerics, not merely the same ballpark."""
+    surface, series, magnitude, _ = setup
+    points = np.concatenate([_offsets(surface, 0.05, count=6),
+                             _offsets(surface, 0.2, count=6)])
+    fast = kst_error_estimate(series, points, (96, 32), order, magnitude)
+    slow = _reference_estimate(series, points, (96, 32), order, magnitude)
+    np.testing.assert_allclose(fast, slow, rtol=1e-12, atol=0.0)
+
+
+def test_the_vectorised_estimate_is_independent_of_batching(setup):
+    """Targets must not influence one another through the vectorisation."""
+    surface, series, magnitude, _ = setup
+    points = _offsets(surface, 0.15, count=9)
+    together = kst_error_estimate(series, points, (96, 32), 1, magnitude)
+    apart = np.concatenate([
+        kst_error_estimate(series, points[i:i + 1], (96, 32), 1, magnitude)
+        for i in range(len(points))])
+    np.testing.assert_allclose(together, apart, rtol=1e-12, atol=0.0)
+
+
+def test_node_positions_by_fft_match_the_direct_series(setup):
+    """The FFT shortcut for the level's nodes is the same grid, not an approximation."""
+    from virtual_casing_jax.error_estimate import _node_positions
+
+    _, series, _, _ = setup
+    for level in ((60, 16), (120, 32)):
+        n_toroidal, n_poloidal = level
+        theta = np.linspace(0.0, 2.0 * np.pi, n_poloidal, endpoint=False)
+        phi = np.linspace(0.0, 2.0 * np.pi, n_toroidal, endpoint=False)
+        phi_mesh, theta_mesh = np.meshgrid(phi, theta, indexing="ij")
+        direct = np.real(series.evaluate(theta_mesh.ravel(), phi_mesh.ravel())[0])
+        np.testing.assert_allclose(_node_positions(series, *level), direct,
+                                   rtol=0.0, atol=1e-11)
+
+    # a toroidal count that is not a multiple of nfp has no per-period tiling
+    # and must fall back rather than return something plausible but wrong
+    n_toroidal, n_poloidal = 61, 16
+    theta = np.linspace(0.0, 2.0 * np.pi, n_poloidal, endpoint=False)
+    phi = np.linspace(0.0, 2.0 * np.pi, n_toroidal, endpoint=False)
+    phi_mesh, theta_mesh = np.meshgrid(phi, theta, indexing="ij")
+    direct = np.real(series.evaluate(theta_mesh.ravel(), phi_mesh.ravel())[0])
+    np.testing.assert_allclose(_node_positions(series, n_toroidal, n_poloidal),
+                               direct, rtol=0.0, atol=1e-11)
+
+
+def test_evaluate_matches_an_explicit_mode_sum(setup):
+    """The separable contraction is the same series, written faster."""
+    _, series, _, _ = setup
+    theta = np.array([0.3, 1.7, 4.2 + 0.11j])
+    phi = np.array([0.2 + 0.05j, 1.1, 2.4])
+
+    position, d_theta, d_phi = series.evaluate(theta, phi)
+    for index in range(len(theta)):
+        phase = np.exp(1j * (series.m[:, None] * theta[index]
+                             + series.n[None, :] * phi[index]))
+        R, Z = (series.coefficients * phase).sum(axis=(1, 2))
+        R_t, Z_t = (series.coefficients * (1j * series.m)[:, None] * phase).sum(axis=(1, 2))
+        R_p, Z_p = (series.coefficients * (1j * series.n)[None, :] * phase).sum(axis=(1, 2))
+        c, s = np.cos(phi[index]), np.sin(phi[index])
+        np.testing.assert_allclose(position[index], [R * c, R * s, Z], rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(d_theta[index], [R_t * c, R_t * s, Z_t],
+                                   rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(d_phi[index], [R_p * c - R * s, R_p * s + R * c, Z_p],
+                                   rtol=1e-12, atol=1e-14)
+
+    # derivatives=False returns the position alone, unchanged
+    np.testing.assert_allclose(series.evaluate(theta, phi, derivatives=False),
+                               position, rtol=0.0, atol=0.0)

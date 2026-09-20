@@ -100,19 +100,35 @@ class BoundarySeries:
     n: np.ndarray  # toroidal wavenumbers including the nfp factor
     nfp: int
 
-    def evaluate(self, theta, phi):
-        """Position and both parameter derivatives; ``theta`` or ``phi`` may be complex."""
+    def evaluate(self, theta, phi, derivatives=True):
+        """Position and both parameter derivatives; ``theta`` or ``phi`` may be complex.
+
+        The phase separates, ``exp(i(m theta + n phi)) = exp(i m theta)
+        exp(i n phi)``, so the mode sum is a batched bilinear form rather than a
+        reduction over a ``(targets, 2, m, n)`` temporary.  With
+        ``derivatives=False`` only the position is formed, which is all Newton
+        needs while it is iterating.
+        """
         theta = np.asarray(theta, dtype=complex)
-        phase = np.exp(1j * (np.multiply.outer(theta, self.m)[..., :, None]
-                             + np.multiply.outer(np.asarray(phi, dtype=complex), self.n)[..., None, :]))
-        rz = np.sum(self.coefficients * phase[..., None, :, :], axis=(-2, -1))
-        rz_theta = np.sum(self.coefficients * (1j * self.m)[:, None] * phase[..., None, :, :], axis=(-2, -1))
-        rz_phi = np.sum(self.coefficients * (1j * self.n)[None, :] * phase[..., None, :, :], axis=(-2, -1))
+        phi = np.asarray(phi, dtype=complex)
+        theta_phase = np.exp(1j * np.multiply.outer(theta, self.m))
+        phi_phase = np.exp(1j * np.multiply.outer(phi, self.n))
+
+        def contract(weighted):
+            return np.einsum("...m,kmn,...n->...k", theta_phase, weighted, phi_phase,
+                             optimize=True)
+
+        rz = contract(self.coefficients)
         R, Z = rz[..., 0], rz[..., 1]
+        cos_phi, sin_phi = np.cos(phi), np.sin(phi)
+        position = np.stack([R * cos_phi, R * sin_phi, Z], axis=-1)
+        if not derivatives:
+            return position
+
+        rz_theta = contract(self.coefficients * (1j * self.m)[:, None])
+        rz_phi = contract(self.coefficients * (1j * self.n)[None, :])
         R_theta, Z_theta = rz_theta[..., 0], rz_theta[..., 1]
         R_phi, Z_phi = rz_phi[..., 0], rz_phi[..., 1]
-        cos_phi, sin_phi = np.cos(np.asarray(phi, dtype=complex)), np.sin(np.asarray(phi, dtype=complex))
-        position = np.stack([R * cos_phi, R * sin_phi, Z], axis=-1)
         d_theta = np.stack([R_theta * cos_phi, R_theta * sin_phi, Z_theta], axis=-1)
         d_phi = np.stack([R_phi * cos_phi - R * sin_phi,
                           R_phi * sin_phi + R * cos_phi, Z_phi], axis=-1)
@@ -134,42 +150,106 @@ def boundary_series_from_gamma(gamma, nfp: int) -> BoundarySeries:
     return BoundarySeries(coefficients=coefficients, m=m, n=n, nfp=int(nfp))
 
 
-def _complex_root(series, target, theta, phi, direction, guess):
-    """Newton for the complex root of ``|gamma - x|^2`` along one parameter line."""
+def _complex_roots(series, targets, theta, phi, direction, guess):
+    """Newton for the complex root of ``|gamma - x|^2``, all targets at once.
+
+    ``theta``, ``phi`` and ``guess`` are ``(n,)``: one parameter line per
+    target, through its own nearest node.  The iteration count is fixed rather
+    than broken out of per target, so every target follows the same code path;
+    converged entries take steps of order the rounding error and stay put.
+    """
     variable = (phi if direction == "phi" else theta) + 1j * guess
-    for _ in range(_NEWTON_STEPS):
+
+    def evaluate(current):
         if direction == "phi":
-            position, _, derivative = series.evaluate(theta, variable)
+            position, _, derivative = series.evaluate(theta, current)
         else:
-            position, derivative, _ = series.evaluate(variable, phi)
-        separation = position - target
-        value = np.sum(separation * separation)
-        slope = 2.0 * np.sum(separation * derivative)
-        if slope == 0.0:
-            break
-        step = value / slope
+            position, derivative, _ = series.evaluate(current, phi)
+        return position, derivative
+
+    for _ in range(_NEWTON_STEPS):
+        position, derivative = evaluate(variable)  # noqa: F841 - both used below
+        separation = position - targets
+        value = np.sum(separation * separation, axis=-1)
+        slope = 2.0 * np.sum(separation * derivative, axis=-1)
+        stalled = slope == 0.0
+        step = np.where(stalled, 0.0, value / np.where(stalled, 1.0, slope))
         variable = variable - step
-        if abs(step) < _NEWTON_TOLERANCE:
+        if np.all(np.abs(step) < _NEWTON_TOLERANCE):
             break
-    if direction == "phi":
-        position, _, derivative = series.evaluate(theta, variable)
-    else:
-        position, derivative, _ = series.evaluate(variable, phi)
-    separation = position - target
-    denominator = 2.0 * np.sum(separation * derivative)
-    factor = np.inf if denominator == 0.0 else 1.0 / denominator
-    return variable, factor, float(np.sqrt(np.sum(np.abs(separation) ** 2)))
+
+    position, derivative = evaluate(variable)
+    separation = position - targets
+    denominator = 2.0 * np.sum(separation * derivative, axis=-1)
+    singular = denominator == 0.0
+    factor = np.where(singular, np.inf, 1.0 / np.where(singular, 1.0, denominator))
+    return variable, factor, np.sqrt(np.sum(np.abs(separation) ** 2, axis=-1))
 
 
-def _combined_root_line_integral(count, separation, parallel, transverse, imaginary_part):
-    """``int exp(-n Im t0(s)) ds`` with the combined linear root model (KST eqs. 101-104)."""
+def _combined_root_line_integrals(count, separation, parallel, transverse, imaginary_part):
+    """``int exp(-n Im t0(s)) ds`` per target, combined linear root model (KST eqs. 101-104)."""
     s = np.linspace(-np.pi, np.pi, _LINE_SAMPLES)
-    a = (separation @ separation) + 2.0 * (separation @ transverse) * s + (transverse @ transverse) * s**2
-    b = 2.0 * (separation @ parallel) + 2.0 * (transverse @ parallel) * s
-    c = parallel @ parallel
+    row = s[None, :]
+
+    def dot(u, v):
+        return np.sum(u * v, axis=-1)[:, None]
+
+    a = (dot(separation, separation) + 2.0 * dot(separation, transverse) * row
+         + dot(transverse, transverse) * row**2)
+    b = 2.0 * dot(separation, parallel) + 2.0 * dot(transverse, parallel) * row
+    c = dot(parallel, parallel)
     imaginary = np.sqrt(np.maximum(4.0 * a * c - b**2, 0.0)) / (2.0 * c)
-    shifted = imaginary_part - imaginary[_LINE_SAMPLES // 2] + imaginary
-    return float(np.trapezoid(np.exp(-count * shifted), s))
+    shifted = (imaginary_part[:, None] - imaginary[:, _LINE_SAMPLES // 2, None] + imaginary)
+    return np.trapezoid(np.exp(-count * shifted), s, axis=-1)
+
+
+def _node_positions(series, n_toroidal, n_poloidal):
+    """Cartesian source nodes of a level, by FFT upsampling rather than mode sums.
+
+    The nodes are a regular grid, so evaluating the series pointwise at each of
+    them costs O(nodes x modes) -- 1.3 s for a 320 x 64 level of a 32 x 32
+    boundary, which dominated everything else in the estimate. Zero-padding the
+    coefficients and inverting the transform gives the same numbers in
+    O(nodes log nodes).
+
+    ``R`` and ``Z`` have period ``2 pi / nfp`` in ``phi``, so the full torus is
+    one period tiled ``nfp`` times.  When the toroidal count is not a multiple
+    of ``nfp`` that tiling does not exist and the direct evaluation is used.
+    """
+    nfp = max(int(series.nfp), 1)
+    if n_toroidal % nfp:
+        theta = np.linspace(0.0, 2.0 * np.pi, n_poloidal, endpoint=False)
+        phi = np.linspace(0.0, 2.0 * np.pi, n_toroidal, endpoint=False)
+        phi_mesh, theta_mesh = np.meshgrid(phi, theta, indexing="ij")
+        return np.real(series.evaluate(theta_mesh.ravel(), phi_mesh.ravel())[0])
+
+    per_period = n_toroidal // nfp
+    poloidal_index = (np.rint(series.m).astype(int) % n_poloidal)
+    # the stored toroidal wavenumbers carry the nfp factor; the per-period
+    # sample index sees only the integer part
+    toroidal_index = (np.rint(series.n / nfp).astype(int) % per_period)
+
+    values = []
+    for coefficients in series.coefficients:
+        padded = np.zeros((n_poloidal, per_period), dtype=complex)
+        np.add.at(padded, (poloidal_index[:, None], toroidal_index[None, :]), coefficients)
+        values.append(np.real(np.fft.ifft2(padded)) * (n_poloidal * per_period))
+
+    R = np.tile(values[0].T, (nfp, 1))
+    Z = np.tile(values[1].T, (nfp, 1))
+    phi = np.linspace(0.0, 2.0 * np.pi, n_toroidal, endpoint=False)[:, None]
+    return np.stack([(R * np.cos(phi)).ravel(),
+                     (R * np.sin(phi)).ravel(), Z.ravel()], axis=-1)
+
+
+def _nearest_node_indices(nodes, targets, chunk=64):
+    """Index of the closest source node to each target, in bounded memory."""
+    indices = np.empty(len(targets), dtype=int)
+    for begin in range(0, len(targets), chunk):
+        block = targets[begin:begin + chunk]
+        squared = ((nodes[None, :, :] - block[:, None, :]) ** 2).sum(axis=-1)
+        indices[begin:begin + chunk] = np.argmin(squared, axis=1)
+    return indices
 
 
 def kst_error_estimate(series, targets, level, order, density_magnitude):
@@ -209,36 +289,36 @@ def kst_error_estimate(series, targets, level, order, density_magnitude):
     theta_nodes = np.linspace(0.0, 2.0 * np.pi, n_poloidal, endpoint=False)
     phi_nodes = np.linspace(0.0, 2.0 * np.pi, n_toroidal, endpoint=False)
     phi_mesh, theta_mesh = np.meshgrid(phi_nodes, theta_nodes, indexing="ij")
-    nodes, _, _ = series.evaluate(theta_mesh.ravel(), phi_mesh.ravel())
-    nodes = np.real(nodes)
+    nodes = _node_positions(series, n_toroidal, n_poloidal)
 
     exponent = 1.5 + order
     constant = _DERIVATIVE_CONSTANTS[order]
-    estimates = np.empty(len(targets))
-    for index, target in enumerate(targets):
-        nearest = int(np.argmin(((nodes - target) ** 2).sum(axis=1)))
-        theta_star = float(theta_mesh.ravel()[nearest])
-        phi_star = float(phi_mesh.ravel()[nearest])
-        position, d_theta, d_phi = series.evaluate(theta_star, phi_star)
-        separation = np.real(position) - target
-        distance = float(np.linalg.norm(separation))
-        magnitude = (density_magnitude(theta_star, phi_star)
-                     if callable(density_magnitude) else float(density_magnitude))
+    flat_theta, flat_phi = theta_mesh.ravel(), phi_mesh.ravel()
+    nearest = _nearest_node_indices(nodes, targets)
+    theta_star, phi_star = flat_theta[nearest], flat_phi[nearest]
 
-        total = 0.0
-        for direction, count, parallel, transverse in (
-            ("phi", n_toroidal, np.real(d_phi), np.real(d_theta)),
-            ("theta", n_poloidal, np.real(d_theta), np.real(d_phi)),
-        ):
-            guess = distance / max(np.linalg.norm(parallel), 1e-300)
-            root, factor, root_distance = _complex_root(
-                series, target, theta_star, phi_star, direction, guess)
-            numerator = constant * magnitude * root_distance ** (order + 1) / (4.0 * np.pi)
-            total += (numerator * abs(factor) ** exponent
+    position, d_theta, d_phi = series.evaluate(theta_star, phi_star)
+    separation = np.real(position) - targets
+    distance = np.linalg.norm(separation, axis=-1)
+    if callable(density_magnitude):
+        magnitude = np.array([density_magnitude(t, p)
+                              for t, p in zip(theta_star, phi_star)])
+    else:
+        magnitude = np.full(len(targets), float(density_magnitude))
+
+    estimates = np.zeros(len(targets))
+    for direction, count, parallel, transverse in (
+        ("phi", n_toroidal, np.real(d_phi), np.real(d_theta)),
+        ("theta", n_poloidal, np.real(d_theta), np.real(d_phi)),
+    ):
+        guess = distance / np.maximum(np.linalg.norm(parallel, axis=-1), 1e-300)
+        root, factor, root_distance = _complex_roots(
+            series, targets, theta_star, phi_star, direction, guess)
+        numerator = constant * magnitude * root_distance ** (order + 1) / (4.0 * np.pi)
+        estimates += (numerator * np.abs(factor) ** exponent
                       * 4.0 * np.pi * count ** (exponent - 1.0) / math.gamma(exponent)
-                      * _combined_root_line_integral(
-                          count, separation, parallel, transverse, abs(root.imag)))
-        estimates[index] = total
+                      * _combined_root_line_integrals(
+                          count, separation, parallel, transverse, np.abs(root.imag)))
     return estimates
 
 
