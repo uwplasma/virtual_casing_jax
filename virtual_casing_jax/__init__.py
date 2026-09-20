@@ -63,6 +63,7 @@ from .error_estimate import (
     plan_levels,
     required_levels,
 )
+from .derivative_kernels import MAX_DERIVATIVE_ORDER, layer_derivatives
 from .vmec_jax_bridge import surface_field_from_vmec_jax
 from .grid_export import (
     evaluate_on_rphiz_grid,
@@ -152,6 +153,8 @@ __all__ = [
     "density_magnitude_from_surface",
     "kst_error_estimate",
     "plan_levels",
+    "layer_derivatives",
+    "MAX_DERIVATIVE_ORDER",
     "required_levels",
     "NearSurfaceTaylorPlan",
     "VirtualCasingExteriorField",
