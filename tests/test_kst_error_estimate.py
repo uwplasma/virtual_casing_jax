@@ -88,6 +88,45 @@ def test_the_estimate_falls_with_distance_and_rises_with_order(setup):
     assert by_order == sorted(by_order)
 
 
+@pytest.mark.parametrize("order", [0, 1, 2, 3])
+def test_far_targets_get_a_negligible_estimate_without_numerical_noise(setup, order):
+    """Ten to 1e5 surface sizes out, the estimate is finite, tiny and silent.
+
+    The Newton start ``d / |gamma'|`` put far targets so far into the complex
+    plane that the boundary series overflowed: every call printed a few
+    hundred RuntimeWarnings and returned NaN, which a caller comparing the
+    estimate with a tolerance reads as a miss.  A field one hundred surface
+    sizes away is resolved to rounding by any grid.
+    """
+    import warnings
+
+    surface, series, magnitude, _ = setup
+    for distance in (10.0, 100.0, 1.0e3, 1.0e5):
+        points = _offsets(surface, distance, count=4)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            estimate = kst_error_estimate(series, points, (96, 32), order, magnitude)
+        assert np.all(np.isfinite(estimate)), (distance, estimate)
+        assert estimate.max() <= 1e-30, (distance, estimate)
+
+
+def test_an_estimate_that_cannot_be_formed_near_the_surface_is_not_small(setup, monkeypatch):
+    """Unknown is reported as a miss near the surface, and as negligible far away."""
+    import virtual_casing_jax.error_estimate as module
+
+    surface, series, magnitude, _ = setup
+    original = module._complex_roots
+
+    def failed(*args):
+        root, factor, distance = original(*args)
+        return root, np.full_like(factor, np.nan), distance
+
+    monkeypatch.setattr(module, "_complex_roots", failed)
+    near = kst_error_estimate(series, _offsets(surface, 0.05, count=3), (96, 32), 1, magnitude)
+    far = kst_error_estimate(series, _offsets(surface, 50.0, count=3), (96, 32), 1, magnitude)
+    assert np.all(np.isinf(near)) and np.all(far == 0.0)
+
+
 def test_the_jacobian_is_part_of_the_density(setup):
     """Passing |n x B| rather than |area_vector x B| is wrong by the Jacobian.
 

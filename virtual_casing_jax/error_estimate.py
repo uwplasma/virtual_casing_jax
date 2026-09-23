@@ -60,6 +60,18 @@ _LINE_SAMPLES = 401
 _NEWTON_STEPS = 40
 _NEWTON_TOLERANCE = 1e-13
 
+#: Largest ``|wavenumber x Im(angle)|`` Newton may evaluate the boundary series
+#: at.  The series grows like ``exp(|k| Im)`` off the real axis and the root
+#: condition squares it, so ``2 x 300`` stays inside double precision.
+_EXPONENT_CAP = 300.0
+
+#: A target at least this many of the level's largest node spacings away has
+#: a periodic-trapezoid error below ``exp(-2 pi x 10)``, about 1e-27 of the
+#: field, so an estimate that cannot be formed there is reported as zero.
+#: Closer in, one that cannot be formed is reported as infinite: unknown is
+#: never reported as small.
+_FAR_SPACINGS = 10.0
+
 
 class GridSizeError(RuntimeError):
     """The requested accuracy needs a grid larger than the cap allows.
@@ -158,7 +170,13 @@ def _complex_roots(series, targets, theta, phi, direction, guess):
     than broken out of per target, so every target follows the same code path;
     converged entries take steps of order the rounding error and stay put.
     """
-    variable = (phi if direction == "phi" else theta) + 1j * guess
+    wavenumbers = series.n if direction == "phi" else series.m
+    ceiling = _EXPONENT_CAP / max(float(np.max(np.abs(wavenumbers))), 1.0)
+
+    def clamp(current):
+        return np.real(current) + 1j * np.clip(np.imag(current), -ceiling, ceiling)
+
+    variable = clamp((phi if direction == "phi" else theta) + 1j * guess)
 
     def evaluate(current):
         if direction == "phi":
@@ -174,7 +192,7 @@ def _complex_roots(series, targets, theta, phi, direction, guess):
         slope = 2.0 * np.sum(separation * derivative, axis=-1)
         stalled = slope == 0.0
         step = np.where(stalled, 0.0, value / np.where(stalled, 1.0, slope))
-        variable = variable - step
+        variable = clamp(variable - step)
         if np.all(np.abs(step) < _NEWTON_TOLERANCE):
             break
 
@@ -183,6 +201,9 @@ def _complex_roots(series, targets, theta, phi, direction, guess):
     denominator = 2.0 * np.sum(separation * derivative, axis=-1)
     singular = denominator == 0.0
     factor = np.where(singular, np.inf, 1.0 / np.where(singular, 1.0, denominator))
+    # A root pinned at the ceiling is not a root: mark it so the caller can
+    # decide from the target's real distance instead of trusting it.
+    factor = np.where(np.abs(np.imag(variable)) >= ceiling, np.nan, factor)
     return variable, factor, np.sqrt(np.sum(np.abs(separation) ** 2, axis=-1))
 
 
@@ -200,7 +221,9 @@ def _combined_root_line_integrals(count, separation, parallel, transverse, imagi
     c = dot(parallel, parallel)
     imaginary = np.sqrt(np.maximum(4.0 * a * c - b**2, 0.0)) / (2.0 * c)
     shifted = (imaginary_part[:, None] - imaginary[:, _LINE_SAMPLES // 2, None] + imaginary)
-    return np.trapezoid(np.exp(-count * shifted), s, axis=-1)
+    # Im t0 is a distance from the real axis: the linear model may dip below
+    # zero away from its centre, but the root it stands for cannot.
+    return np.trapezoid(np.exp(-count * np.maximum(shifted, 0.0)), s, axis=-1)
 
 
 def _node_positions(series, n_toroidal, n_poloidal):
@@ -311,15 +334,29 @@ def kst_error_estimate(series, targets, level, order, density_magnitude):
         ("phi", n_toroidal, np.real(d_phi), np.real(d_theta)),
         ("theta", n_poloidal, np.real(d_theta), np.real(d_phi)),
     ):
-        guess = distance / np.maximum(np.linalg.norm(parallel, axis=-1), 1e-300)
+        # |gamma(t) - x|^2 = 0 puts the root about asinh(d / |gamma'|) off the
+        # real axis: d / |gamma'| near the surface, only logarithmic far away.
+        # The linear guess alone started far targets so far out that the
+        # series overflowed and the estimate came back NaN.
+        guess = np.arcsinh(distance / np.maximum(np.linalg.norm(parallel, axis=-1), 1e-300))
         root, factor, root_distance = _complex_roots(
             series, targets, theta_star, phi_star, direction, guess)
-        numerator = constant * magnitude * root_distance ** (order + 1) / (4.0 * np.pi)
-        estimates += (numerator * np.abs(factor) ** exponent
-                      * 4.0 * np.pi * count ** (exponent - 1.0) / math.gamma(exponent)
-                      * _combined_root_line_integrals(
-                          count, separation, parallel, transverse, np.abs(root.imag)))
-    return estimates
+        line = _combined_root_line_integrals(
+            count, separation, parallel, transverse, np.abs(root.imag))
+        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+            estimates += (constant * magnitude * root_distance ** (order + 1) / (4.0 * np.pi)
+                          * np.abs(factor) ** exponent
+                          * 4.0 * np.pi * count ** (exponent - 1.0) / math.gamma(exponent)
+                          * line)
+
+    # Far from the surface the root leaves the strip where the interpolated
+    # boundary means anything, and the product above overflows or is NaN.
+    # The error there is negligible; near the surface it is unknown.
+    grid = nodes.reshape(n_toroidal, n_poloidal, 3)
+    spacing = max(float(np.max(np.linalg.norm(np.roll(grid, -1, axis=0) - grid, axis=-1))),
+                  float(np.max(np.linalg.norm(np.roll(grid, -1, axis=1) - grid, axis=-1))))
+    far = distance >= _FAR_SPACINGS * spacing
+    return np.where(np.isfinite(estimates), estimates, np.where(far, 0.0, np.inf))
 
 
 def density_magnitude_from_surface(surface_data):
