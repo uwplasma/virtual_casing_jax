@@ -152,6 +152,12 @@ target coordinates through host memory for correctness on systems without GPU
 peer-to-peer access; use ``B_xyz`` directly inside an existing jitted device
 graph.
 
+``VirtualCasingExteriorField.level_sources`` likewise caches only concrete
+source nodes and layer densities.  A traced source field bypasses the cache,
+and source construction traced by an outer ``jax.jit`` is not written to it.
+Those values stay in the active graph, so source-field gradients remain live
+and a JIT-first call cannot poison later eager calls.
+
 Off-surface Schedule + JIT
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -471,9 +471,15 @@ class VirtualCasingExteriorField:
         cached = getattr(self, "_level_source_cache", None)
         if cached is None:
             cached = self._level_source_cache = {}
-        traced = isinstance(jnp.asarray(self.B_total), jax.core.Tracer)
-        if not traced and key in cached:
-            return cached[key]
+        traced_source = isinstance(jnp.asarray(self.B_total), jax.core.Tracer)
+        if not traced_source and key in cached:
+            value = cached[key]
+            if not any(isinstance(leaf, jax.core.Tracer)
+                       for leaf in jax.tree_util.tree_leaves(value)):
+                return value
+            # A cache created by an older/JIT-first call must never let a
+            # trace-local value escape into this or a later transformation.
+            del cached[key]
         source, charge_base, current_base = self._vc._offsurface_densities(
             self.B_total, int(self.config.digits))
         nt0, np0 = int(source.shape[1]), int(source.shape[2])
@@ -492,7 +498,9 @@ class VirtualCasingExteriorField:
         result = (jnp.asarray(nodes).reshape(3, -1).T,
                   sheet_current.reshape(3, -1).T * weight[:, None],
                   jnp.asarray(charge).reshape(-1) * weight)
-        if not traced:
+        if not traced_source and not any(
+                isinstance(leaf, jax.core.Tracer)
+                for leaf in jax.tree_util.tree_leaves(result)):
             cached[key] = result
         return result
 
