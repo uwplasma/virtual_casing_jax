@@ -1194,7 +1194,8 @@ def laplace_fxd_u_eval_singular(
         return jax.vmap(lambda ii: values[:, ii])(idx)
 
     if orient is None:
-        orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
+        # orientation of the raw (d/dt x d/dp) normals, which the patch correction rebuilds
+        orient = float(surf_normal_area_elem(dX_src, X_src, return_orientation=True)[2])
     invNt = 1.0 / nt
     invNp = 1.0 / npol
 
@@ -1408,7 +1409,8 @@ def laplace_dx_u_eval_singular(
         return jax.vmap(lambda ii: values[:, ii])(idx)
 
     if orient is None:
-        orient = float(normal_orientation(X_src, normal))
+        # `normal` is already flipped outward; the patch correction needs the raw orientation
+        orient = float(surf_normal_area_elem(dX_src, X_src, return_orientation=True)[2])
     invNt = 1.0 / nt
     invNp = 1.0 / npol
 
@@ -1589,7 +1591,8 @@ def laplace_fxd2_u_eval_singular(
         return jax.vmap(lambda ii: values[:, ii])(idx)
 
     if orient is None:
-        orient = float(normal_orientation(X_src, surf_normal_area_elem(dX_src, X_src)[0]))
+        # orientation of the raw (d/dt x d/dp) normals, which the patch correction rebuilds
+        orient = float(surf_normal_area_elem(dX_src, X_src, return_orientation=True)[2])
     invNt = 1.0 / nt
     invNp = 1.0 / npol
 
