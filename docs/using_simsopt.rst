@@ -40,6 +40,11 @@ and ``plot()`` methods as SIMSOPT. Internally it uses
 ready for parity checks against the C++ backend and for JAX-based
 autodiff once connected to differentiable geometry inputs.
 
+Unlike SIMSOPT, ``from_vmec()`` also accepts non-stellarator-symmetric
+(``lasym = T``) equilibria: the boundary then includes ``rmns``/``zmnc``,
+the field includes ``bsupumns``/``bsupvmns``, and the source grid spans a
+full field period (``half_period=False``).
+
 Examples
 --------
 
