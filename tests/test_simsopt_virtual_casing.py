@@ -151,7 +151,8 @@ def test_extend_normal_field_matches_stellarator_symmetry_and_full_period():
     )
 
 
-def test_from_vmec_follows_simsopt_surface_contract(monkeypatch):
+@pytest.mark.parametrize("lasym", [False, True])
+def test_from_vmec_follows_simsopt_surface_contract(monkeypatch, lasym):
     """Exercise the optional SIMSOPT adapter without a VMEC executable."""
     modules = {
         name: types.ModuleType(name)
@@ -175,7 +176,7 @@ def test_from_vmec_follows_simsopt_surface_contract(monkeypatch):
             self.boundary = object()
             self.wout = types.SimpleNamespace(
                 nfp=2,
-                lasym=False,
+                lasym=lasym,
                 mpol=1,
                 ntor=0,
                 mnmax=1,
@@ -183,6 +184,15 @@ def test_from_vmec_follows_simsopt_surface_contract(monkeypatch):
                 xn=np.array([0]),
                 rmnc=np.array([[2.0]]),
                 zmns=np.array([[0.0]]),
+                rmns=np.array([[0.0]]),
+                zmnc=np.array([[0.0]]),
+                xm_nyq=np.array([0, 1]),
+                xn_nyq=np.array([0, 0]),
+                # Constant along s, so the half-grid extrapolation returns the value.
+                bsupumnc=np.array([[1.0, 1.0], [0.0, 0.0]]),
+                bsupumns=np.array([[0.0, 0.0], [2.0, 2.0]]),
+                bsupvmnc=np.array([[3.0, 3.0], [0.0, 0.0]]),
+                bsupvmns=np.zeros((2, 2)),
             )
 
         def run(self):
@@ -197,14 +207,20 @@ def test_from_vmec_follows_simsopt_surface_contract(monkeypatch):
             self.x = np.zeros(2)
 
         @classmethod
-        def from_nphi_ntheta(cls, *, nphi, ntheta, **_):
+        def from_nphi_ntheta(cls, *, nphi, ntheta, stellsym=True, **_):
+            assert stellsym == (not lasym)
             return cls(nphi, ntheta)
 
         def set_rc(self, *_):
             pass
 
-        def set_zs(self, *_):
-            pass
+        set_zs = set_rs = set_zc = set_rc
+
+        def gammadash1(self):
+            return np.broadcast_to([1.0, 0.0, 0.0], (self.nphi, self.ntheta, 3))
+
+        def gammadash2(self):
+            return np.broadcast_to([0.0, 1.0, 0.0], (self.nphi, self.ntheta, 3))
 
         def gamma(self):
             return np.zeros((self.nphi, self.ntheta, 3))
@@ -223,7 +239,7 @@ def test_from_vmec_follows_simsopt_surface_contract(monkeypatch):
             return 2.0 * B_total
 
     def B_cartesian(_, *, nphi, ntheta, range):
-        assert range == "half period"
+        assert range == "half period" and not lasym
         return np.ones((3, nphi, ntheta))
 
     modules["simsopt.mhd.vmec"].Vmec = FakeVmec
@@ -240,10 +256,15 @@ def test_from_vmec_follows_simsopt_surface_contract(monkeypatch):
         "input.fake", src_nphi=3, digits=3, filename="auto"
     )
 
-    assert vc.src_ntheta == 6
-    assert vc.trgt_nphi_extended == 12
-    assert vc.B_external_normal.shape == (3, 6)
-    assert vc.B_external_normal_extended.shape == (12, 6)
+    ntheta = 3 if lasym else 6
+    assert vc.src_ntheta == ntheta
+    assert vc.trgt_nphi_extended == (6 if lasym else 12)
+    assert vc.B_external_normal.shape == (3, ntheta)
+    assert vc.B_external_normal_extended.shape == (vc.trgt_nphi_extended, ntheta)
+    if lasym:  # B = (B^v d gamma/dphi + B^u d gamma/dtheta) / 2 pi with the sine partners
+        theta = 2 * np.pi * np.arange(ntheta) / ntheta
+        np.testing.assert_allclose(2 * np.pi * vc.B_total[..., 0], 3.0)
+        np.testing.assert_allclose(2 * np.pi * vc.B_total[..., 1], np.broadcast_to(1 + 2 * np.sin(theta), (3, ntheta)))
     assert saved == ["/tmp/vcasing_fake.nc"]
 
 
@@ -505,3 +526,29 @@ def test_stellsym():
     idxs = list(range(1, vc.trgt_nphi // 2, 2))
     np.testing.assert_allclose(vc.trgt_phi[idxs], vc_ss.trgt_phi)
     np.testing.assert_allclose(vc.B_external_normal[idxs, :], vc_ss.B_external_normal, atol=1e-5)
+
+
+@REQUIRES_SIMSOPT
+def test_from_vmec_lasym_with_zero_asymmetry_matches_symmetric_field_period():
+    wout_file = _require_test_files("wout_li383_low_res_reference.nc")
+    kwargs = dict(src_nphi=8, src_ntheta=16, digits=3, filename=None)
+    sym = VirtualCasing.from_vmec(str(wout_file), use_stellsym=False, **kwargs)
+    vmec = Vmec(str(wout_file))
+    vmec.wout.lasym = True
+    for cos, sin in (("rmnc", "rmns"), ("zmns", "zmnc"), ("bsupumnc", "bsupumns"), ("bsupvmnc", "bsupvmns")):
+        setattr(vmec.wout, sin, np.zeros_like(getattr(vmec.wout, cos)))
+    asym = VirtualCasing.from_vmec(vmec, **kwargs)
+    np.testing.assert_allclose(asym.B_total, sym.B_total, rtol=0, atol=1e-14 * np.abs(sym.B_total).max())
+    np.testing.assert_allclose(asym.B_external, sym.B_external, rtol=0, atol=1e-13 * np.abs(sym.B_total).max())
+
+
+@REQUIRES_SIMSOPT
+def test_from_vmec_lasym_wout():
+    vc = VirtualCasing.from_vmec(
+        str(_require_test_files("wout_LandremanSenguptaPlunk_section5p3_reference.nc")),
+        src_nphi=8, src_ntheta=16, digits=3, filename=None,
+    )
+    assert vc.B_external_normal_extended.shape == (8 * 3, 16)
+    Bn = np.sum(vc.B_total * vc.unit_normal, axis=-1)
+    assert np.abs(Bn).max() < 1e-12 * np.linalg.norm(vc.B_total, axis=-1).max()
+    assert np.all(np.isfinite(vc.B_external_normal))

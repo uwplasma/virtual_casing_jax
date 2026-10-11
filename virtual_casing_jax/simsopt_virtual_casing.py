@@ -36,6 +36,21 @@ def _extend_normal_field(Bnormal: np.ndarray, nfp: int, stellsym: bool) -> np.nd
     return np.tile(period, (int(nfp), 1))
 
 
+def _asym_B_cartesian(wout, surf) -> np.ndarray:
+    """SIMSOPT's ``B_cartesian`` with the ``lasym`` sine partners, as (3, nphi, ntheta)."""
+    theta, phi = np.meshgrid(2 * np.pi * surf.quadpoints_theta, 2 * np.pi * surf.quadpoints_phi)
+    angle = wout.xm_nyq[:, None, None] * theta[None] - wout.xn_nyq[:, None, None] * phi[None]
+
+    def edge(c, s):
+        c, s = (1.5 * x[:, -1] - 0.5 * x[:, -2] for x in (c, s))
+        return np.sum(c[:, None, None] * np.cos(angle) + s[:, None, None] * np.sin(angle), axis=0)
+
+    Bsupu = edge(wout.bsupumnc, wout.bsupumns)
+    Bsupv = edge(wout.bsupvmnc, wout.bsupvmns)
+    B = (Bsupv[..., None] * surf.gammadash1() + Bsupu[..., None] * surf.gammadash2()) / (2 * np.pi)
+    return _soa_from_3d(B)
+
+
 class VirtualCasing:
     r"""
     SIMSOPT-compatible VirtualCasing class backed by JAX.
@@ -77,9 +92,8 @@ class VirtualCasing:
 
         vmec.run()
         nfp = vmec.wout.nfp
-        stellsym = (not bool(vmec.wout.lasym)) and use_stellsym
-        if vmec.wout.lasym:
-            raise RuntimeError("virtual casing presently only works for stellarator symmetry")
+        lasym = bool(vmec.wout.lasym)
+        stellsym = (not lasym) and use_stellsym
 
         if src_ntheta is None:
             src_ntheta = int(
@@ -88,6 +102,7 @@ class VirtualCasing:
             logger.info("new src_ntheta: %s", src_ntheta)
 
         ran = "half period" if stellsym else "field period"
+        asym = {"stellsym": False} if lasym else {}
         surf = SurfaceRZFourier.from_nphi_ntheta(
             mpol=vmec.wout.mpol,
             ntor=vmec.wout.ntor,
@@ -95,12 +110,19 @@ class VirtualCasing:
             nphi=src_nphi,
             ntheta=src_ntheta,
             range=ran,
+            **asym,
         )
         for jmn in range(vmec.wout.mnmax):
             surf.set_rc(int(vmec.wout.xm[jmn]), int(vmec.wout.xn[jmn] / nfp), vmec.wout.rmnc[jmn, -1])
             surf.set_zs(int(vmec.wout.xm[jmn]), int(vmec.wout.xn[jmn] / nfp), vmec.wout.zmns[jmn, -1])
+            if lasym:
+                surf.set_rs(int(vmec.wout.xm[jmn]), int(vmec.wout.xn[jmn] / nfp), vmec.wout.rmns[jmn, -1])
+                surf.set_zc(int(vmec.wout.xm[jmn]), int(vmec.wout.xn[jmn] / nfp), vmec.wout.zmnc[jmn, -1])
 
-        Bxyz = B_cartesian(vmec, nphi=src_nphi, ntheta=src_ntheta, range=ran)
+        if lasym:
+            Bxyz = _asym_B_cartesian(vmec.wout, surf)
+        else:
+            Bxyz = B_cartesian(vmec, nphi=src_nphi, ntheta=src_ntheta, range=ran)
         gamma = surf.gamma()
 
         if trgt_nphi is None:
@@ -114,6 +136,7 @@ class VirtualCasing:
             nphi=trgt_nphi,
             ntheta=trgt_ntheta,
             range=ran,
+            **asym,
         )
         trgt_surf.x = surf.x
 
