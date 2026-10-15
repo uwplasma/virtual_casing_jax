@@ -20,15 +20,6 @@ Core types
    :show-inheritance:
    :no-index:
 
-VMEC bridge
------------
-
-.. automodule:: virtual_casing_jax.vmec_jax_bridge
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
 Grid export
 -----------
 

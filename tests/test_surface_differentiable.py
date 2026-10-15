@@ -6,7 +6,7 @@ which needs (a) the adaptive precision (quad sizes + singular-patch dim) frozen 
 static values via :meth:`VirtualCasingJAX.plan_precision` / ``PrecisionPlan`` so
 it does not concretize traced surface values, and (b) a NaN-safe Laplace kernel
 gradient (the self-interaction ``r -> 0`` term).  This is what lets a downstream
-code (e.g. vmec-jax) differentiate a free-boundary objective in the plasma
+code (e.g. VMEX) differentiate a free-boundary objective in the plasma
 boundary, not just the coils.
 """
 

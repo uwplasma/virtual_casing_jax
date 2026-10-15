@@ -32,7 +32,7 @@ class VmecSurfaceFieldData:
     nfp: int
     stellsym: bool
     signgs: int
-    source_convention: str = "vmec_jax"
+    source_convention: str = "vmex"
 
 
 @dataclass(frozen=True)
