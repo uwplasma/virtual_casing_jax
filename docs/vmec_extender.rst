@@ -101,14 +101,13 @@ If VMEX reports that ``virtual_casing_jax`` is missing, run both commands with
 the exact interpreter used to start the VMEX script. Version ``0.0.4`` adds
 the differentiable VMEX exterior-field and fixed-schedule refinement API.
 
-Legacy ``vmec_jax`` bridge
---------------------------
+Removed ``vmec_jax`` bridge
+---------------------------
 
-The module ``virtual_casing_jax.vmec_jax_bridge`` and its entry point
-``surface_field_from_vmec_jax`` are retained only for backwards compatibility
-with the historical ``vmec_jax`` package name. They require that package to be
-importable and are not used by VMEX; new code should build
-:class:`VmecSurfaceFieldData` through VMEX as shown above.
+``surface_field_from_vmec_jax`` and the ``vmec_jax_bridge`` module were
+removed because the ``vmec_jax`` package is retired. Its successor, VMEX
+(``pip install vmex``), builds :class:`VmecSurfaceFieldData` itself through
+``vmex.core.virtual_casing.surface_field_data_from_*`` as shown above.
 
 Validation checks
 -----------------

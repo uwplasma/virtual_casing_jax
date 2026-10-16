@@ -36,11 +36,6 @@ API
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: virtual_casing_jax.vmec_jax_bridge
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. automodule:: virtual_casing_jax.grid_export
    :members:
    :undoc-members:
