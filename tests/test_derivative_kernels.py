@@ -5,6 +5,8 @@ which fixes the sign and weight conventions; the higher orders are then checked
 against nested ``jacfwd`` of that path, which is the thing they replace.
 """
 
+from dataclasses import replace
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -64,6 +66,52 @@ def test_one_pass_returns_every_lower_order(setup):
         alone = single.B_and_derivatives_xyz(points, order=order)[order]
         np.testing.assert_allclose(np.asarray(together[order]), np.asarray(alone),
                                    rtol=1e-12, atol=0.0)
+
+
+def test_jit_first_does_not_cache_tracers(setup):
+    """An outer jit may trace source construction but must not retain its tracers."""
+    surface, field, points = setup
+    single = _field(surface, 6, (field.schedule_levels[-1],))
+    compiled = jax.jit(
+        lambda xyz: single.B_and_derivatives_xyz(xyz, order=2))
+
+    first = compiled(points)
+    second = compiled(points)
+    eager = single.B_and_derivatives_xyz(points, order=2)
+
+    for actual in (first, second):
+        for value, expected in zip(actual, eager):
+            np.testing.assert_allclose(np.asarray(value), np.asarray(expected),
+                                       rtol=1e-12, atol=1e-14)
+    assert single._level_source_cache
+    assert not any(isinstance(leaf, jax.core.Tracer)
+                   for leaf in jax.tree_util.tree_leaves(single._level_source_cache))
+
+    eager_first = _field(surface, 6, (field.schedule_levels[-1],))
+    expected = eager_first.B_and_derivatives_xyz(points, order=2)
+    compiled_after_eager = jax.jit(
+        lambda xyz: eager_first.B_and_derivatives_xyz(xyz, order=2))(points)
+    for value, reference in zip(compiled_after_eager, expected):
+        np.testing.assert_allclose(np.asarray(value), np.asarray(reference),
+                                   rtol=1e-12, atol=1e-14)
+
+
+def test_jitted_closed_forms_keep_source_field_gradients(setup):
+    """Skipping the mutable cache under tracing must not detach B_total."""
+    surface, field, points = setup
+    level = (field.schedule_levels[-1],)
+
+    def objective(B_total):
+        live = _field(replace(surface, B_total=B_total), 6, level)
+        value = live.B_and_derivatives_xyz(points[:1], order=1)[1]
+        return jnp.vdot(value, value)
+
+    eager = jax.grad(objective)(surface.B_total)
+    compiled = jax.jit(jax.grad(objective))(surface.B_total)
+    assert np.all(np.isfinite(np.asarray(compiled)))
+    assert np.linalg.norm(np.asarray(compiled)) > 0.0
+    np.testing.assert_allclose(np.asarray(compiled), np.asarray(eager),
+                               rtol=1e-12, atol=1e-14)
 
 
 def test_shapes_follow_the_target_layout(setup):
