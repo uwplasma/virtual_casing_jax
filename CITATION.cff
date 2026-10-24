@@ -4,6 +4,8 @@ type: software
 title: "virtual_casing_jax"
 authors:
   - name: "UW Plasma"
+  - given-names: Dhairya
+    family-names: Malhotra
 abstract: "A JAX translation of virtual-casing, and of the parts of BIEST and SCTL it uses, for computing the magnetic field due to plasma currents from the total field on a toroidal surface with high-order singular quadrature, with differentiable and batched evaluation."
 repository-code: "https://github.com/uwplasma/virtual_casing_jax"
 url: "https://virtual-casing-jax.readthedocs.io"
