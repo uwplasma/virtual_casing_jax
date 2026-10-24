@@ -1,3 +1,14 @@
+# Translated to Python/JAX and modified from:
+#  virtual-casing, https://github.com/hiddenSymmetries/virtual-casing
+#    include/virtual-casing.hpp                 VirtualCasingTestData
+#                                               Authors: Dhairya Malhotra, Matt Landreman, Bharat Medasani
+#    Copyright (C) 2021-2026 The Simons Foundation, Inc. and the virtual-casing authors
+#  BIEST, https://github.com/dmalhotra/BIEST
+#    include/biest/surface.hpp, surface.txx     SurfType and the test-surface geometries
+#    Copyright (C) 2018-2026 The Simons Foundation, Inc. and the BIEST authors
+#    Author: Dhairya Malhotra
+# Modifications Copyright (C) 2026 the virtual_casing_jax authors
+# SPDX-License-Identifier: Apache-2.0
 """Test data utilities mirroring virtual-casing VirtualCasingTestData."""
 from __future__ import annotations
 

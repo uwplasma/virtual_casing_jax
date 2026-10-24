@@ -1,3 +1,11 @@
+# Translated to Python/JAX and modified from:
+#  BIEST, https://github.com/dmalhotra/BIEST
+#    include/biest/surface_op.txx               SurfaceOp::CompleteVecField, RotateToroidal, Upsample,
+#                                               Resample, Grad2D, SurfNormalAreaElem
+#    Copyright (C) 2018-2026 The Simons Foundation, Inc. and the BIEST authors
+#    Author: Dhairya Malhotra
+# Modifications Copyright (C) 2026 the virtual_casing_jax authors
+# SPDX-License-Identifier: Apache-2.0
 """JAX surface operators matching BIEST conventions."""
 from __future__ import annotations
 

@@ -1,0 +1,41 @@
+virtual_casing_jax
+Copyright (C) 2026 the virtual_casing_jax authors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This software includes code translated to Python/JAX and modified from the
+following projects, also licensed under the Apache License, Version 2.0:
+
+  virtual-casing, https://github.com/hiddenSymmetries/virtual-casing
+    Copyright (C) 2021-2026 The Simons Foundation, Inc. and the virtual-casing authors
+    Authors of the translated code: Dhairya Malhotra, Matt Landreman, Bharat Medasani
+  BIEST, https://github.com/dmalhotra/BIEST
+    Copyright (C) 2018-2026 The Simons Foundation, Inc. and the BIEST authors
+    Author of the translated code: Dhairya Malhotra
+  SCTL, https://github.com/dmalhotra/SCTL
+    Copyright (C) 2017-2026 The Simons Foundation, Inc. and the SCTL authors
+    Author of the translated code: Dhairya Malhotra
+
+Translated files (each names its source files in its header):
+  virtual_casing_jax/singular_quadrature.py   BIEST, SCTL
+  virtual_casing_jax/surface_ops.py           BIEST
+  virtual_casing_jax/kernels.py               BIEST
+  virtual_casing_jax/integrals.py             BIEST
+  virtual_casing_jax/virtual_casing.py        virtual-casing, BIEST
+  virtual_casing_jax/functional.py            virtual-casing, BIEST
+  virtual_casing_jax/testdata.py              virtual-casing, BIEST
+  virtual_casing_jax/w7x_coeffs.py            BIEST
+  virtual_casing_jax/geom/                    BIEST (surface geometry data)
+
+If you use virtual_casing_jax, please cite:
+  - D. Malhotra, B. Medasani, M. Landreman, C. Smiet, A. Cerfon, virtual-casing:
+    the virtual-casing principle on toroidal surfaces,
+    https://github.com/hiddenSymmetries/virtual-casing, doi:10.5281/zenodo.23619289.
+  - D. Malhotra, BIEST: Boundary Integral Equation Solver for Taylor states,
+    https://github.com/dmalhotra/BIEST, doi:10.5281/zenodo.23511944.
+  - D. Malhotra, A. J. Cerfon, M. O'Neil, E. Toler, "Efficient high-order
+    singular quadrature schemes in magnetic fusion,"
+    Plasma Phys. Control. Fusion 62 (2020) 024004, doi:10.1088/1361-6587/ab57f4.
+  - D. Malhotra, A. Cerfon, L.-M. Imbert-Gérard, M. O'Neil, "Taylor states in
+    stellarators: A fast high-order boundary integral solver,"
+    J. Comput. Phys. 397 (2019) 108791, doi:10.1016/j.jcp.2019.06.067.

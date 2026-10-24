@@ -4,13 +4,13 @@ Overview
 Purpose
 -------
 
-This project re-implements the virtual casing principle and the associated
-high-order singular quadrature schemes used in the BIEST library in pure
-Python with JAX acceleration. The goals are:
+This project is a JAX translation of virtual-casing [VC]_, and of the parts
+of BIEST [BIEST]_ and SCTL [SCTL]_ it uses, by Dhairya Malhotra and co-authors
+(see the ``NOTICE`` file). The goals of the translation are:
 
 - Full end-to-end differentiability via JAX autodiff.
 - CPU and GPU execution.
-- Parity with the reference C++ implementation of ``virtual-casing``.
+- Parity with the original C++ ``virtual-casing`` code.
 - A clean, testable, and documented numerical pipeline.
 
 Scope
@@ -25,7 +25,7 @@ The v1 target includes:
 - Off-surface gradients (``GradB``) with direct quadrature.
 - High-order singular quadrature (partition of unity + polar change of variables).
 
-The implementation mirrors the structure of the reference code:
+The implementation follows the structure of the original C++ code:
 
 - Surface operators (Fourier resampling, differentiation, normal vectors).
 - Boundary integral operators (Laplace and Biot-Savart kernels).
@@ -35,11 +35,6 @@ The implementation mirrors the structure of the reference code:
 References
 ----------
 
-The primary algorithmic reference is:
-
-- D. Malhotra, A. J. Cerfon, M. O'Neil, and E. Toler,
-  "Efficient high-order singular quadrature schemes in magnetic fusion",
-  Plasma Physics and Controlled Fusion 62, 024004 (2020).
-  Preprint: https://arxiv.org/abs/1909.07417
-
-See :doc:`references` for full citations.
+If you use this package, please cite the software it is translated from,
+virtual-casing [VC]_ and BIEST [BIEST]_, and the papers describing the method,
+[MCO2019]_ and [MCIO2019]_. See :doc:`references` for full citations.

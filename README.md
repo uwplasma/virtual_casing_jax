@@ -9,9 +9,12 @@
 
 `virtual_casing_jax` is a JAX implementation of the virtual casing
 principle for computing magnetic-field contributions from plasma currents
-using high-order singular quadrature. It is based on the C++ reference
-implementation in [`hiddenSymmetries/virtual-casing`](https://github.com/hiddenSymmetries/virtual-casing)
-and on the SIMSOPT virtual-casing interface in
+using high-order singular quadrature. It is a JAX translation of
+[`virtual-casing`](https://github.com/hiddenSymmetries/virtual-casing), and of
+the parts of [`BIEST`](https://github.com/dmalhotra/BIEST) and
+[`SCTL`](https://github.com/dmalhotra/SCTL) it uses, by Dhairya Malhotra and
+co-authors (see [NOTICE](NOTICE)), extended with differentiable and batched
+evaluation. Its SIMSOPT-compatible interface follows
 [`hiddenSymmetries/simsopt`](https://github.com/hiddenSymmetries/simsopt).
 
 Documentation is available at
@@ -204,3 +207,66 @@ The `surface_field_from_vmec_jax` bridge was removed with the retired
 `vmec_jax` package. Use VMEX (`pip install vmex`), which builds the surface
 data through `vmex.core.virtual_casing.surface_field_data_from_*`.
 This field wrapper is not a self-consistent SOL or edge-MHD solver.
+
+## Citing
+
+If you use `virtual_casing_jax`, please cite the software it is translated from
+and the papers describing the method (also listed in [CITATION.cff](CITATION.cff)):
+
+- D. Malhotra, B. Medasani, M. Landreman, C. Smiet, A. Cerfon, *virtual-casing: the virtual-casing principle on toroidal surfaces*, https://github.com/hiddenSymmetries/virtual-casing, [doi:10.5281/zenodo.23619289](https://doi.org/10.5281/zenodo.23619289).
+- D. Malhotra, *BIEST: Boundary Integral Equation Solver for Taylor states*, https://github.com/dmalhotra/BIEST, [doi:10.5281/zenodo.23511944](https://doi.org/10.5281/zenodo.23511944).
+- D. Malhotra, A. J. Cerfon, M. O'Neil, E. Toler, "Efficient high-order singular quadrature schemes in magnetic fusion," *Plasma Physics and Controlled Fusion* 62 (2020) 024004, [doi:10.1088/1361-6587/ab57f4](https://doi.org/10.1088/1361-6587/ab57f4).
+- D. Malhotra, A. Cerfon, L.-M. Imbert-Gérard, M. O'Neil, "Taylor states in stellarators: A fast high-order boundary integral solver," *Journal of Computational Physics* 397 (2019) 108791, [doi:10.1016/j.jcp.2019.06.067](https://doi.org/10.1016/j.jcp.2019.06.067).
+
+<details>
+<summary>BibTeX</summary>
+
+```bibtex
+@software{virtualcasing,
+  author    = {Malhotra, Dhairya and Medasani, Bharat and Landreman, Matt and Smiet, Chris and Cerfon, Antoine},
+  title     = {virtual-casing: the virtual-casing principle on toroidal surfaces},
+  url       = {https://github.com/hiddenSymmetries/virtual-casing},
+  doi       = {10.5281/zenodo.23619289},
+  version   = {0.3.1},
+  year      = {2026}
+}
+
+@software{biest,
+  author    = {Malhotra, Dhairya},
+  title     = {{BIEST}: Boundary Integral Equation Solver for {Taylor} states},
+  url       = {https://github.com/dmalhotra/BIEST},
+  doi       = {10.5281/zenodo.23511944},
+  version   = {1.0.0},
+  year      = {2026}
+}
+
+@article{malhotra2020quadrature,
+  author  = {Malhotra, Dhairya and Cerfon, Antoine J. and O'Neil, Michael and Toler, Evan},
+  title   = {Efficient high-order singular quadrature schemes in magnetic fusion},
+  journal = {Plasma Physics and Controlled Fusion},
+  volume  = {62},
+  number  = {2},
+  pages   = {024004},
+  year    = {2020},
+  doi     = {10.1088/1361-6587/ab57f4}
+}
+
+@article{malhotra2019taylor,
+  author  = {Malhotra, Dhairya and Cerfon, Antoine and Imbert-G{\'e}rard, Lise-Marie and O'Neil, Michael},
+  title   = {Taylor states in stellarators: A fast high-order boundary integral solver},
+  journal = {Journal of Computational Physics},
+  volume  = {397},
+  pages   = {108791},
+  year    = {2019},
+  doi     = {10.1016/j.jcp.2019.06.067}
+}
+```
+
+</details>
+
+## License
+
+`virtual_casing_jax` is licensed under the [Apache License 2.0](LICENSE). It
+includes code translated from virtual-casing, BIEST and SCTL; the
+[NOTICE](NOTICE) file lists their copyright and authors and must be kept in any
+redistribution.
