@@ -1,3 +1,14 @@
+# Translated to Python/JAX and modified from:
+#  BIEST, https://github.com/dmalhotra/BIEST
+#    include/biest/singular_correction.hpp      SingularCorrection::Setup, operator()
+#    include/biest/surface_op.txx               SurfaceOp::EvalSurfInteg, SetupSingularCorrection,
+#                                               EvalSingularCorrection
+#    include/biest/boundary_integ_op.txx        FieldPeriodBIOp::Eval
+#    include/biest/vacuum-field.txx             VacuumFieldBase::EvalOffSurface, ExtVacuumField
+#    Copyright (C) 2018-2026 The Simons Foundation, Inc. and the BIEST authors
+#    Author: Dhairya Malhotra
+# Modifications Copyright (C) 2026 the virtual_casing_jax authors
+# SPDX-License-Identifier: Apache-2.0
 """Boundary integral evaluation (baseline direct-sum)."""
 from __future__ import annotations
 
