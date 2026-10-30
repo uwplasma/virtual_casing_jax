@@ -11,6 +11,15 @@ interface, live in `VMEX <https://github.com/uwplasma/VMEX>`_. This package
 keeps explicit-array functions so its quadrature kernels remain stateless and
 easy to transform with JAX.
 
+On-surface target chunking
+-------------------------
+
+``B_plasma_on_surface()`` uses ``ExteriorFieldConfig.target_chunk_size`` for
+on-surface quadrature, as the off-surface evaluators do. A call can override
+that memory control without changing the prepared geometry or precision plan::
+
+    B_surface = field.B_plasma_on_surface(precision=plan, target_chunk_size=8)
+
 Core types
 ----------
 

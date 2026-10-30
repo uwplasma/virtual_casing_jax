@@ -217,6 +217,26 @@ def test_exterior_field_reuses_prepared_geometry_for_surface_quadrature():
     assert recorder.calls[-1][1]["precision"] == plan
 
 
+@pytest.mark.parametrize("configured, override, expected", [
+    (8, None, 8), (8, 3, 3), (8, "auto", "auto"), ("auto", None, "auto"),
+])
+def test_surface_quadrature_forwards_target_chunk_size(configured, override, expected):
+    field, recorder = _field(config=ExteriorFieldConfig(
+        digits=3, levels=((5, 4),), target_chunk_size=configured))
+    kwargs = {} if override is None else {"target_chunk_size": override}
+    field.B_plasma_on_surface(**kwargs)
+    assert recorder.calls[-1][1]["target_chunk_size"] == expected
+
+
+def test_surface_target_chunking_preserves_quadrature_values():
+    field = VirtualCasingExteriorField(
+        _surface_data(), ExteriorFieldConfig(digits=3, target_chunk_size=2))
+    precision = field.plan_surface_precision()
+    configured = field.B_plasma_on_surface(precision=precision)
+    overridden = field.B_plasma_on_surface(precision=precision, target_chunk_size=5)
+    np.testing.assert_allclose(configured, overridden, rtol=1e-12, atol=1e-12)
+
+
 def test_near_surface_plan_reuses_precision_for_gradient_quadrature():
     field, recorder = _field()
     precision = SimpleNamespace(
