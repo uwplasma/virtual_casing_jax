@@ -355,17 +355,20 @@ class VirtualCasingExteriorField:
 
     def B_plasma_on_surface(
         self, *, digits=None, chunk_size=None, quad_nt=None, quad_np=None,
-        precision=None,
+        precision=None, target_chunk_size=None,
     ):
         """Return the internal-current plasma field on the source surface.
 
         This reuses the geometry prepared by the exterior field, avoiding a
         second quadrature setup when boundary diagnostics and off-surface
-        evaluations are needed together.
+        evaluations are needed together. Target chunking defaults to the
+        configured value unless overridden for this call.
         """
         kwargs = {
             "digits": int(self.config.digits if digits is None else digits),
             "chunk_size": self.config.chunk_size if chunk_size is None else chunk_size,
+            "target_chunk_size": (self.config.target_chunk_size
+                                  if target_chunk_size is None else target_chunk_size),
         }
         if quad_nt is not None:
             kwargs["quad_nt"] = int(quad_nt)

@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import jax
 import jax.numpy as jnp
 
 from virtual_casing_jax.integrals import (
@@ -160,6 +161,33 @@ def test_direct_integral_evaluators_match_explicit_kernel_sums(eval_fn, manual_f
     np.testing.assert_allclose(source_chunked, expected, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(target_chunked, expected, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(target_only_chunked, expected, rtol=1e-12, atol=1e-12)
+
+    # Differentiate geometry, density, area and (for the double layer) normals.
+    # The explicit sum is independent of the checkpointed source/target scans.
+    directions = tuple(jnp.sin(jnp.arange(x.size).reshape(x.shape) + 0.3)
+                       for x in call_args)
+    cotangent = jnp.cos(jnp.arange(expected.size).reshape(expected.shape))
+    expected_value, expected_jvp = jax.jvp(manual_fn, tuple(call_args), directions)
+    _, expected_pullback = jax.vjp(manual_fn, *call_args)
+    expected_vjp = expected_pullback(cotangent)
+    for target_chunk in (None, 2):
+        def blocked(*xs):
+            return eval_fn(*xs, chunk_size=4, target_chunk_size=target_chunk)
+
+        value, tangent = jax.jit(lambda *xs: jax.jvp(blocked, xs, directions))(*call_args)
+        _, pullback = jax.vjp(blocked, *call_args)
+        actual_vjp = jax.jit(pullback)(cotangent)
+        np.testing.assert_allclose(value, expected_value, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(tangent, expected_jvp, rtol=1e-11, atol=1e-11)
+        for actual, reference in zip(actual_vjp, expected_vjp):
+            np.testing.assert_allclose(actual, reference, rtol=1e-11, atol=1e-11)
+
+    h = 1e-5
+    plus = manual_fn(*(x + h*d for x, d in zip(call_args, directions)))
+    minus = manual_fn(*(x - h*d for x, d in zip(call_args, directions)))
+    finite_difference = jnp.vdot(cotangent, (plus-minus)/(2*h))
+    np.testing.assert_allclose(jnp.vdot(cotangent, expected_jvp), finite_difference,
+                               rtol=2e-7, atol=2e-8)
 
 
 def test_direct_integral_evaluators_restore_target_grid_shape():
