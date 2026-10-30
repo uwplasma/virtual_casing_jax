@@ -274,6 +274,9 @@ class VirtualCasingJAX:
                 self.nfp_eff,
                 digits=digits,
                 chunk_size=1024,
+                target_chunk_size=autotune_chunk_sizes(
+                    "b", quad_nt_aligned * quad_np_aligned,
+                    trg_nt_self * trg_np_self)[1],
             )
             err = float(jnp.max(jnp.abs(jnp.asarray(U).reshape(-1) + 0.5)))
             if err <= 0:

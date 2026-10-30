@@ -17,6 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from virtual_casing_jax import PrecisionPlan, VirtualCasingJAX, testdata
+from virtual_casing_jax import virtual_casing as vc_module
 from virtual_casing_jax.kernels import _safe_rinv, laplace_fxd_u
 
 
@@ -71,6 +72,38 @@ def test_plan_precision_matches_autoselect_value():
     B_auto = np.asarray(_vc(X).compute_internal_B(B0, digits=_DIG))
     B_plan = np.asarray(_vc(X).compute_internal_B(B0, digits=_DIG, precision=plan))
     assert np.allclose(B_auto, B_plan, rtol=0, atol=1e-12)
+
+
+def test_precision_pilot_tiles_targets_without_changing_plan(monkeypatch):
+    # 272 targets force several automatic tiles and a padded final tile.
+    nt, npol = 17, 16
+    X = testdata.surface_coordinates(
+        _NFP, _HP, nt, npol, surf_type=testdata.SurfType.RotatingEllipseNarrow)
+
+    def plan():
+        vc = VirtualCasingJAX()
+        vc.setup(_DIG, _NFP, _HP, nt, npol, X, nt, npol, nt, npol)
+        return vc.plan_precision()
+
+    original = vc_module.laplace_dx_u_eval_singular
+    tiles = []
+
+    def record(*args, **kwargs):
+        tiles.append(kwargs.get("target_chunk_size"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(vc_module, "laplace_dx_u_eval_singular", record)
+    tiled = plan()
+    assert tiles and all(t is not None and 0 < t < nt*npol for t in tiles)
+
+    def unblocked(*args, **kwargs):
+        return original(*args, **dict(kwargs, target_chunk_size=None))
+
+    monkeypatch.setattr(vc_module, "laplace_dx_u_eval_singular", unblocked)
+    reference = plan()
+    assert (tiled.quad_nt, tiled.quad_np, tiled.patch_dim0) == (
+        reference.quad_nt, reference.quad_np, reference.patch_dim0)
+    np.testing.assert_array_equal(tiled.patch_idx, reference.patch_idx)
 
 
 def test_compute_internal_B_differentiable_in_surface():
