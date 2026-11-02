@@ -75,6 +75,33 @@ The same JAX code runs on CPU and GPU. GPU acceleration is achieved
 via large batched kernel evaluations. The code avoids Python loops in
 performance-critical paths.
 
+Device defaults and when to change them
+---------------------------------------
+
+A call uses JAX's default device, and JAX's default precision unless ``JAX_ENABLE_X64=1``. ``B_xyz_sharded`` is the only route that uses several devices, and it is opt-in.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Setting
+     - Default
+     - Change it when
+   * - ``B_xyz_sharded(devices=)``
+     - opt-in; all JAX devices
+     - A large target batch on several devices
+   * - ``chunk_size``, ``target_chunk_size``
+     - ``"auto"``
+     - Memory runs out, or the override variables below suit your hardware
+   * - ``JAX_ENABLE_X64=1``
+     - off
+     - Parity checks and high-accuracy work
+   * - ``JAX_PLATFORMS=cpu``
+     - GPU when a CUDA ``jaxlib`` is installed
+     - The GPU is busy
+   * - ``XLA_PYTHON_CLIENT_PREALLOCATE=false``
+     - JAX preallocates most GPU memory
+     - Several processes share one GPU
+
 Tips and Tricks
 ---------------
 
