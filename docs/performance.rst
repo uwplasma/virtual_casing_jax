@@ -32,13 +32,21 @@ target tile size. When enabled, each tile performs a source scan using
 Singular Correction
 -------------------
 
-The singular correction introduces per-target patch work. For now it is
-implemented in Python with JAX primitives, which is adequate for parity
-tests but not yet optimized. The next step is to batch patches and use
-``vmap``/``scan`` to reduce overhead and enable GPU acceleration.
+The singular correction interpolates and integrates a local surface patch
+for each target.
 
 Rematerialization
 -----------------
+
+Regular direct-sum source scans automatically checkpoint each kernel tile.
+During reverse-mode differentiation, kernel intermediates are recomputed for
+the current tile instead of being retained across all source/target pairs.
+This applies to field, field-gradient and double-layer operators, including
+off-surface evaluation. No user setting is needed; quadrature precision,
+forward accumulation order and support for JVPs and higher derivatives are
+preserved. Source and target chunk sizes still control the working tile size.
+Geometry-dependent precision pilots also use automatic target tiling to bound
+their singular-patch temporaries while keeping the same precision test.
 
 The GradB singular correction supports optional rematerialization via
 ``jax.checkpoint`` to trade recomputation for memory. Use ``remat=True``

@@ -64,7 +64,6 @@ from .error_estimate import (
     required_levels,
 )
 from .derivative_kernels import MAX_DERIVATIVE_ORDER, layer_derivatives
-from .vmec_jax_bridge import surface_field_from_vmec_jax
 from .grid_export import (
     evaluate_on_rphiz_grid,
     write_extended_field_netcdf,
@@ -163,7 +162,6 @@ __all__ = [
     "build_near_surface_taylor_plan",
     "cyl_to_xyz",
     "xyz_vec_to_cyl_vec",
-    "surface_field_from_vmec_jax",
     "evaluate_on_rphiz_grid",
     "write_extended_field_netcdf",
     "write_mgrid_like",

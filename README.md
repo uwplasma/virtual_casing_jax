@@ -200,6 +200,7 @@ the `internal` virtual-casing branch because the plasma currents are inside
 the LCFS. The `external` branch means currents outside the VMEC surface, not
 targets outside it.
 
-The legacy `surface_field_from_vmec_jax` bridge remains available for the
-historical `vmec_jax` package name and requires that package to be importable.
+The `surface_field_from_vmec_jax` bridge was removed with the retired
+`vmec_jax` package. Use VMEX (`pip install vmex`), which builds the surface
+data through `vmex.core.virtual_casing.surface_field_data_from_*`.
 This field wrapper is not a self-consistent SOL or edge-MHD solver.

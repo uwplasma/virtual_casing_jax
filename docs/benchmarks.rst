@@ -5,15 +5,6 @@ Benchmark scripts live under ``benchmarks/external``. They are not part of the
 default unit-test suite because they may require external codes, larger inputs,
 or longer runtimes.
 
-The lightweight in-repository smoke benchmark
-``benchmarks/vmec_extender_smoke_benchmark.py`` exercises the legacy
-``vmec_jax`` bridge, fixed-schedule off-surface field evaluation, and small cylindrical grid
-export on the bundled ``circular_tokamak`` VMEC case. It writes a JSON report
-with construction time, target-evaluation time, grid-export time, source-grid
-size, and boundary ``B dot n`` residual. This benchmark is intended for
-regression tracking and CI smoke validation; it is not a substitute for the
-external-code comparisons below.
-
 Planned benchmark families
 --------------------------
 
