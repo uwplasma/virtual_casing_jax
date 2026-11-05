@@ -87,6 +87,17 @@ def test_jit_first_does_not_cache_tracers(setup):
     assert not any(isinstance(leaf, jax.core.Tracer)
                    for leaf in jax.tree_util.tree_leaves(single._level_source_cache))
 
+    def stale_entry(xyz):
+        single._level_source_cache[single.schedule_levels[-1]] = (
+            xyz, xyz, xyz[:, 0])
+        return single.B_and_derivatives_xyz(xyz, order=2)
+
+    with jax.checking_leaks():
+        recovered = jax.jit(stale_entry)(points)
+    for value, reference in zip(recovered, eager):
+        np.testing.assert_allclose(np.asarray(value), np.asarray(reference),
+                                   rtol=1e-12, atol=1e-14)
+
     eager_first = _field(surface, 6, (field.schedule_levels[-1],))
     expected = eager_first.B_and_derivatives_xyz(points, order=2)
     compiled_after_eager = jax.jit(
