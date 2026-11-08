@@ -344,11 +344,14 @@ def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
         design = jnp.einsum(
             "cim,pm->pic", table[3:], _monomials((around[inner] - centre) / scale, exps, degree))
         nc = design.shape[-1]
-        q, r = jnp.linalg.qr(jnp.concatenate([design.reshape(-1, nc), jnp.diag(damping[3:])]))
         rhs = jnp.concatenate([(values[inner] - flat_field[nearest]).reshape(-1),
                                jnp.zeros(nc, values.dtype)])
-        coefficients = jnp.concatenate([
-            flat_field[nearest], jax.scipy.linalg.solve_triangular(r, q.T @ rhs)])
+        coefficients = flat_field[nearest]
+        if nc:
+            q, r = jnp.linalg.qr(jnp.concatenate(
+                [design.reshape(-1, nc), jnp.diag(damping[3:])]))
+            coefficients = jnp.concatenate(
+                [coefficients, jax.scipy.linalg.solve_triangular(r, q.T @ rhs)])
         monomial_coefficients = jnp.einsum("c,cim->im", coefficients, table)
 
         def polynomial(y):
