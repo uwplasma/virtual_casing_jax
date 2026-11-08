@@ -539,8 +539,8 @@ class VirtualCasingExteriorField:
         return tuple(v.reshape(leading + v.shape[1:]) for v in values)
 
     def B_and_derivatives_near_surface_xyz(
-        self, xyz, *, order=1, degree=8, patch=3, level=None,
-        branch: Branch | None = None, target_batch=8,
+        self, xyz, *, order=1, degree=8, level=None,
+        branch: Branch | None = None,
     ):
         """``B`` and its derivatives at targets arbitrarily close to the surface.
 
@@ -560,11 +560,11 @@ class VirtualCasingExteriorField:
         survives ``jit`` where an exception cannot.  The error of the first
         derivative, in units of the surface's minor radius, was at most ``20``
         times the estimate in the gate cases; a high ``estimate`` calls for a
-        larger ``degree`` or ``patch``, or a finer ``level``.  The field and
+        larger ``degree`` or a finer ``level``.  The field and
         its derivatives are those of one fixed function of the inputs, so
         ``jax.jvp``, ``jax.grad`` and ``jax.jacfwd`` through the targets, the
         surface and the field data are consistent with the returned values.
-        A target exactly on a node is outside the scope.
+        A target exactly on the surface returns the outside limit.
         """
         from .derivative_kernels import near_surface_derivatives
 
@@ -578,8 +578,7 @@ class VirtualCasingExteriorField:
         field = charge[..., None] * normal + jnp.cross(normal, jnp.moveaxis(current, 0, -1))
         values, estimate = near_surface_derivatives(
             flat, jnp.moveaxis(nodes, 0, -1), normal, area, field,
-            order=int(order), degree=int(degree), patch=int(patch),
-            batch=int(target_batch))
+            order=int(order), degree=int(degree))
         sign = 1.0 if branch == "internal" else -1.0
         leading = points.shape[:-1]
         return (tuple(sign * v.reshape(leading + v.shape[1:]) for v in values),

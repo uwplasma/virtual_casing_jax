@@ -76,13 +76,13 @@ the field data agree with the returned gradient to rounding.
 with ``10**-digits``. It is the misfit of the fitted field one node ring outside
 the fit times a factor calibrated on the gate cases, which never saw the error
 exceed it; the first-derivative error, in minor radii, was at most 20 times
-larger. A high estimate asks for a larger ``degree`` or ``patch``, or a finer
+larger. A high estimate asks for a larger ``degree`` or a finer
 ``level`` (the accuracy follows the node spacing of the level, not that of the
 field data: a 24-node field with ``level=(4*nt, 4*np)`` matches a 48-node field
 at its default level). The cost, a few milliseconds per target at 2 x 48 nodes
 per direction, is dominated by evaluating ``P`` on the nodes and does not depend
 on the derivative order; use it for the targets the schedule's error estimate
-rejects. A target exactly on a node is outside the scope.
+rejects. A target exactly on the surface returns the outside limit.
 
 On a non-axisymmetric two-loop fixture, the worst scaled errors
 ``e_k = L**k max|D**k B - ref| / B*`` (``L`` the minor radius; targets above

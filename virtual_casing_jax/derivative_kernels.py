@@ -261,13 +261,18 @@ def _inside(point, coeff, start, outward):
         uv = uv - jnp.linalg.solve(jax.jacfwd(residual)(uv), residual(uv))
     tangents = jax.jacfwd(surface)(uv)
     normal = jnp.cross(tangents[:, 0], tangents[:, 1])
-    return (point - surface(uv)) @ normal * (normal @ outward) < 0.0
+    # a point on the surface, to rounding, counts as outside
+    tolerance = 16.0 * jnp.finfo(point.dtype).eps * jnp.max(jnp.abs(point))
+    return (point - surface(uv)) @ normal * jnp.sign(normal @ outward) < -tolerance
 
 
 #: Tikhonov weight of the polynomial fit, relative to the field at one
 #: surface half-width from the fitted patch.  It keeps the fitted field
 #: bounded on the far side of the surface, where it is only extrapolated.
 _FIT_RIDGE = 1.0e-9
+
+#: The fit uses the ``(2 * _PATCH + 1)**2`` nodes around the nearest node.
+_PATCH = 3
 
 #: Ratio of the largest relative error of ``B`` to the misfit of the fitted
 #: field on the ring of nodes just outside the fit, over the gate cases
@@ -278,7 +283,7 @@ _ESTIMATE_FACTOR = 0.05
 
 
 def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
-                             degree=8, patch=3, batch=8, source_chunk=4096):
+                             degree=8):
     """``B`` and its derivatives at targets arbitrarily close to the surface.
 
     The layer sum is evaluated for the density of ``field - P``, where ``P`` is
@@ -303,10 +308,6 @@ def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
         Highest derivative returned, ``0..MAX_DERIVATIVE_ORDER``.
     degree:
         Degree of the polynomial field.
-    patch:
-        The fit uses the ``(2 patch + 1)^2`` nodes around the nearest node.
-    batch:
-        Targets evaluated together; bounds the memory.
 
     Returns ``(values, estimate)``: the tuple of ``order + 1`` arrays of
     :func:`layer_derivatives` and, per target, an estimate of the relative error
@@ -315,6 +316,7 @@ def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
     In the gate cases the first derivative, in units of the surface's minor
     radius, was never worse than ``20`` times the estimate.
     """
+    patch = _PATCH
     nt, npol = nodes.shape[:2]
     exps, table, degrees = (jnp.asarray(a) for a in _harmonic_gradients(degree))
     flat_nodes = nodes.reshape(-1, 3)
@@ -359,11 +361,14 @@ def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
 
         misfit = jnp.max(jnp.abs(values[ring] - polynomial(around[ring]))) / field_scale
         residual = flat_field - polynomial(flat_nodes)
+        # The residual vanishes at the nearest node by construction, so its term
+        # is exactly zero; moving that node away keeps a target lying on it
+        # finite, in the value and in the derivatives, without an offset.
         result = layer_derivatives(
-            x[None], flat_nodes,
+            x[None], flat_nodes.at[nearest].set(1.0e6),
             jnp.cross(flat_normal, residual) * weight[:, None],
             jnp.sum(flat_normal * residual, axis=-1) * weight,
-            order=order, source_chunk=source_chunk)
+            order=order)
         start = 2.0 * jnp.pi * jnp.stack((i0, j0)).astype(x.dtype) / jnp.asarray((nt, npol), x.dtype)
         inside = jax.lax.stop_gradient(_inside(x, coeff, start, flat_normal[nearest]))
         restored, derivative = [], polynomial
@@ -372,4 +377,4 @@ def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
             derivative = jax.jacfwd(derivative)
         return tuple(restored), _ESTIMATE_FACTOR * misfit
 
-    return jax.lax.map(one, targets, batch_size=batch)
+    return jax.lax.map(one, targets, batch_size=8)
