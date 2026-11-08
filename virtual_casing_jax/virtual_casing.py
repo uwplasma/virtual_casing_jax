@@ -715,6 +715,7 @@ class VirtualCasingJAX:
         B0,
         *,
         sign: float,
+        jump_weight: float = 0.5,
         X_trg=None,
         quad_nt: int | None = None,
         quad_np: int | None = None,
@@ -844,7 +845,7 @@ class VirtualCasingJAX:
         B_on = B_on_trg[:, : self.trg_nt, :]
 
         Bvc = curl_single_layer_gradient(gradG_J)
-        Bvc = sign * (Bvc + gradG_BdotN) + 0.5 * B_on
+        Bvc = sign * (Bvc + gradG_BdotN) + jump_weight * B_on
         return Bvc
 
     def compute_external_B(
@@ -883,6 +884,15 @@ class VirtualCasingJAX:
             patch_idx=patch_idx,
             precision=precision,
         )
+
+    def compute_principal_value_B(self, B0, **kwargs):
+        """Compute the principal-value (two-sided average) trace of the field.
+
+        With ``external = PV + B0/2`` and ``internal = B0/2 - PV``, this returns
+        ``PV = (external - internal) / 2`` from a single quadrature pass.
+        It accepts the keyword arguments of :meth:`compute_external_B`.
+        """
+        return self._compute_B_signed(B0, sign=1.0, jump_weight=0.0, **kwargs)
 
     def compute_internal_B(
         self,

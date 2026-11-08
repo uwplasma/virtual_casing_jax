@@ -64,8 +64,12 @@ def test_one_pass_returns_every_lower_order(setup):
     assert len(together) == 4
     for order in range(4):
         alone = single.B_and_derivatives_xyz(points, order=order)[order]
-        np.testing.assert_allclose(np.asarray(together[order]), np.asarray(alone),
-                                   rtol=1e-12, atol=0.0)
+        # Near-cancelled entries differ at round-off level on some backends, so
+        # the absolute floor scales with the largest entry of the reference.
+        reference = np.asarray(alone)
+        np.testing.assert_allclose(np.asarray(together[order]), reference,
+                                   rtol=1e-12,
+                                   atol=1e-13 * np.max(np.abs(reference)))
 
 
 def test_jit_first_does_not_cache_tracers(setup):
