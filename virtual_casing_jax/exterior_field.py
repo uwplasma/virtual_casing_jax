@@ -445,28 +445,24 @@ class VirtualCasingExteriorField:
             return self._vc.compute_internal_gradB_offsurf(self.B_total, **kwargs)
         return self._vc.compute_external_gradB_offsurf(self.B_total, **kwargs)
 
-    def level_sources(self, level=None):
-        """Quadrature nodes and layer densities of one schedule level.
+    def _level_fields(self, level=None):
+        """Nodes, unit normal, area element and unit-normal densities of a level.
 
-        Returns ``(nodes, sheet_current, charge)`` with shapes ``(m, 3)``,
-        ``(m, 3)`` and ``(m,)``, the densities already carrying the quadrature
-        weight, ready for
-        :func:`~virtual_casing_jax.derivative_kernels.layer_derivatives`.
-
-        ``level`` defaults to the finest of the schedule -- the one the
-        two-level default returns unconditionally.  The densities are built the
-        way the schedule builds them: the field is recovered pointwise on the
-        base grid and interpolated, and the products are formed on the level
-        with the level's own normal, so these nodes reproduce
-        :meth:`B_plasma_xyz` rather than approximating it.
+        Returns ``(nodes, normal, area, charge, current)`` with shapes
+        ``(3, nt, np)``, ``(3, nt, np)``, ``(nt, np)``, ``(nt, np)`` and
+        ``(3, nt, np)``; ``charge = B . n`` and ``current = B x n`` carry no
+        quadrature weight.  The densities are built the way the schedule builds
+        them: the field is recovered pointwise on the base grid and
+        interpolated, and the products are formed on the level with the level's
+        own normal.
         """
         from .integrals import _level_densities
         from .surface_ops import grad2d, resample, surf_normal_area_elem
 
         level = self.schedule_levels[-1] if level is None else level
         n_toroidal, n_poloidal = int(level[0]), int(level[1])
-        # The sources depend only on B_total and the level, both fixed for a
-        # given field, while rebuilding them costs about one field evaluation --
+        # These depend only on B_total and the level, both fixed for a given
+        # field, while rebuilding them costs about one field evaluation --
         # enough to make a single closed-form call look slower than the nested
         # derivative it replaces.  Cache them, except under tracing, where
         # holding a tracer past its trace would be worse than recomputing.
@@ -494,18 +490,31 @@ class VirtualCasingExteriorField:
         charge, current = _level_densities(
             charge_base, current_base, normal_base, normal,
             nt0, np0, n_toroidal, n_poloidal)
-
-        # the package stores J = B x n; the sheet current is n x B
-        sheet_current = -jnp.asarray(current)
-        weight = jnp.asarray(area).reshape(-1)
-        result = (jnp.asarray(nodes).reshape(3, -1).T,
-                  sheet_current.reshape(3, -1).T * weight[:, None],
-                  jnp.asarray(charge).reshape(-1) * weight)
+        result = tuple(jnp.asarray(a) for a in (nodes, normal, area, charge, current))
         if not traced_source and not any(
                 isinstance(leaf, jax.core.Tracer)
                 for leaf in jax.tree_util.tree_leaves(result)):
             cached[key] = result
         return result
+
+    def level_sources(self, level=None):
+        """Quadrature nodes and layer densities of one schedule level.
+
+        Returns ``(nodes, sheet_current, charge)`` with shapes ``(m, 3)``,
+        ``(m, 3)`` and ``(m,)``, the densities already carrying the quadrature
+        weight, ready for
+        :func:`~virtual_casing_jax.derivative_kernels.layer_derivatives`.
+
+        ``level`` defaults to the finest of the schedule -- the one the
+        two-level default returns unconditionally.  These nodes reproduce
+        :meth:`B_plasma_xyz` rather than approximating it.
+        """
+        nodes, _, area, charge, current = self._level_fields(level)
+        # the package stores J = B x n; the sheet current is n x B
+        weight = area.reshape(-1)
+        return (nodes.reshape(3, -1).T,
+                -current.reshape(3, -1).T * weight[:, None],
+                charge.reshape(-1) * weight)
 
     def B_and_derivatives_xyz(self, xyz, *, order=0, level=None, source_chunk=4096):
         """``B`` and its spatial derivatives at ``xyz``, from the closed forms.
@@ -528,6 +537,53 @@ class VirtualCasingExteriorField:
                                    order=int(order), source_chunk=int(source_chunk))
         leading = jnp.asarray(xyz).shape[:-1]
         return tuple(v.reshape(leading + v.shape[1:]) for v in values)
+
+    def B_and_derivatives_near_surface_xyz(
+        self, xyz, *, order=1, degree=8, patch=3, level=None,
+        branch: Branch | None = None, target_batch=8,
+    ):
+        """``B`` and its derivatives at targets arbitrarily close to the surface.
+
+        Same field as :meth:`B_and_derivatives_xyz` -- every derivative order
+        up to 3 in one pass, valid on either side of the surface -- but the
+        near-singular quadrature error, which makes the closed forms useless
+        within a few node spacings of the surface, is removed by subtracting
+        a fitted harmonic polynomial field whose layer integral is known
+        exactly (see
+        :func:`~virtual_casing_jax.derivative_kernels.near_surface_derivatives`).
+        The cost is a few milliseconds per target, independent of the order, so
+        use it for the targets the schedule's error estimate rejects.
+
+        Returns ``(values, estimate)``: the tuple of ``order + 1`` arrays and a
+        per-target dimensionless estimate of the relative error of ``B``,
+        comparable with ``10**-config.digits``.  It is an array, so it
+        survives ``jit`` where an exception cannot.  The error of the first
+        derivative, in units of the surface's minor radius, was at most ``20``
+        times the estimate in the gate cases; a high ``estimate`` calls for a
+        larger ``degree`` or ``patch``, or a finer ``level``.  The field and
+        its derivatives are those of one fixed function of the inputs, so
+        ``jax.jvp``, ``jax.grad`` and ``jax.jacfwd`` through the targets, the
+        surface and the field data are consistent with the returned values.
+        A target exactly on a node is outside the scope.
+        """
+        from .derivative_kernels import near_surface_derivatives
+
+        branch = self.config.branch if branch is None else branch
+        if branch not in ("internal", "external"):
+            raise ValueError("branch must be 'internal' or 'external'")
+        points = jnp.asarray(xyz)
+        flat = points.reshape((-1, 3)).astype(self.gamma.dtype)
+        nodes, normal, area, charge, current = self._level_fields(level)
+        normal = jnp.moveaxis(normal, 0, -1)
+        field = charge[..., None] * normal + jnp.cross(normal, jnp.moveaxis(current, 0, -1))
+        values, estimate = near_surface_derivatives(
+            flat, jnp.moveaxis(nodes, 0, -1), normal, area, field,
+            order=int(order), degree=int(degree), patch=int(patch),
+            batch=int(target_batch))
+        sign = 1.0 if branch == "internal" else -1.0
+        leading = points.shape[:-1]
+        return (tuple(sign * v.reshape(leading + v.shape[1:]) for v in values),
+                estimate.reshape(leading))
 
     def B_plasma_xyz(self, xyz, *, branch: Branch | None = None, return_estimate: bool = False):
         """Return the virtual-casing plasma-current field in Cartesian components.
