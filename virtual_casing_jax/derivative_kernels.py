@@ -194,7 +194,7 @@ def layer_derivatives(targets, sources, sheet_current, charge, *, order=0,
     return total
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _harmonic_gradients(degree):
     """Polynomial fields ``grad(phi)`` for harmonic ``phi`` of degree ``1..degree+1``.
 
