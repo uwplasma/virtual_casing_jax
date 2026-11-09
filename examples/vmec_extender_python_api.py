@@ -38,22 +38,11 @@ def main():
         nphi=args.nphi,
         ntheta=args.ntheta,
     )
-    levels = (
-        (args.nphi, args.ntheta),
-        (2 * args.nphi, 2 * args.ntheta),
-    )
-    field = VirtualCasingExteriorField(
-        surface,
-        ExteriorFieldConfig(
-            digits=args.digits,
-            levels=levels,
-            chunk_size="auto",
-            target_chunk_size="auto",
-        ),
-    )
+    field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=args.digits))
 
     target_xyz = np.asarray([args.target])
-    print("B_plasma_xyz:", np.asarray(field.B_plasma_xyz(target_xyz)))
+    B, estimate = field.B_plasma_xyz(target_xyz, return_estimate=True)
+    print("B_plasma_xyz:", np.asarray(B), "relative error estimate:", np.asarray(estimate))
 
 
 if __name__ == "__main__":

@@ -58,6 +58,9 @@ class ExteriorFieldConfig:
     target_chunk_size: int | str = "auto"
     branch: Branch = "internal"
     use_jit_schedule: bool = True
+    #: Route targets near the surface through ``B_and_derivatives_accurate_xyz``
+    #: (needs a schedule of two or more levels); ``False`` keeps the schedule alone.
+    near_surface: bool = True
     validate_orientation: bool = True
     dtype: str = "float64"
 
@@ -155,6 +158,9 @@ def B_cyl_from_B_xyz(field_fn: Callable, R_phi_Z):
     """Evaluate a Cartesian field callback and return cylindrical components."""
     xyz = cyl_to_xyz(R_phi_Z)
     return xyz_vec_to_cyl_vec(R_phi_Z, field_fn(xyz))
+
+
+_ROUTE_FACTOR = 30.0  # closed-form error over the squared level difference, gate cases
 
 
 def default_schedule_levels(nphi: int, ntheta: int, nfp: int):
@@ -445,28 +451,24 @@ class VirtualCasingExteriorField:
             return self._vc.compute_internal_gradB_offsurf(self.B_total, **kwargs)
         return self._vc.compute_external_gradB_offsurf(self.B_total, **kwargs)
 
-    def level_sources(self, level=None):
-        """Quadrature nodes and layer densities of one schedule level.
+    def _level_fields(self, level=None):
+        """Nodes, unit normal, area element and unit-normal densities of a level.
 
-        Returns ``(nodes, sheet_current, charge)`` with shapes ``(m, 3)``,
-        ``(m, 3)`` and ``(m,)``, the densities already carrying the quadrature
-        weight, ready for
-        :func:`~virtual_casing_jax.derivative_kernels.layer_derivatives`.
-
-        ``level`` defaults to the finest of the schedule -- the one the
-        two-level default returns unconditionally.  The densities are built the
-        way the schedule builds them: the field is recovered pointwise on the
-        base grid and interpolated, and the products are formed on the level
-        with the level's own normal, so these nodes reproduce
-        :meth:`B_plasma_xyz` rather than approximating it.
+        Returns ``(nodes, normal, area, charge, current)`` with shapes
+        ``(3, nt, np)``, ``(3, nt, np)``, ``(nt, np)``, ``(nt, np)`` and
+        ``(3, nt, np)``; ``charge = B . n`` and ``current = B x n`` carry no
+        quadrature weight.  The densities are built the way the schedule builds
+        them: the field is recovered pointwise on the base grid and
+        interpolated, and the products are formed on the level with the level's
+        own normal.
         """
         from .integrals import _level_densities
         from .surface_ops import grad2d, resample, surf_normal_area_elem
 
         level = self.schedule_levels[-1] if level is None else level
         n_toroidal, n_poloidal = int(level[0]), int(level[1])
-        # The sources depend only on B_total and the level, both fixed for a
-        # given field, while rebuilding them costs about one field evaluation --
+        # These depend only on B_total and the level, both fixed for a given
+        # field, while rebuilding them costs about one field evaluation --
         # enough to make a single closed-form call look slower than the nested
         # derivative it replaces.  Cache them, except under tracing, where
         # holding a tracer past its trace would be worse than recomputing.
@@ -494,18 +496,31 @@ class VirtualCasingExteriorField:
         charge, current = _level_densities(
             charge_base, current_base, normal_base, normal,
             nt0, np0, n_toroidal, n_poloidal)
-
-        # the package stores J = B x n; the sheet current is n x B
-        sheet_current = -jnp.asarray(current)
-        weight = jnp.asarray(area).reshape(-1)
-        result = (jnp.asarray(nodes).reshape(3, -1).T,
-                  sheet_current.reshape(3, -1).T * weight[:, None],
-                  jnp.asarray(charge).reshape(-1) * weight)
+        result = tuple(jnp.asarray(a) for a in (nodes, normal, area, charge, current))
         if not traced_source and not any(
                 isinstance(leaf, jax.core.Tracer)
                 for leaf in jax.tree_util.tree_leaves(result)):
             cached[key] = result
         return result
+
+    def level_sources(self, level=None):
+        """Quadrature nodes and layer densities of one schedule level.
+
+        Returns ``(nodes, sheet_current, charge)`` with shapes ``(m, 3)``,
+        ``(m, 3)`` and ``(m,)``, the densities already carrying the quadrature
+        weight, ready for
+        :func:`~virtual_casing_jax.derivative_kernels.layer_derivatives`.
+
+        ``level`` defaults to the finest of the schedule -- the one the
+        two-level default returns unconditionally.  These nodes reproduce
+        :meth:`B_plasma_xyz` rather than approximating it.
+        """
+        nodes, _, area, charge, current = self._level_fields(level)
+        # the package stores J = B x n; the sheet current is n x B
+        weight = area.reshape(-1)
+        return (nodes.reshape(3, -1).T,
+                -current.reshape(3, -1).T * weight[:, None],
+                charge.reshape(-1) * weight)
 
     def B_and_derivatives_xyz(self, xyz, *, order=0, level=None, source_chunk=4096):
         """``B`` and its spatial derivatives at ``xyz``, from the closed forms.
@@ -529,6 +544,79 @@ class VirtualCasingExteriorField:
         leading = jnp.asarray(xyz).shape[:-1]
         return tuple(v.reshape(leading + v.shape[1:]) for v in values)
 
+    def B_and_derivatives_accurate_xyz(
+        self, xyz, *, order=1, tol=1.0e-8, degree=8, branch: Branch | None = None,
+    ):
+        """``B`` and its derivatives at any distance from the surface, either side.
+
+        Each target goes to the closed forms of :meth:`B_and_derivatives_xyz`
+        when their estimated error is below ``tol`` and otherwise to the sum of
+        :func:`~virtual_casing_jax.derivative_kernels.near_surface_derivatives`,
+        evaluated only where needed; the routing is a stop-gradient ``where``,
+        safe under ``jit``.  Errors are scaled, ``L**k max|D**k B - ref| / B*``
+        (``L`` the half-extent of the surface, ``B*`` its RMS field), and the
+        ``k``-th derivative may be off by ``tol * 100**k``.  The closed-form
+        error is estimated as ``30`` times the squared difference between the
+        coarsest and the finest level, which covered every gate case; it does not
+        see the resolution of the field data.  The result jumps by at most
+        ``tol`` where the routing switches.
+
+        Returns ``(values, estimate)``: the ``order + 1`` arrays and a relative
+        error estimate of ``B`` per target (for a routed one, from the misfit of
+        the fitted field, so a high value calls for a larger ``degree`` or finer
+        data).  ``jvp``, ``grad`` and ``jacfwd`` through the targets, the surface
+        and the field data agree with the returned derivatives.  A target on the
+        surface returns the outside limit.
+        """
+        from .derivative_kernels import near_surface_derivatives
+
+        branch = self.config.branch if branch is None else branch
+        if branch not in ("internal", "external"):
+            raise ValueError("branch must be 'internal' or 'external'")
+        coarse, fine = self.schedule_levels[0], self.schedule_levels[-1]
+        if coarse == fine:
+            raise ValueError("the error estimate needs a schedule of at least two levels")
+        order = int(order)
+        points = jnp.asarray(xyz)
+        flat = points.reshape((-1, 3)).astype(self.gamma.dtype)
+
+        def level(shape):
+            nodes, normal, area, charge, current = self._level_fields(shape)
+            normal = jnp.moveaxis(normal, 0, -1)
+            return (jnp.moveaxis(nodes, 0, -1), normal, area,
+                    charge[..., None] * normal + jnp.cross(normal, jnp.moveaxis(current, 0, -1)))
+
+        finest, doubled = level(fine), level((2 * fine[0], 2 * fine[1]))
+        extent = jnp.min(jnp.ptp(finest[0].reshape(-1, 3), axis=0)) / 2.0
+        reference = jnp.sqrt(jnp.mean(jnp.sum(finest[3] ** 2, axis=-1)))
+        # a target on a node would make the closed forms infinite and their
+        # gradient NaN; they are not used there, so move it
+        nodes = finest[0].reshape(-1, 3)
+        on_node = jax.lax.map(lambda x: jnp.min(jnp.sum((nodes - x) ** 2, axis=-1)),
+                              flat, batch_size=64) < (1.0e-12 * extent) ** 2
+        safe = jnp.where(on_node[:, None], flat + extent, flat)
+        closed = self.B_and_derivatives_xyz(safe, order=order)
+        rough = self.B_and_derivatives_xyz(safe, order=order, level=coarse)
+        estimates = [_ROUTE_FACTOR * (extent**k * jnp.max(jnp.abs((a - b).reshape(len(flat), -1)), axis=1)
+                                      / reference) ** 2 / 100.0**k
+                     for k, (a, b) in enumerate(zip(closed, rough))]
+        direct = jnp.max(jnp.stack(estimates), axis=0)
+        # ``not (x <= tol)`` sends a NaN estimate to the near-surface sum
+        needs = jax.lax.stop_gradient(~(direct <= tol) | on_node)
+        values, near = near_surface_derivatives(
+            flat, needs, finest, doubled, order=order, degree=int(degree))
+        sign = 1.0 if branch == "internal" else -1.0
+        leading = points.shape[:-1]
+        merged = tuple(
+            sign * jnp.where(needs.reshape((-1,) + (1,) * (v.ndim - 1)), v, c).reshape(leading + v.shape[1:])
+            for v, c in zip(values, closed))
+        return merged, jnp.where(needs, near, direct).reshape(leading)
+
+    def _routed(self):
+        """Whether ``B_plasma_xyz`` and ``gradB_plasma_xyz`` use the accurate evaluator."""
+        levels = self.schedule_levels
+        return self.config.near_surface and self.config.use_jit_schedule and levels[0] != levels[-1]
+
     def B_plasma_xyz(self, xyz, *, branch: Branch | None = None, return_estimate: bool = False):
         """Return the virtual-casing plasma-current field in Cartesian components.
 
@@ -542,6 +630,10 @@ class VirtualCasingExteriorField:
             raise ValueError("branch must be 'internal' or 'external'")
         xyz_soa, restore = _points_to_soa(xyz)
         xyz_soa = xyz_soa.astype(self.gamma.dtype)
+        if self._routed():
+            (value,), estimate = self.B_and_derivatives_accurate_xyz(
+                xyz_soa.T, order=0, tol=10.0**-self.config.digits, branch=branch)
+            return (restore(value.T), estimate) if return_estimate else restore(value.T)
         if not return_estimate:
             return restore(self._call_vc_B(xyz_soa, branch))
         value, estimate = self._call_vc_B(xyz_soa, branch, return_estimate=True)
@@ -613,6 +705,10 @@ class VirtualCasingExteriorField:
             raise ValueError("branch must be 'internal' or 'external'")
         xyz_soa, _ = _points_to_soa(xyz)
         xyz_soa = xyz_soa.astype(self.gamma.dtype)
+        if self._routed():
+            gradient = self.B_and_derivatives_accurate_xyz(
+                xyz_soa.T, order=1, tol=10.0**-self.config.digits, branch=branch)[0][1]
+            return _restore_matrix_output(jnp.moveaxis(gradient, 0, -1), xyz)
         return _restore_matrix_output(self._call_vc_gradB(xyz_soa, branch), xyz)
 
     def gradB_xyz(self, xyz):

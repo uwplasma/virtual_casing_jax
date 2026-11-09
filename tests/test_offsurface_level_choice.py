@@ -76,6 +76,7 @@ def _field(surface, digits, levels=None):
         ExteriorFieldConfig(
             digits=digits, levels=levels,
             src_nphi=int(surface.gamma.shape[1]), src_ntheta=int(surface.gamma.shape[2]),
+            near_surface=False,  # these tests are about the schedule alone
         ),
     )
 

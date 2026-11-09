@@ -176,20 +176,20 @@ wout = read_wout("wout_circular_tokamak.nc")
 surface = surface_field_data_from_wout(wout, nphi=32, ntheta=32)
 field = VirtualCasingExteriorField(surface, ExteriorFieldConfig(digits=8))
 
+# Accurate at any distance from the LCFS, either side, with its error estimate.
 points = [[1.8, 0.0, 0.0]]
-B_plasma = field.B_plasma_xyz(points)
-
-# Reuse accurate on-surface data for many targets close to the LCFS.
-near = field.plan_near_surface(digits=4)
-B_near = field.B_plasma_near_surface_xyz(points, near)
+B_plasma, estimate = field.B_plasma_xyz(points, return_estimate=True)
+gradB_plasma = field.gradB_plasma_xyz(points)
 
 # Large target batches can use every visible JAX device.
 B_total = field.B_xyz_sharded(points)
 ```
 
-`plan_near_surface` is a first-order local continuation. Bound field-line
-traces by distance from the LCFS, and use a converged direct off-surface
-schedule before interpreting farther targets or magnetic topology.
+`B_plasma_xyz` and `gradB_plasma_xyz` send targets whose closed-form quadrature
+is not converged to a near-surface sum (`B_and_derivatives_accurate_xyz`, see
+`docs/exterior_field_api.rst`), so they reach `10**-digits` down to the surface;
+`ExteriorFieldConfig(near_surface=False)` keeps the schedule alone. The
+older first-order `plan_near_surface` remains for amortized batches.
 
 The explicit field functions and their derivatives are JAX differentiable.
 VMEX owns the user-facing magnetic-field object and SIMSOPT-compatible
