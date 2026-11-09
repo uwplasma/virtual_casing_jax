@@ -157,6 +157,11 @@ def B_cyl_from_B_xyz(field_fn: Callable, R_phi_Z):
     return xyz_vec_to_cyl_vec(R_phi_Z, field_fn(xyz))
 
 
+#: Squared difference between the coarsest and finest level, times this, bounds
+#: the closed-form error in the gate cases (see ``B_and_derivatives_accurate_xyz``).
+_ROUTE_FACTOR = 30.0
+
+
 def default_schedule_levels(nphi: int, ntheta: int, nfp: int):
     """Two-level schedule sized from the source grid, in full-torus counts.
 
@@ -538,51 +543,79 @@ class VirtualCasingExteriorField:
         leading = jnp.asarray(xyz).shape[:-1]
         return tuple(v.reshape(leading + v.shape[1:]) for v in values)
 
-    def B_and_derivatives_near_surface_xyz(
-        self, xyz, *, order=1, degree=8, level=None,
-        branch: Branch | None = None,
+    def B_and_derivatives_accurate_xyz(
+        self, xyz, *, order=1, tol=1.0e-8, degree=8, branch: Branch | None = None,
     ):
-        """``B`` and its derivatives at targets arbitrarily close to the surface.
+        """``B`` and its derivatives at any distance from the surface, on either side.
 
-        Same field as :meth:`B_and_derivatives_xyz` -- every derivative order
-        up to 3 in one pass, valid on either side of the surface -- but the
-        near-singular quadrature error, which makes the closed forms useless
-        within a few node spacings of the surface, is removed by subtracting
-        a fitted harmonic polynomial field whose layer integral is known
-        exactly (see
-        :func:`~virtual_casing_jax.derivative_kernels.near_surface_derivatives`).
-        The cost is a few milliseconds per target, independent of the order, so
-        use it for the targets the schedule's error estimate rejects.
+        Each target is routed, by a stop-gradient ``jnp.where`` that is safe
+        under ``jit``, to the closed forms of :meth:`B_and_derivatives_xyz`
+        when their estimated error is below ``tol``, and otherwise to a sum that
+        subtracts a fitted harmonic polynomial field of known layer integral
+        and refines the nodes next to the target (see
+        :func:`~virtual_casing_jax.derivative_kernels.near_surface_derivatives`),
+        evaluated only for the targets that need it.  Errors are the scaled
+        ``L**k max|D**k B - ref| / B*`` (``L`` the half-extent of the surface,
+        ``B*`` its RMS field); the ``k``-th derivative may be off by
+        ``tol * 100**k``.  The closed-form error is ``30`` times the squared
+        difference between the coarsest and the finest schedule level (it
+        falls geometrically with the node spacing), a factor that covered every
+        gate case.  It does not see the resolution of the field data itself.
+        The result is discontinuous, by at most ``tol``, where the routing
+        switches.
 
         Returns ``(values, estimate)``: the tuple of ``order + 1`` arrays and a
-        per-target dimensionless estimate of the relative error of ``B``,
-        comparable with ``10**-config.digits``.  It is an array, so it
-        survives ``jit`` where an exception cannot.  The error of the first
-        derivative, in units of the surface's minor radius, was at most ``20``
-        times the estimate in the gate cases; a high ``estimate`` calls for a
-        larger ``degree`` or a finer ``level``.  The field and
-        its derivatives are those of one fixed function of the inputs, so
-        ``jax.jvp``, ``jax.grad`` and ``jax.jacfwd`` through the targets, the
-        surface and the field data are consistent with the returned values.
-        A target exactly on the surface returns the outside limit.
+        per-target estimate of the relative error of ``B``; for a routed target
+        the misfit of the fitted field one node ring outside the fit times a
+        calibrated factor, so a high value calls for a larger ``degree`` or
+        finer field data.  ``jax.jvp``, ``jax.grad`` and ``jax.jacfwd`` through
+        the targets, the surface and the field data are consistent with the
+        returned derivatives.  A target exactly on the surface returns the
+        outside limit.
         """
         from .derivative_kernels import near_surface_derivatives
 
         branch = self.config.branch if branch is None else branch
         if branch not in ("internal", "external"):
             raise ValueError("branch must be 'internal' or 'external'")
+        coarse, fine = self.schedule_levels[0], self.schedule_levels[-1]
+        if coarse == fine:
+            raise ValueError("the error estimate needs a schedule of at least two levels")
+        order = int(order)
         points = jnp.asarray(xyz)
         flat = points.reshape((-1, 3)).astype(self.gamma.dtype)
-        nodes, normal, area, charge, current = self._level_fields(level)
-        normal = jnp.moveaxis(normal, 0, -1)
-        field = charge[..., None] * normal + jnp.cross(normal, jnp.moveaxis(current, 0, -1))
-        values, estimate = near_surface_derivatives(
-            flat, jnp.moveaxis(nodes, 0, -1), normal, area, field,
-            order=int(order), degree=int(degree))
+
+        def level(shape):
+            nodes, normal, area, charge, current = self._level_fields(shape)
+            normal = jnp.moveaxis(normal, 0, -1)
+            return (jnp.moveaxis(nodes, 0, -1), normal, area,
+                    charge[..., None] * normal + jnp.cross(normal, jnp.moveaxis(current, 0, -1)))
+
+        finest, doubled = level(fine), level((2 * fine[0], 2 * fine[1]))
+        extent = jnp.min(jnp.ptp(finest[0].reshape(-1, 3), axis=0)) / 2.0
+        reference = jnp.sqrt(jnp.mean(jnp.sum(finest[3] ** 2, axis=-1)))
+        # a target on a node would make the closed forms infinite and their
+        # gradient NaN; they are not used there, so move it
+        nodes = finest[0].reshape(-1, 3)
+        on_node = jax.lax.map(lambda x: jnp.min(jnp.sum((nodes - x) ** 2, axis=-1)),
+                              flat, batch_size=8) < (1.0e-12 * extent) ** 2
+        safe = jnp.where(on_node[:, None], flat + extent, flat)
+        closed = self.B_and_derivatives_xyz(safe, order=order)
+        rough = self.B_and_derivatives_xyz(safe, order=order, level=coarse)
+        estimates = [_ROUTE_FACTOR * (extent**k * jnp.max(jnp.abs((a - b).reshape(len(flat), -1)), axis=1)
+                                      / reference) ** 2 / 100.0**k
+                     for k, (a, b) in enumerate(zip(closed, rough))]
+        direct = jnp.max(jnp.stack(estimates), axis=0)
+        # ``not (x <= tol)`` sends a NaN estimate to the near-surface sum
+        needs = jax.lax.stop_gradient(~(direct <= tol) | on_node)
+        values, near = near_surface_derivatives(
+            flat, needs, finest, doubled, order=order, degree=int(degree))
         sign = 1.0 if branch == "internal" else -1.0
         leading = points.shape[:-1]
-        return (tuple(sign * v.reshape(leading + v.shape[1:]) for v in values),
-                estimate.reshape(leading))
+        merged = tuple(
+            sign * jnp.where(needs.reshape((-1,) + (1,) * (v.ndim - 1)), v, c).reshape(leading + v.shape[1:])
+            for v, c in zip(values, closed))
+        return merged, jnp.where(needs, near, direct).reshape(leading)
 
     def B_plasma_xyz(self, xyz, *, branch: Branch | None = None, return_estimate: bool = False):
         """Return the virtual-casing plasma-current field in Cartesian components.

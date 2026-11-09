@@ -49,65 +49,79 @@ so ``external + internal = B0`` at every target.
   higher derivative orders are evaluated off the surface only
   (``B_and_derivatives_xyz``).
 
-Targets near the surface
-------------------------
+Targets at any distance from the surface
+----------------------------------------
 
 The periodic trapezoid rule behind ``B_plasma_xyz`` and
 ``B_and_derivatives_xyz`` is near-singular within a few node spacings of the
 surface: the error is of order one a hundredth of a minor radius away, grows
 like ``1/d**k`` for the ``k``-th derivative as the target approaches a node, and
-the closed forms carry no failure signal. ``B_and_derivatives_near_surface_xyz``
-removes it on either side of the surface::
+the closed forms carry no failure signal. ``B_and_derivatives_accurate_xyz``
+evaluates ``B`` and its derivatives up to order 3 at arbitrary targets, on
+either side of the surface, with one call::
 
-    (B, gradB), estimate = field.B_and_derivatives_near_surface_xyz(xyz, order=1)
+    (B, gradB), estimate = field.B_and_derivatives_accurate_xyz(xyz, order=1, tol=1e-8)
 
-For each target a harmonic polynomial field ``P`` is fitted to the surface field
-around the nearest node (interpolating it there), and the layer sum is taken
-for the density of ``B - P``. The layer integral of the trace of ``P`` is known
-exactly -- ``0`` outside the surface and ``-P(x)`` inside it, with the same
-derivatives -- and is added back. The fixed iteration count (a Newton step on
-the Fourier interpolant of the surface decides the side) and the absence of
-Python exceptions keep it ``jit``-, ``vmap``- and AD-compatible. Derivatives of
-every order up to 3 cost the same pass; the derivatives are those of the
-returned map, so ``jax.jvp``/``jax.grad`` through the targets, the surface and
-the field data agree with the returned gradient to rounding.
+Each target is routed, by a stop-gradient ``jnp.where`` that is safe under
+``jit``, to the closed forms when their estimated error is below ``tol`` (for
+``B``; ``100**k * tol`` for the ``k``-th derivative; scaled by the surface
+half-extent ``L`` and the RMS surface field ``B*``), and otherwise to the
+near-surface sum, which is evaluated only for the targets that need it. The
+closed-form estimate is ``30`` times the squared difference between the
+coarsest and the finest schedule level, since the trapezoid error falls
+geometrically with the node spacing.
 
-``estimate`` is an array of dimensionless relative errors of ``B``, comparable
-with ``10**-digits``. It is the misfit of the fitted field one node ring outside
-the fit times a factor calibrated on the gate cases, which never saw the error
-exceed it; the first-derivative error, in minor radii, was at most 20 times
-larger. A high estimate asks for a larger ``degree`` or a finer
-``level`` (the accuracy follows the node spacing of the level, not that of the
-field data: a 24-node field with ``level=(4*nt, 4*np)`` matches a 48-node field
-at its default level). The cost, a few milliseconds per target at 2 x 48 nodes
-per direction, is dominated by evaluating ``P`` on the nodes and does not depend
-on the derivative order; use it for the targets the schedule's error estimate
-rejects. A target exactly on the surface returns the outside limit.
+For a routed target a harmonic polynomial field ``P`` is fitted to the surface
+field around the nearest node, and the layer sum is taken for the density of
+``B - P``. The layer integral of the trace of ``P`` is known exactly -- ``0``
+outside the surface and ``-P(x)`` inside it, with the same derivatives -- and is
+added back. Within a smooth window of 10 coarse nodes around the target the sum
+runs over a level twice as fine, elsewhere over the finest schedule level. A
+fixed number of Newton steps on the Fourier interpolant of the surface decides
+the side, so the map is ``jit``-, ``vmap``- and AD-compatible: ``jax.jvp`` and
+``jax.grad`` through the targets, the surface and the field data agree with the
+returned derivatives to rounding. A target exactly on the surface returns the
+outside limit.
 
-On a non-axisymmetric two-loop fixture, the worst scaled errors
-``e_k = L**k max|D**k B - ref| / B*`` (``L`` the minor radius; targets above
-random surface points and above nodes, on both sides, field grid ``n x n``,
-default level) are:
+``estimate`` is an array of dimensionless relative errors of ``B``. For a routed
+target it is the misfit of the fitted field one node ring outside the fit, times
+a factor calibrated on the gate cases (the error stayed below a fifth of it; the
+first derivative, in units of ``L``, below 16 times). It cannot see the
+resolution of the field data: with ``n`` nodes per direction the data is only
+known to its Fourier interpolation error, ``6e-4``, ``6e-6`` and ``2e-10`` for
+``n = 24, 48, 96`` on the gate fixture, and no evaluation of the same data does
+better.
+
+On a non-axisymmetric two-loop fixture (targets above 8 random surface points and
+2 nodes, on both sides, field grid ``n x n``) the worst scaled errors
+``e_k = L**k max|D**k B - ref| / B*`` over ``d = 10**-4 .. 1`` minor radii are:
 
 .. list-table::
    :header-rows: 1
 
    * - n
      - closed forms, 0.01 a
-     - near-surface, 1e-4 a to 0.01 a
-     - near-surface, 0.3 a
+     - accurate, 1e-4 a to 1 a
+     - ``e2``, ``e3`` at 1e-2 a
    * - 24
      - e0 22, e1 4e3
-     - e0 8e-5, e1 1.4e-3
-     - e0 1e-4, e1 1.6e-3
+     - e0 1e-4, e1 1.4e-3
+     - 0.1, 13
    * - 48
      - e0 5, e1 1e3
-     - e0 2e-6, e1 4e-5
-     - e0 3e-7, e1 2.5e-6
+     - e0 1.2e-6, e1 1.1e-5
+     - 3e-4, 0.07
    * - 96
      - e0 1.2, e1 2.4e2
-     - e0 1.4e-8, e1 8e-7
-     - e0 7e-11, e1 4e-11
+     - e0 1e-9, e1 3.5e-7
+     - 9e-6, 3e-3
+
+At ``n = 96`` the goal ``e0 <= 1e-8``, ``e1 <= 1e-6`` holds at every distance; at
+smaller ``n`` the data, not the quadrature, sets the error. Orders 2 and 3 lose
+about a digit or two per decade of ``d`` below ``0.1 a``. At the switch (``d`` between
+0.3 and 0.5 a at ``n = 96``) the one-sided mismatch between the two evaluations
+is ``6e-10`` in ``B`` and ``4e-9`` in the gradient; the routed field is
+discontinuous by that much, and no smoothness is claimed across it.
 
 Core types
 ----------

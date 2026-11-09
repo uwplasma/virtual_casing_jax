@@ -269,21 +269,49 @@ def _inside(point, coeff, start, outward):
 #: Tikhonov weight of the polynomial fit, relative to the field at one
 #: surface half-width from the fitted patch.  It keeps the fitted field
 #: bounded on the far side of the surface, where it is only extrapolated.
-_FIT_RIDGE = 1.0e-9
+_FIT_RIDGE = 2.0e-10
 
-#: The fit uses the ``(2 * _PATCH + 1)**2`` nodes around the nearest node.
-_PATCH = 3
+#: The fit uses the ``(2 * _PATCH + 1)**2`` fine nodes around the nearest
+#: coarse node.
+_PATCH = 5
+
+#: The fine level replaces the coarse one inside a window of ``_WINDOW`` coarse
+#: nodes in each direction around the target, through the smooth bump
+#: ``exp(_SHAPE (sqrt(1 - t^2) - 1))``: narrow enough to be a few nodes wide,
+#: wide enough to be resolved by the coarse level (aliasing and truncation both
+#: stay below 1e-9).
+_WINDOW = 10
+_SHAPE = 20.0
 
 #: Ratio of the largest relative error of ``B`` to the misfit of the fitted
 #: field on the ring of nodes just outside the fit, over the gate cases
-#: (axisymmetric and non-axisymmetric tori, ``nfp`` 1-3, 24-96 nodes per
-#: period, targets 1e-4 to 0.3 minor radii on both sides) with a margin of
-#: 2.5; the gate cases reach 0.02 at most.
-_ESTIMATE_FACTOR = 0.05
+#: (non-axisymmetric tori and a rotating ellipse, 16-96 nodes per direction,
+#: targets 1e-4 to 1 minor radii on both sides) with a margin of 2.
+_ESTIMATE_FACTOR = 0.25
 
 
-def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
-                             degree=8):
+def _horner(coefficients, s, degree):
+    """``sum_a coefficients[:, a, b, c] s_x^a s_y^b s_z^c``: vector polynomial by Horner."""
+    x, y, z = s[..., 0:1], s[..., 1:2], s[..., 2:3]
+    total = 0.0
+    for a in range(degree, -1, -1):
+        row = 0.0
+        for b in range(degree - a, -1, -1):
+            line = coefficients[:, a, b, degree - a - b]
+            for c in range(degree - a - b - 1, -1, -1):
+                line = line * z + coefficients[:, a, b, c]
+            row = row * y + line
+        total = total * x + row
+    return total
+
+
+def _bump(t):
+    """1 at ``t = 0``, about ``2e-9`` at ``|t| = 1`` and 0 beyond."""
+    return jnp.where(jnp.abs(t) < 1.0,
+                     jnp.exp(_SHAPE * (jnp.sqrt(1.0 - jnp.minimum(t * t, 1.0)) - 1.0)), 0.0)
+
+
+def near_surface_derivatives(targets, active, coarse, fine, *, order=1, degree=8):
     """``B`` and its derivatives at targets arbitrarily close to the surface.
 
     The layer sum is evaluated for the density of ``field - P``, where ``P`` is
@@ -293,17 +321,21 @@ def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
     exactly -- zero outside the surface and ``-P(x)`` inside -- and is added
     back, derivatives included.  Next to the target ``field - P`` vanishes to
     high order, which removes the near-singular quadrature error that grows as
-    the target approaches the nodes.
+    the target approaches the nodes.  Within a smooth window around the target
+    the sum runs over the ``fine`` level, elsewhere over the ``coarse`` one,
+    so the cost is that of the coarse level.
 
     Parameters
     ----------
-    targets:
-        ``(n, 3)`` points.
-    nodes, normal, field:
-        ``(nt, np, 3)`` quadrature nodes, outward unit normals and the total
-        field at the nodes.
-    weight:
-        ``(nt, np)`` area element of the quadrature (including ``1/(nt np)``).
+    targets, active:
+        ``(n, 3)`` points and an ``(n,)`` mask; the sum is only evaluated for
+        the active targets (inactive ones return zeros), in chunks of 8 sorted
+        so that the active ones come first.
+    coarse, fine:
+        ``(nodes, normal, weight, field)`` at two levels, the fine one a whole
+        multiple of the coarse one: ``(nt, np, 3)`` nodes, outward unit normals
+        and total field, and the ``(nt, np)`` area element including the
+        quadrature weight.
     order:
         Highest derivative returned, ``0..MAX_DERIVATIVE_ORDER``.
     degree:
@@ -313,62 +345,78 @@ def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
     :func:`layer_derivatives` and, per target, an estimate of the relative error
     of ``B``: the misfit of the fitted field on the ring of nodes just outside
     the fitted patch, relative to the RMS field, times a calibrated factor.
-    In the gate cases the first derivative, in units of the surface's minor
-    radius, was never worse than ``20`` times the estimate.
     """
-    patch = _PATCH
+    nodes, normal, weight, field = coarse
+    fine_nodes, _, _, fine_field = fine
     nt, npol = nodes.shape[:2]
+    mt, mp = fine_nodes.shape[:2]
+    ratio = mt // nt
+    half = min(_WINDOW, nt // 2, npol // 2)
     exps, table, degrees = (jnp.asarray(a) for a in _harmonic_gradients(degree))
-    flat_nodes = nodes.reshape(-1, 3)
-    wide = np.arange(-patch - 1, patch + 2)
+    wide = np.arange(-_PATCH - 1, _PATCH + 2)
     offsets = np.stack(np.meshgrid(wide, wide, indexing="ij"), -1).reshape(-1, 2)
-    inner = np.abs(offsets).max(axis=1) <= patch
-    ring = np.abs(offsets).max(axis=1) == patch + 1
-    scale = patch * jnp.median(jnp.linalg.norm(nodes[1:] - nodes[:-1], axis=-1))
-    extent = jnp.min(jnp.ptp(flat_nodes, axis=0)) / 2.0
+    inner = np.abs(offsets).max(axis=1) <= _PATCH
+    ring = np.abs(offsets).max(axis=1) == _PATCH + 1
+    spacing = [jnp.mean(jnp.linalg.norm(jnp.diff(nodes, axis=a), axis=-1)) for a in (0, 1)]
+    scale = _PATCH * jnp.sqrt(spacing[0] * spacing[1]) / ratio
+    extent = jnp.min(jnp.ptp(nodes.reshape(-1, 3), axis=0)) / 2.0
     damping = _FIT_RIDGE * (extent / scale) ** (degrees.astype(nodes.dtype) - 1.0)
     coeff = jnp.fft.fft2(jnp.moveaxis(nodes, -1, 0)) / (nt * npol)
     field_scale = jnp.sqrt(jnp.mean(jnp.sum(field**2, axis=-1)))
-    weight = weight.reshape(-1)
-    flat_normal = normal.reshape(-1, 3)
-    flat_field = field.reshape(-1, 3)
+    flat_nodes, flat_normal = nodes.reshape(-1, 3), normal.reshape(-1, 3)
+    cells = np.arange(1 - half * ratio, half * ratio)
+    bump = _bump(cells / (half * ratio))
+    # the node under the nearest coarse node has a vanishing residual: drop it
+    disc = (bump[:, None] * bump[None, :]).at[half * ratio - 1, half * ratio - 1].set(0.0)
+    tiny = (1.0e-12 * extent) ** 2
 
     def one(x):
         nearest = jnp.argmin(jnp.sum((flat_nodes - x) ** 2, axis=-1))
         i0, j0 = nearest // npol, nearest % npol
-        around = flat_nodes[((i0 + offsets[:, 0]) % nt) * npol + (j0 + offsets[:, 1]) % npol]
-        values = flat_field[((i0 + offsets[:, 0]) % nt) * npol + (j0 + offsets[:, 1]) % npol]
-        centre = flat_nodes[nearest]
-        # The three constant fields come first.  They are set to the field at
-        # the nearest node, so the fit interpolates it exactly: a target at
-        # distance d above that node weighs its density residual by 1/d^2 (and
-        # the gradient by 1/d^3).
-        design = jnp.einsum(
-            "cim,pm->pic", table[3:], _monomials((around[inner] - centre) / scale, exps, degree))
+        rows, cols = (i0 * ratio + offsets[:, 0]) % mt, (j0 * ratio + offsets[:, 1]) % mp
+        around, values = fine_nodes[rows, cols], fine_field[rows, cols]
+        centre, centre_value = nodes[i0, j0], field[i0, j0]
+
+        def local(y):
+            return (y - centre) / scale
+
+        design = jnp.einsum("cim,pm->pic", table[3:], _monomials(local(around[inner]), exps, degree))
         nc = design.shape[-1]
-        rhs = jnp.concatenate([(values[inner] - flat_field[nearest]).reshape(-1),
-                               jnp.zeros(nc, values.dtype)])
-        coefficients = flat_field[nearest]
-        if nc:
-            q, r = jnp.linalg.qr(jnp.concatenate(
-                [design.reshape(-1, nc), jnp.diag(damping[3:])]))
-            coefficients = jnp.concatenate(
-                [coefficients, jax.scipy.linalg.solve_triangular(r, q.T @ rhs)])
-        monomial_coefficients = jnp.einsum("c,cim->im", coefficients, table)
+        rhs = jnp.concatenate([(values[inner] - centre_value).reshape(-1), jnp.zeros(nc, values.dtype)])
+        matrix = jnp.concatenate([design.reshape(-1, nc), jnp.diag(damping[3:])])
+        triangle = jnp.linalg.qr(matrix, mode="r")
+
+        def solve(b):  # semi-normal equations with one refinement step
+            return jax.scipy.linalg.solve_triangular(
+                triangle, jax.scipy.linalg.solve_triangular(triangle, b, trans=1))
+
+        fitted = solve(matrix.T @ rhs)
+        fitted = fitted + solve(matrix.T @ (rhs - matrix @ fitted))
+        monomial_coefficients = jnp.einsum(
+            "c,cim->im", jnp.concatenate([centre_value, fitted]), table)
+        tensor = jnp.zeros((3,) + (degree + 1,) * 3, x.dtype).at[
+            :, exps[:, 0], exps[:, 1], exps[:, 2]].set(monomial_coefficients)
 
         def polynomial(y):
-            return _monomials((y - centre) / scale, exps, degree) @ monomial_coefficients.T
+            return _horner(tensor, local(y), degree)
 
         misfit = jnp.max(jnp.abs(values[ring] - polynomial(around[ring]))) / field_scale
-        residual = flat_field - polynomial(flat_nodes)
-        # The residual vanishes at the nearest node by construction, so its term
-        # is exactly zero; moving that node away keeps a target lying on it
-        # finite, in the value and in the derivatives, without an offset.
+        # coarse nodes weighted by one minus the window, fine nodes by the window
+        wrapped = (jnp.arange(nt) - i0 + nt // 2) % nt - nt // 2, (jnp.arange(npol) - j0 + npol // 2) % npol - npol // 2
+        outside = 1.0 - _bump(wrapped[0] / half)[:, None] * _bump(wrapped[1] / half)[None, :]
+        window = ((i0 * ratio + cells) % mt)[:, None], ((j0 * ratio + cells) % mp)[None, :]
+        pts = jnp.concatenate([flat_nodes, fine_nodes[window].reshape(-1, 3)])
+        unit = jnp.concatenate([flat_normal, fine[1][window].reshape(-1, 3)])
+        total = jnp.concatenate([field.reshape(-1, 3), fine_field[window].reshape(-1, 3)])
+        w = jnp.concatenate([(outside * weight).reshape(-1), (disc * fine[2][window]).reshape(-1)])
+        # a node on the target contributes nothing; moving it away keeps the sum finite
+        coincident = jnp.sum((pts - x) ** 2, axis=-1) < tiny
+        pts = jnp.where(coincident[:, None], 1.0e6, pts)
+        w = jnp.where(coincident, 0.0, w)
+        residual = total - polynomial(pts)
         result = layer_derivatives(
-            x[None], flat_nodes.at[nearest].set(1.0e6),
-            jnp.cross(flat_normal, residual) * weight[:, None],
-            jnp.sum(flat_normal * residual, axis=-1) * weight,
-            order=order)
+            x[None], pts, jnp.cross(unit, residual) * w[:, None],
+            jnp.sum(unit * residual, axis=-1) * w, order=order)
         start = 2.0 * jnp.pi * jnp.stack((i0, j0)).astype(x.dtype) / jnp.asarray((nt, npol), x.dtype)
         inside = jax.lax.stop_gradient(_inside(x, coeff, start, flat_normal[nearest]))
         restored, derivative = [], polynomial
@@ -377,4 +425,18 @@ def near_surface_derivatives(targets, nodes, normal, weight, field, *, order=1,
             derivative = jax.jacfwd(derivative)
         return tuple(restored), _ESTIMATE_FACTOR * misfit
 
-    return jax.lax.map(one, targets, batch_size=8)
+    batch = 8
+    count = targets.shape[0]
+    rank = jnp.argsort(~active)
+    pad = (-count) % batch
+    sorted_targets = jnp.concatenate([targets[rank], jnp.repeat(targets[rank][-1:], pad, axis=0)])
+    flags = jnp.concatenate([active[rank], jnp.zeros(pad, bool)])
+    shape = jax.eval_shape(jax.vmap(one), sorted_targets[:batch])
+    idle = jax.tree_util.tree_map(lambda s: jnp.zeros(s.shape, s.dtype), shape)
+
+    def chunk(args):
+        return jax.lax.cond(jnp.any(args[1]), lambda: jax.vmap(one)(args[0]), lambda: idle)
+
+    out = jax.lax.map(chunk, (sorted_targets.reshape(-1, batch, 3), flags.reshape(-1, batch)))
+    restore = jnp.argsort(rank)
+    return jax.tree_util.tree_map(lambda a: a.reshape((-1,) + a.shape[2:])[:count][restore], out)
