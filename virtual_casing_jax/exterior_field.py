@@ -598,7 +598,7 @@ class VirtualCasingExteriorField:
         # gradient NaN; they are not used there, so move it
         nodes = finest[0].reshape(-1, 3)
         on_node = jax.lax.map(lambda x: jnp.min(jnp.sum((nodes - x) ** 2, axis=-1)),
-                              flat, batch_size=8) < (1.0e-12 * extent) ** 2
+                              flat, batch_size=64) < (1.0e-12 * extent) ** 2
         safe = jnp.where(on_node[:, None], flat + extent, flat)
         closed = self.B_and_derivatives_xyz(safe, order=order)
         rough = self.B_and_derivatives_xyz(safe, order=order, level=coarse)

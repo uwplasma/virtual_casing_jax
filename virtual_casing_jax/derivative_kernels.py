@@ -329,8 +329,8 @@ def near_surface_derivatives(targets, active, coarse, fine, *, order=1, degree=8
     ----------
     targets, active:
         ``(n, 3)`` points and an ``(n,)`` mask; the sum is only evaluated for
-        the active targets (inactive ones return zeros), in chunks of 8 sorted
-        so that the active ones come first.
+        the active targets (inactive ones return zeros), in chunks sorted so
+        that the active ones come first.
     coarse, fine:
         ``(nodes, normal, weight, field)`` at two levels, the fine one a whole
         multiple of the coarse one: ``(nt, np, 3)`` nodes, outward unit normals
@@ -425,7 +425,7 @@ def near_surface_derivatives(targets, active, coarse, fine, *, order=1, degree=8
             derivative = jax.jacfwd(derivative)
         return tuple(restored), _ESTIMATE_FACTOR * misfit
 
-    batch = 8
+    batch = 16 if jax.default_backend() == "cpu" else 64  # chunks the active-first order is cut into
     count = targets.shape[0]
     rank = jnp.argsort(~active)
     pad = (-count) % batch

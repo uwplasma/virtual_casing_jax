@@ -120,7 +120,7 @@ At ``n = 96`` the goal ``e0 <= 1e-8``, ``e1 <= 1e-6`` holds at every distance; a
 smaller ``n`` the data, not the quadrature, sets the error. Orders 2 and 3 lose
 about a digit or two per decade of ``d`` below ``0.1 a``. At the switch (``d`` between
 0.3 and 0.5 a at ``n = 96``) the one-sided mismatch between the two evaluations
-is ``6e-10`` in ``B`` and ``4e-9`` in the gradient; the routed field is
+is ``1.3e-10`` in ``B`` and ``4e-9`` in the gradient; the routed field is
 discontinuous by that much, and no smoothness is claimed across it.
 
 Core types
