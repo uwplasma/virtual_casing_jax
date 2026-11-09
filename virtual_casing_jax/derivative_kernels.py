@@ -188,7 +188,7 @@ def layer_derivatives(targets, sources, sheet_current, charge, *, order=0,
 
     def accumulate(carry, block):
         values = _pair_block(targets, block[0], block[1], block[2], order)
-        return tuple(a + v for a, v in zip(carry, values)), None
+        return tuple(a + v.astype(a.dtype) for a, v in zip(carry, values)), None
 
     total, _ = jax.lax.scan(accumulate, initial, shaped)
     return total
@@ -266,27 +266,18 @@ def _inside(point, coeff, start, outward):
     return (point - surface(uv)) @ normal * jnp.sign(normal @ outward) < -tolerance
 
 
-#: Tikhonov weight of the polynomial fit, relative to the field at one
-#: surface half-width from the fitted patch.  It keeps the fitted field
-#: bounded on the far side of the surface, where it is only extrapolated.
+#: Tikhonov weight of the fit, relative to the field one surface half-width
+#: from the patch: it bounds the polynomial where it is only extrapolated.
 _FIT_RIDGE = 2.0e-10
-
-#: The fit uses the ``(2 * _PATCH + 1)**2`` fine nodes around the nearest
-#: coarse node.
+#: The fit uses the ``(2 * _PATCH + 1)**2`` fine nodes around the nearest node.
 _PATCH = 5
-
-#: The fine level replaces the coarse one inside a window of ``_WINDOW`` coarse
-#: nodes in each direction around the target, through the smooth bump
-#: ``exp(_SHAPE (sqrt(1 - t^2) - 1))``: narrow enough to be a few nodes wide,
-#: wide enough to be resolved by the coarse level (aliasing and truncation both
-#: stay below 1e-9).
-_WINDOW = 10
-_SHAPE = 20.0
-
-#: Ratio of the largest relative error of ``B`` to the misfit of the fitted
-#: field on the ring of nodes just outside the fit, over the gate cases
-#: (non-axisymmetric tori and a rotating ellipse, 16-96 nodes per direction,
-#: targets 1e-4 to 1 minor radii on both sides) with a margin of 2.
+#: The fine level replaces the coarse one within ``_WINDOW`` coarse nodes of the
+#: target, through the bump ``exp(_SHAPE (sqrt(1 - t^2) - 1))``: a few nodes
+#: wide, yet resolved by the coarse level (aliasing and truncation below 1e-9).
+_WINDOW, _SHAPE = 10, 20.0
+#: Largest relative error of ``B`` over the misfit of the fit on the ring of
+#: nodes just outside it, in the gate cases (tori and a rotating ellipse, 16-96
+#: nodes, 1e-4 to 1 minor radii on both sides), with a margin of 2.
 _ESTIMATE_FACTOR = 0.25
 
 
@@ -314,37 +305,25 @@ def _bump(t):
 def near_surface_derivatives(targets, active, coarse, fine, *, order=1, degree=8):
     """``B`` and its derivatives at targets arbitrarily close to the surface.
 
-    The layer sum is evaluated for the density of ``field - P``, where ``P`` is
-    a harmonic polynomial vector field fitted to the surface values of the
-    field around the node nearest to each target.  A harmonic polynomial is
-    harmonic everywhere, so the virtual-casing integral of its trace is known
-    exactly -- zero outside the surface and ``-P(x)`` inside -- and is added
-    back, derivatives included.  Next to the target ``field - P`` vanishes to
-    high order, which removes the near-singular quadrature error that grows as
-    the target approaches the nodes.  Within a smooth window around the target
-    the sum runs over the ``fine`` level, elsewhere over the ``coarse`` one,
-    so the cost is that of the coarse level.
+    The layer sum is taken for the density of ``field - P``, where ``P`` is a
+    harmonic polynomial field fitted to the surface field around the node
+    nearest to each target.  Its layer integral is known exactly -- zero outside
+    the surface, ``-P(x)`` inside, derivatives included -- and is added back;
+    next to the target ``field - P`` vanishes to high order, which removes the
+    near-singular quadrature error.  Within a smooth window around the target
+    the sum runs over the ``fine`` level, elsewhere over the ``coarse`` one.
 
-    Parameters
-    ----------
-    targets, active:
-        ``(n, 3)`` points and an ``(n,)`` mask; the sum is only evaluated for
-        the active targets (inactive ones return zeros), in chunks sorted so
-        that the active ones come first.
-    coarse, fine:
-        ``(nodes, normal, weight, field)`` at two levels, the fine one a whole
-        multiple of the coarse one: ``(nt, np, 3)`` nodes, outward unit normals
-        and total field, and the ``(nt, np)`` area element including the
-        quadrature weight.
-    order:
-        Highest derivative returned, ``0..MAX_DERIVATIVE_ORDER``.
-    degree:
-        Degree of the polynomial field.
+    ``targets`` ``(n, 3)`` are only evaluated where ``active`` ``(n,)`` is true
+    (zeros elsewhere), in chunks of the active-first order.  ``coarse`` and
+    ``fine`` are ``(nodes, normal, weight, field)`` at two levels, the fine one
+    a whole multiple of the coarse one: ``(nt, np, 3)`` nodes, outward unit
+    normals and total field, and the ``(nt, np)`` area element with the
+    quadrature weight.  ``order`` is the highest derivative, ``degree`` that of
+    the polynomial.
 
-    Returns ``(values, estimate)``: the tuple of ``order + 1`` arrays of
-    :func:`layer_derivatives` and, per target, an estimate of the relative error
-    of ``B``: the misfit of the fitted field on the ring of nodes just outside
-    the fitted patch, relative to the RMS field, times a calibrated factor.
+    Returns ``(values, estimate)``: the ``order + 1`` arrays of
+    :func:`layer_derivatives` and, per target, the relative error of ``B``
+    estimated from the misfit of ``P`` on the ring of nodes outside the fit.
     """
     nodes, normal, weight, field = coarse
     fine_nodes, _, _, fine_field = fine
@@ -353,6 +332,7 @@ def near_surface_derivatives(targets, active, coarse, fine, *, order=1, degree=8
     ratio = mt // nt
     half = min(_WINDOW, nt // 2, npol // 2)
     exps, table, degrees = (jnp.asarray(a) for a in _harmonic_gradients(degree))
+    table = table.astype(nodes.dtype)
     wide = np.arange(-_PATCH - 1, _PATCH + 2)
     offsets = np.stack(np.meshgrid(wide, wide, indexing="ij"), -1).reshape(-1, 2)
     inner = np.abs(offsets).max(axis=1) <= _PATCH

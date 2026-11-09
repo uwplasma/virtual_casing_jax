@@ -58,6 +58,9 @@ class ExteriorFieldConfig:
     target_chunk_size: int | str = "auto"
     branch: Branch = "internal"
     use_jit_schedule: bool = True
+    #: Route targets near the surface through ``B_and_derivatives_accurate_xyz``
+    #: (needs a schedule of two or more levels); ``False`` keeps the schedule alone.
+    near_surface: bool = True
     validate_orientation: bool = True
     dtype: str = "float64"
 
@@ -157,9 +160,7 @@ def B_cyl_from_B_xyz(field_fn: Callable, R_phi_Z):
     return xyz_vec_to_cyl_vec(R_phi_Z, field_fn(xyz))
 
 
-#: Squared difference between the coarsest and finest level, times this, bounds
-#: the closed-form error in the gate cases (see ``B_and_derivatives_accurate_xyz``).
-_ROUTE_FACTOR = 30.0
+_ROUTE_FACTOR = 30.0  # closed-form error over the squared level difference, gate cases
 
 
 def default_schedule_levels(nphi: int, ntheta: int, nfp: int):
@@ -546,32 +547,26 @@ class VirtualCasingExteriorField:
     def B_and_derivatives_accurate_xyz(
         self, xyz, *, order=1, tol=1.0e-8, degree=8, branch: Branch | None = None,
     ):
-        """``B`` and its derivatives at any distance from the surface, on either side.
+        """``B`` and its derivatives at any distance from the surface, either side.
 
-        Each target is routed, by a stop-gradient ``jnp.where`` that is safe
-        under ``jit``, to the closed forms of :meth:`B_and_derivatives_xyz`
-        when their estimated error is below ``tol``, and otherwise to a sum that
-        subtracts a fitted harmonic polynomial field of known layer integral
-        and refines the nodes next to the target (see
-        :func:`~virtual_casing_jax.derivative_kernels.near_surface_derivatives`),
-        evaluated only for the targets that need it.  Errors are the scaled
-        ``L**k max|D**k B - ref| / B*`` (``L`` the half-extent of the surface,
-        ``B*`` its RMS field); the ``k``-th derivative may be off by
-        ``tol * 100**k``.  The closed-form error is ``30`` times the squared
-        difference between the coarsest and the finest schedule level (it
-        falls geometrically with the node spacing), a factor that covered every
-        gate case.  It does not see the resolution of the field data itself.
-        The result is discontinuous, by at most ``tol``, where the routing
-        switches.
+        Each target goes to the closed forms of :meth:`B_and_derivatives_xyz`
+        when their estimated error is below ``tol`` and otherwise to the sum of
+        :func:`~virtual_casing_jax.derivative_kernels.near_surface_derivatives`,
+        evaluated only where needed; the routing is a stop-gradient ``where``,
+        safe under ``jit``.  Errors are scaled, ``L**k max|D**k B - ref| / B*``
+        (``L`` the half-extent of the surface, ``B*`` its RMS field), and the
+        ``k``-th derivative may be off by ``tol * 100**k``.  The closed-form
+        error is estimated as ``30`` times the squared difference between the
+        coarsest and the finest level, which covered every gate case; it does not
+        see the resolution of the field data.  The result jumps by at most
+        ``tol`` where the routing switches.
 
-        Returns ``(values, estimate)``: the tuple of ``order + 1`` arrays and a
-        per-target estimate of the relative error of ``B``; for a routed target
-        the misfit of the fitted field one node ring outside the fit times a
-        calibrated factor, so a high value calls for a larger ``degree`` or
-        finer field data.  ``jax.jvp``, ``jax.grad`` and ``jax.jacfwd`` through
-        the targets, the surface and the field data are consistent with the
-        returned derivatives.  A target exactly on the surface returns the
-        outside limit.
+        Returns ``(values, estimate)``: the ``order + 1`` arrays and a relative
+        error estimate of ``B`` per target (for a routed one, from the misfit of
+        the fitted field, so a high value calls for a larger ``degree`` or finer
+        data).  ``jvp``, ``grad`` and ``jacfwd`` through the targets, the surface
+        and the field data agree with the returned derivatives.  A target on the
+        surface returns the outside limit.
         """
         from .derivative_kernels import near_surface_derivatives
 
@@ -617,6 +612,11 @@ class VirtualCasingExteriorField:
             for v, c in zip(values, closed))
         return merged, jnp.where(needs, near, direct).reshape(leading)
 
+    def _routed(self):
+        """Whether ``B_plasma_xyz`` and ``gradB_plasma_xyz`` use the accurate evaluator."""
+        levels = self.schedule_levels
+        return self.config.near_surface and self.config.use_jit_schedule and levels[0] != levels[-1]
+
     def B_plasma_xyz(self, xyz, *, branch: Branch | None = None, return_estimate: bool = False):
         """Return the virtual-casing plasma-current field in Cartesian components.
 
@@ -630,6 +630,10 @@ class VirtualCasingExteriorField:
             raise ValueError("branch must be 'internal' or 'external'")
         xyz_soa, restore = _points_to_soa(xyz)
         xyz_soa = xyz_soa.astype(self.gamma.dtype)
+        if self._routed():
+            (value,), estimate = self.B_and_derivatives_accurate_xyz(
+                xyz_soa.T, order=0, tol=10.0**-self.config.digits, branch=branch)
+            return (restore(value.T), estimate) if return_estimate else restore(value.T)
         if not return_estimate:
             return restore(self._call_vc_B(xyz_soa, branch))
         value, estimate = self._call_vc_B(xyz_soa, branch, return_estimate=True)
@@ -701,6 +705,10 @@ class VirtualCasingExteriorField:
             raise ValueError("branch must be 'internal' or 'external'")
         xyz_soa, _ = _points_to_soa(xyz)
         xyz_soa = xyz_soa.astype(self.gamma.dtype)
+        if self._routed():
+            gradient = self.B_and_derivatives_accurate_xyz(
+                xyz_soa.T, order=1, tol=10.0**-self.config.digits, branch=branch)[0][1]
+            return _restore_matrix_output(jnp.moveaxis(gradient, 0, -1), xyz)
         return _restore_matrix_output(self._call_vc_gradB(xyz_soa, branch), xyz)
 
     def gradB_xyz(self, xyz):

@@ -52,76 +52,77 @@ so ``external + internal = B0`` at every target.
 Targets at any distance from the surface
 ----------------------------------------
 
-The periodic trapezoid rule behind ``B_plasma_xyz`` and
-``B_and_derivatives_xyz`` is near-singular within a few node spacings of the
-surface: the error is of order one a hundredth of a minor radius away, grows
-like ``1/d**k`` for the ``k``-th derivative as the target approaches a node, and
-the closed forms carry no failure signal. ``B_and_derivatives_accurate_xyz``
-evaluates ``B`` and its derivatives up to order 3 at arbitrary targets, on
-either side of the surface, with one call::
+The periodic trapezoid rule is near-singular within a few node spacings of the
+surface: the closed forms of ``B_and_derivatives_xyz`` are off by order one a
+hundredth of a minor radius away, and their error grows like ``1/d**k`` for the
+``k``-th derivative. By default ``B_plasma_xyz``, ``gradB_plasma_xyz`` (and so
+``B_xyz``, ``gradB_xyz``) therefore route each target through
+``B_and_derivatives_accurate_xyz``, on either side of the surface, to ``tol =
+10**-digits``; ``return_estimate=True`` returns the relative error estimate of
+``B``. ``ExteriorFieldConfig(near_surface=False)`` restores the schedule alone,
+as does a single-level schedule or ``use_jit_schedule=False``. The call itself
+gives derivatives up to order 3::
 
     (B, gradB), estimate = field.B_and_derivatives_accurate_xyz(xyz, order=1, tol=1e-8)
 
 Each target is routed, by a stop-gradient ``jnp.where`` that is safe under
-``jit``, to the closed forms when their estimated error is below ``tol`` (for
-``B``; ``100**k * tol`` for the ``k``-th derivative; scaled by the surface
-half-extent ``L`` and the RMS surface field ``B*``), and otherwise to the
-near-surface sum, which is evaluated only for the targets that need it. The
-closed-form estimate is ``30`` times the squared difference between the
-coarsest and the finest schedule level, since the trapezoid error falls
-geometrically with the node spacing.
+``jit``, to the closed forms when their estimated error is below ``tol`` (``100**k
+* tol`` for the ``k``-th derivative, scaled by the surface half-extent ``L`` and
+the RMS surface field ``B*``), and otherwise to the near-surface sum, evaluated
+only for those targets. The closed-form estimate is ``30`` times the squared
+difference between the coarsest and the finest level.
 
 For a routed target a harmonic polynomial field ``P`` is fitted to the surface
 field around the nearest node, and the layer sum is taken for the density of
-``B - P``. The layer integral of the trace of ``P`` is known exactly -- ``0``
-outside the surface and ``-P(x)`` inside it, with the same derivatives -- and is
-added back. Within a smooth window of 10 coarse nodes around the target the sum
-runs over a level twice as fine, elsewhere over the finest schedule level. A
-fixed number of Newton steps on the Fourier interpolant of the surface decides
-the side, so the map is ``jit``-, ``vmap``- and AD-compatible: ``jax.jvp`` and
-``jax.grad`` through the targets, the surface and the field data agree with the
-returned derivatives to rounding. A target exactly on the surface returns the
-outside limit.
+``B - P``. The layer integral of ``P`` is known exactly (``0`` outside the surface,
+``-P(x)`` inside, derivatives included) and is added back. Within a smooth
+window of 10 coarse nodes around the target the sum runs over a level twice as
+fine, elsewhere over the finest schedule level. The side is decided by a fixed
+number of Newton steps on the Fourier interpolant of the surface, so the map is
+``jit``-, ``vmap``- and AD-compatible: ``jvp``, ``grad`` and ``jacfwd`` agree with
+the returned derivatives to rounding. A target on the surface returns the
+outside limit, and the result jumps by at most ``tol`` where the routing switches.
 
-``estimate`` is an array of dimensionless relative errors of ``B``. For a routed
-target it is the misfit of the fitted field one node ring outside the fit, times
-a factor calibrated on the gate cases (the error stayed below a fifth of it; the
-first derivative, in units of ``L``, below 16 times). It cannot see the
-resolution of the field data: with ``n`` nodes per direction the data is only
-known to its Fourier interpolation error, ``6e-4``, ``6e-6`` and ``2e-10`` for
-``n = 24, 48, 96`` on the gate fixture, and no evaluation of the same data does
-better.
+``estimate`` is the misfit of the fitted field one node ring outside the fit,
+times a factor calibrated on the gate cases. It cannot see the resolution of the
+field data: with ``n`` nodes per direction the data is known to its Fourier
+interpolation error, ``6e-4``, ``6e-6`` and ``2e-10`` for ``n = 24, 48, 96`` on
+the gate fixture, and no evaluation of the same data does better.
 
-On a non-axisymmetric two-loop fixture (targets above 8 random surface points and
-2 nodes, on both sides, field grid ``n x n``) the worst scaled errors
-``e_k = L**k max|D**k B - ref| / B*`` over ``d = 10**-4 .. 1`` minor radii are:
+Measured worst scaled errors ``e_k = L**k max|D**k B - ref| / B*`` over
+``d = 10**-4 .. 1`` minor radii, on both sides, targets above random points and
+nodes, with ``n x n`` field data (closed forms at 0.01 a for comparison):
 
 .. list-table::
    :header-rows: 1
 
    * - n
      - closed forms, 0.01 a
-     - accurate, 1e-4 a to 1 a
-     - ``e2``, ``e3`` at 1e-2 a
-   * - 24
-     - e0 22, e1 4e3
-     - e0 1e-4, e1 1.4e-3
-     - 0.1, 13
+     - accurate, non-axisymmetric
+     - accurate, ``R0/a = 3, 8, 12`` (outside)
    * - 48
      - e0 5, e1 1e3
      - e0 1.2e-6, e1 1.1e-5
-     - 3e-4, 0.07
+     - e0 7e-9, 1e-7, 2e-6; e1 2e-6, 1e-5, 4e-5
    * - 96
      - e0 1.2, e1 2.4e2
      - e0 1e-9, e1 3.5e-7
-     - 9e-6, 3e-3
+     - e0 2e-9, 7e-9, 6e-8; e1 3e-6, 1.2e-6, 8e-7
 
-At ``n = 96`` the goal ``e0 <= 1e-8``, ``e1 <= 1e-6`` holds at every distance; at
-smaller ``n`` the data, not the quadrature, sets the error. Orders 2 and 3 lose
-about a digit or two per decade of ``d`` below ``0.1 a``. At the switch (``d`` between
-0.3 and 0.5 a at ``n = 96``) the one-sided mismatch between the two evaluations
-is ``1.3e-10`` in ``B`` and ``4e-9`` in the gradient; the routed field is
-discontinuous by that much, and no smoothness is claimed across it.
+At ``n = 96`` the goal ``e0 <= 1e-8``, ``e1 <= 1e-6`` holds at every distance on
+the non-axisymmetric fixture; at smaller ``n`` the data sets the error. Orders 2
+and 3 lose a digit or two per decade of ``d`` below ``0.1 a``. On a thin torus
+the error has a floor that rises with the aspect ratio (``R0/a = 12``: ``e0``
+``6e-8`` at ``n = 96`` and ``144``, ``2e-8`` at ``192``) that finer data does not
+remove: the fitted polynomial grows like ``(R/a)**8`` over the torus and the
+rounding of its cancelling layer sum is proportional to that. Stronger
+regularization lowers the floor but costs the near-surface ``e1``; a decaying
+point-source basis, a physical-norm penalty and a size-scaled ridge were tried
+and were less accurate. Check ``estimate`` for such surfaces.
+
+Cost: targets the closed forms resolve cost about the same as before (a second
+evaluation at the coarsest level gives the estimate); a routed target costs about
+1 ms (``B``) to 2 ms (with the gradient) at ``n = 96`` on a laptop CPU.
 
 Core types
 ----------
