@@ -158,3 +158,28 @@ def test_the_default_field_methods_are_accurate_next_to_the_surface(side):
     far = _targets(1, 3.0, 0.37)  # transposed layout and the closed forms agree
     np.testing.assert_allclose(default.B_plasma_xyz(far.T), legacy.B_plasma_xyz(far.T), rtol=1e-6)
     np.testing.assert_allclose(default.gradB_plasma_xyz(far), legacy.gradB_plasma_xyz(far), rtol=1e-6, atol=1e-9)
+
+
+def test_the_default_never_does_worse_than_the_closed_forms_on_a_thin_torus(monkeypatch):
+    """Where the data are too coarse for the near sum, a target stays on the closed forms.
+
+    On a torus of aspect ratio 15 with coarse data the near sum is limited by the
+    field data at about 1e-4, while the closed forms are already far better a
+    minor radius or so out; routed targets must keep the better of the two.
+    """
+    import test_offsurface_level_choice as oracle
+
+    monkeypatch.setattr(oracle, "A_MINOR", 0.065)
+    monkeypatch.setattr(oracle, "DELTA", 0.015)
+    surface = oracle._rotating_ellipse(NPHI, NTHETA, NFP)
+    config = ExteriorFieldConfig(digits=8, src_nphi=NPHI, src_ntheta=NTHETA)
+    default = VirtualCasingExteriorField(surface, config)
+    legacy = VirtualCasingExteriorField(surface, replace(config, near_surface=False))
+    for distance in (1.0, 0.7, 0.3, 0.1, 1e-2):
+        points = oracle._offsets(surface, distance * oracle.A_MINOR)
+        expected = oracle._ring_field(points)
+        scale = np.max(np.abs(expected))
+        error = lambda field: np.max(np.abs(np.asarray(field.B_plasma_xyz(points)) - expected)) / scale  # noqa: E731
+        assert error(default) <= 1.5 * error(legacy) + 1e-12, distance
+    far = oracle._offsets(surface, 3.0 * oracle.A_MINOR)
+    np.testing.assert_allclose(default.B_plasma_xyz(far), legacy.B_plasma_xyz(far), rtol=1e-6)

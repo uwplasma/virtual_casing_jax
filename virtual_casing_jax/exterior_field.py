@@ -160,6 +160,7 @@ def B_cyl_from_B_xyz(field_fn: Callable, R_phi_Z):
     return xyz_vec_to_cyl_vec(R_phi_Z, field_fn(xyz))
 
 
+_TRUSTED_GAPS = 1.0  # node spacings out, where the closed-form estimate can be trusted
 _ROUTE_FACTOR = 30.0  # closed-form error over the squared level difference, gate cases
 
 
@@ -552,8 +553,9 @@ class VirtualCasingExteriorField:
         Each target goes to the closed forms of :meth:`B_and_derivatives_xyz`
         when their estimated error is below ``tol`` and otherwise to the sum of
         :func:`~virtual_casing_jax.derivative_kernels.near_surface_derivatives`,
-        evaluated only where needed; the routing is a stop-gradient ``where``,
-        safe under ``jit``.  Errors are scaled, ``L**k max|D**k B - ref| / B*``
+        evaluated only where needed and only where its own error estimate beats
+        the closed forms'; the routing is a stop-gradient ``where``, safe under
+        ``jit``.  Errors are scaled, ``L**k max|D**k B - ref| / B*``
         (``L`` the half-extent of the surface, ``B*`` its RMS field), and the
         ``k``-th derivative may be off by ``tol * 100**k``.  The closed-form
         error is estimated as ``30`` times the squared difference between the
@@ -592,8 +594,9 @@ class VirtualCasingExteriorField:
         # a target on a node would make the closed forms infinite and their
         # gradient NaN; they are not used there, so move it
         nodes = finest[0].reshape(-1, 3)
-        on_node = jax.lax.map(lambda x: jnp.min(jnp.sum((nodes - x) ** 2, axis=-1)),
-                              flat, batch_size=64) < (1.0e-12 * extent) ** 2
+        gap2 = jax.lax.map(lambda x: jnp.min(jnp.sum((nodes - x) ** 2, axis=-1)),
+                           flat, batch_size=64)
+        on_node = gap2 < (1.0e-12 * extent) ** 2
         safe = jnp.where(on_node[:, None], flat + extent, flat)
         closed = self.B_and_derivatives_xyz(safe, order=order)
         rough = self.B_and_derivatives_xyz(safe, order=order, level=coarse)
@@ -607,10 +610,21 @@ class VirtualCasingExteriorField:
             flat, needs, finest, doubled, order=order, degree=int(degree))
         sign = 1.0 if branch == "internal" else -1.0
         leading = points.shape[:-1]
+        # The near sum is only as good as the field data resolve.  Where its
+        # own estimate is not below the closed forms' and the target is a few
+        # node spacings out, where the closed-form estimate can be trusted (it
+        # misses closer in), the closed forms are kept.
+        grid = finest[0]
+        spacing = jnp.max(jnp.stack([
+            jnp.linalg.norm(jnp.diff(grid, axis=axis), axis=-1).max() for axis in (0, 1)]))
+        keep = jax.lax.stop_gradient(
+            ~on_node & (gap2 >= (_TRUSTED_GAPS * spacing) ** 2) & jnp.isfinite(direct)
+            & ~(near < direct))
+        use_near = needs & ~keep
         merged = tuple(
-            sign * jnp.where(needs.reshape((-1,) + (1,) * (v.ndim - 1)), v, c).reshape(leading + v.shape[1:])
+            sign * jnp.where(use_near.reshape((-1,) + (1,) * (v.ndim - 1)), v, c).reshape(leading + v.shape[1:])
             for v, c in zip(values, closed))
-        return merged, jnp.where(needs, near, direct).reshape(leading)
+        return merged, jnp.where(use_near, near, direct).reshape(leading)
 
     def _routed(self):
         """Whether ``B_plasma_xyz`` and ``gradB_plasma_xyz`` use the accurate evaluator."""
