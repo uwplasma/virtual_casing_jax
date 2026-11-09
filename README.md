@@ -186,8 +186,9 @@ B_total = field.B_xyz_sharded(points)
 ```
 
 `B_plasma_xyz` and `gradB_plasma_xyz` send targets whose closed-form quadrature
-is not converged to a near-surface sum (`B_and_derivatives_accurate_xyz`, see
-`docs/exterior_field_api.rst`), so they reach `10**-digits` down to the surface;
+is not converged to a rule graded about the target
+(`B_and_derivatives_accurate_xyz`, see `docs/exterior_field_api.rst`), so they
+reach `10**-digits` down to the surface;
 `ExteriorFieldConfig(near_surface=False)` keeps the schedule alone. The
 older first-order `plan_near_surface` remains for amortized batches.
 

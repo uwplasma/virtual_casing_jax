@@ -26,7 +26,7 @@ from test_offsurface_level_choice import (
 
 from virtual_casing_jax import ExteriorFieldConfig, VirtualCasingExteriorField
 
-NFP, NPHI, NTHETA = 3, 16, 24
+NFP, NPHI, NTHETA = 3, 32, 48
 
 
 def _foot(phi, theta):
@@ -81,8 +81,8 @@ def test_accurate_at_every_distance_where_closed_forms_are_not(field, side, shif
         expected, expected_gradient = _oracle(points, side)
         scale = np.max(np.abs(expected))
         error = np.max(np.abs(np.asarray(value) - expected), axis=1) / scale
-        assert error.max() <= 5e-4, distance
-        assert A_MINOR * np.max(np.abs(np.asarray(gradient) - expected_gradient)) <= 5e-3 * scale
+        assert error.max() <= 1e-8, distance
+        assert A_MINOR * np.max(np.abs(np.asarray(gradient) - expected_gradient)) <= 1e-5 * scale
     closed = np.asarray(field.B_and_derivatives_xyz(points, order=0)[0])
     assert np.max(np.abs(closed - expected)) > 0.1 * scale  # unlike the closed forms
 
@@ -118,7 +118,7 @@ def test_derivatives_are_derivatives_of_the_returned_field_and_nodes_are_finite(
     (node_value, node_gradient), _ = _accurate(field, on_node)
     assert all(np.all(np.isfinite(a)) for a in (node_value, node_gradient, jax.jacfwd(B)(on_node)))
     outside = B(jnp.asarray(_targets(1, 1e-6, 0.0)))
-    assert np.max(np.abs(node_value - outside)) <= 1e-3 * np.max(np.abs(outside))
+    assert np.max(np.abs(node_value - outside)) <= 1e-5 * np.max(np.abs(outside))
 
 
 def test_branches_coefficient_gradient_and_single_level():
@@ -133,7 +133,7 @@ def test_branches_coefficient_gradient_and_single_level():
             .B_and_derivatives_accurate_xyz(points, order=0, branch=branch)[0][0]
 
     expected = _ring_field(np.asarray(points))
-    assert np.max(np.abs(np.asarray(jax.jacfwd(near)(1.0)) - expected)) <= 5e-4 * np.max(np.abs(expected))
+    assert np.max(np.abs(np.asarray(jax.jacfwd(near)(1.0)) - expected)) <= 1e-8 * np.max(np.abs(expected))
     np.testing.assert_allclose(near(1.0, "external"), -near(1.0), rtol=1e-12, atol=1e-14)
     with pytest.raises(ValueError, match="branch"):
         near(1.0, "outside")
@@ -152,8 +152,8 @@ def test_the_default_field_methods_are_accurate_next_to_the_surface(side):
     expected, expected_gradient = _oracle(points, side)
     scale = np.max(np.abs(expected))
     value, estimate = default.B_plasma_xyz(points, return_estimate=True)
-    assert np.max(np.abs(value - expected)) <= 5e-4 * scale and np.max(estimate) < 1e-2
-    assert A_MINOR * np.max(np.abs(default.gradB_plasma_xyz(points) - expected_gradient)) <= 5e-3 * scale
+    assert np.max(np.abs(value - expected)) <= 1e-8 * scale and np.max(estimate) < 1e-6
+    assert A_MINOR * np.max(np.abs(default.gradB_plasma_xyz(points) - expected_gradient)) <= 1e-5 * scale
     assert np.max(np.abs(legacy.B_plasma_xyz(points) - expected)) > 0.1 * scale
     far = _targets(1, 3.0, 0.37)  # transposed layout and the closed forms agree
     np.testing.assert_allclose(default.B_plasma_xyz(far.T), legacy.B_plasma_xyz(far.T), rtol=1e-6)
@@ -182,4 +182,17 @@ def test_the_default_never_does_worse_than_the_closed_forms_on_a_thin_torus(monk
         error = lambda field: np.max(np.abs(np.asarray(field.B_plasma_xyz(points)) - expected)) / scale  # noqa: E731
         assert error(default) <= 1.5 * error(legacy) + 1e-12, distance
     far = oracle._offsets(surface, 3.0 * oracle.A_MINOR)
-    np.testing.assert_allclose(default.B_plasma_xyz(far), legacy.B_plasma_xyz(far), rtol=1e-6)
+    np.testing.assert_allclose(default.B_plasma_xyz(far), legacy.B_plasma_xyz(far), rtol=1e-6, atol=1e-6)
+
+
+def test_the_graded_rule_reproduces_the_closed_forms_where_both_resolve(field):
+    """Forcing every target through the graded rule checks its signs and kernels to order 3."""
+    points = _targets(1, 0.5, 0.37)
+    closed = field.B_and_derivatives_xyz(points, order=3)
+    explicit = VirtualCasingExteriorField(
+        field.surface_data, replace(field.config, graded_nodes=(96, 192)))
+    for source in (field, explicit):
+        graded, estimate = source.B_and_derivatives_accurate_xyz(points, order=3, tol=-1.0)
+        assert np.max(estimate) < 1e-7
+        for order, (got, expected) in enumerate(zip(graded, closed)):
+            assert np.max(np.abs(got - expected)) <= 1e-6 * 10.0**order * np.max(np.abs(expected))
