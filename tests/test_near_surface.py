@@ -196,3 +196,11 @@ def test_the_graded_rule_reproduces_the_closed_forms_where_both_resolve(field):
         assert np.max(estimate) < 1e-7
         for order, (got, expected) in enumerate(zip(graded, closed)):
             assert np.max(np.abs(got - expected)) <= 1e-6 * 10.0**order * np.max(np.abs(expected))
+
+
+def test_routing_by_the_field_alone_does_not_depend_on_the_order_asked_for(field):
+    """With ``route_order=0`` the jets of every order come from the routing of ``B``."""
+    points = _targets(1, 0.5, 0.37)
+    (value,), _ = field.B_and_derivatives_accurate_xyz(points, order=0)
+    (routed, *_), _ = field.B_and_derivatives_accurate_xyz(points, order=3, route_order=0)
+    np.testing.assert_allclose(routed, value, rtol=1e-12, atol=0)

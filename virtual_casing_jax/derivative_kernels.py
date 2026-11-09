@@ -190,5 +190,6 @@ def layer_derivatives(targets, sources, sheet_current, charge, *, order=0,
         values = _pair_block(targets, block[0], block[1], block[2], order)
         return tuple(a + v.astype(a.dtype) for a, v in zip(carry, values)), None
 
-    total, _ = jax.lax.scan(accumulate, initial, shaped)
+    # rematerialised, so a reverse-mode pass keeps one block's working set, not all of them
+    total, _ = jax.lax.scan(jax.checkpoint(accumulate), initial, shaped)
     return total

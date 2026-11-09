@@ -80,9 +80,9 @@ nodes ``theta = theta* + u - a sin u`` (likewise ``phi``), with ``u`` uniform
 and ``a`` chosen so that the local spacing is an eighth of the distance, cluster
 about it: the substitution is entire and periodic, so the trapezoid rule stays
 spectrally accurate while the nodes crowd the singularity. The default node
-count is that of the finest schedule level (``ExteriorFieldConfig.graded_nodes``
-overrides it). Within ``0.3`` half-extents the rule uses twice the nodes, at
-least ``256 x 512``, because resolving a distance does not depend on the data.
+count is twice that of the finest schedule level and at least ``256 x 512``,
+because resolving a distance does not depend on the data
+(``ExteriorFieldConfig.graded_nodes`` overrides it).
 Within ``1e-3`` it is evaluated at that distance, on the target's side, with
 ``B`` and its derivatives to order 3, and Taylor-continued along the normal:
 each side's field is analytic up to the boundary, so a target on the surface
@@ -190,7 +190,7 @@ interpolation error (``1e-5`` to ``1e-7``); ``estimate`` reports that limit.
 
 Cost: targets the closed forms resolve cost about the same as before (a second
 evaluation at the coarsest level gives the estimate); a graded target costs
-about 7 ms (``B``) to 9 ms (with the gradient) between ``1e-3`` and ``0.3`` half-extents, and about 25 ms within ``1e-3`` (order-3 jets on at least 131 072 nodes), at 64 samples per direction on a laptop CPU; the closed forms cost about 0.4 ms. On an accelerator the targets of a chunk run together, but the rule is still several times slower than the closed forms. The graded rule is a point-query tool: it runs target by target, so a
+about 7 ms (``B``) to 9 ms (with the gradient) above ``1e-3`` half-extents, and about 25 ms within it (order-3 jets on at least 131 072 nodes), at 64 samples per direction on a laptop CPU; the closed forms cost about 0.4 ms. On an accelerator the targets of a chunk run together, but the rule is still several times slower than the closed forms. The graded rule is a point-query tool: it runs target by target, so a
 large batch of near-surface targets is better served by the closed forms on a
 finer data set where that is possible.
 

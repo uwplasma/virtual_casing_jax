@@ -63,7 +63,7 @@ class ExteriorFieldConfig:
     #: (needs a schedule of two or more levels); ``False`` keeps the schedule alone.
     near_surface: bool = True
     #: ``(poloidal, toroidal)`` nodes of the graded rule over the full torus;
-    #: ``None`` takes the finest schedule level.
+    #: ``None`` takes twice the finest schedule level, and at least 256 x 512.
     graded_nodes: tuple[int, int] | None = None
     validate_orientation: bool = True
     dtype: str = "float64"
@@ -300,10 +300,8 @@ _GRADING = 8.0
 _MAX_GRADING = 0.9999
 #: Targets closer than this fraction of the half-extent are continued from it.
 _FLOOR = 1.0e-3
-#: Targets closer than this fraction of the half-extent get twice the nodes, and
-#: at least ``_DEEP`` of them: resolving a distance does not depend on the data.
-_BAND = 0.3
-_DEEP = (256, 512)
+#: Fewest nodes of the default rule: resolving a distance does not depend on the data.
+_MIN_NODES = (256, 512)
 
 _ROUTE_FACTOR = 30.0  # closed-form error over the squared level difference, gate cases
 
@@ -708,7 +706,7 @@ class VirtualCasingExteriorField:
         return tuple(v.reshape(leading + v.shape[1:]) for v in values)
 
     def B_and_derivatives_accurate_xyz(
-        self, xyz, *, order=1, tol=1.0e-8, branch: Branch | None = None,
+        self, xyz, *, order=1, tol=1.0e-8, route_order=None, branch: Branch | None = None,
     ):
         """``B`` and its derivatives at any distance from the surface, either side.
 
@@ -721,8 +719,11 @@ class VirtualCasingExteriorField:
         ``k``-th derivative may be off by ``tol * 100**k``.  The closed-form
         error is estimated as ``30`` times the squared difference between the
         coarsest and the finest level, which covered every gate case; it does not
-        see the resolution of the field data.  The result jumps by at most
-        ``tol`` where the routing switches.
+        see the resolution of the field data.  The routing looks at the
+        derivatives up to ``route_order`` (default ``order``); ``route_order=0``
+        makes it that of ``B`` alone, whatever ``order`` is, so that nested
+        derivatives of the order-0 call differentiate the same map.  The result
+        jumps by at most ``tol`` where the routing switches.
 
         Returns ``(values, estimate)``: the ``order + 1`` arrays and a relative
         error estimate of ``B`` per target (for a graded one, the change from
@@ -740,6 +741,7 @@ class VirtualCasingExteriorField:
         if coarse == fine:
             raise ValueError("the error estimate needs a schedule of at least two levels")
         order = int(order)
+        route = order if route_order is None else int(route_order)
         points = jnp.asarray(xyz)
         flat = points.reshape((-1, 3)).astype(self.gamma.dtype)
         nodes = self.level_sources(fine)[0]
@@ -755,7 +757,7 @@ class VirtualCasingExteriorField:
         rough = self.B_and_derivatives_xyz(safe, order=order, level=coarse)
         estimates = [_ROUTE_FACTOR * (extent**k * jnp.max(jnp.abs((a - b).reshape(len(flat), -1)), axis=1)
                                       / reference) ** 2 / 100.0**k
-                     for k, (a, b) in enumerate(zip(closed, rough))]
+                     for k, (a, b) in enumerate(zip(closed[:route + 1], rough[:route + 1]))]
         direct = jnp.max(jnp.stack(estimates), axis=0)
         # ``not (x <= tol)`` sends a NaN estimate to the graded rule
         needs = jax.lax.stop_gradient(~(direct <= tol) | on_node)
@@ -784,14 +786,14 @@ class VirtualCasingExteriorField:
         from .derivative_kernels import MAX_DERIVATIVE_ORDER, layer_derivatives
 
         fine = self.schedule_levels[-1]
-        nodes = self.config.graded_nodes or (fine[1], fine[0])
+        nodes = self.config.graded_nodes or tuple(
+            max(2 * n, m) for n, m in zip((fine[1], fine[0]), _MIN_NODES))
         series = self._cached(("series",), lambda: _graded_series(
             self.gamma, self.B_total, int(self.surface_data.nfp)))
         floor = _FLOOR * extent
-        double = tuple(max(2 * n, m) for n, m in zip(nodes, _DEEP))
 
         def locate(x):
-            """Refinement tier, grading centre, grading distance and lift of one target."""
+            """Whether the target is within the floor, its grading centre and distance, and its lift."""
             x = jax.lax.stop_gradient(x)
             angles = _nearest_surface_point(series, x)
             foot, e_theta, e_phi = _graded_point(series, angles[0], angles[1])
@@ -801,8 +803,7 @@ class VirtualCasingExteriorField:
             distance = jnp.maximum(jnp.abs(height), floor)
             # a target on the surface, to rounding, counts as outside
             side = jnp.where(height < -1.0e-10 * extent, -distance, distance)
-            tier = (jnp.abs(height) < _BAND * extent).astype(int) + (jnp.abs(height) < floor).astype(int)
-            return tier, angles, distance, (side - height) * normal
+            return jnp.abs(height) < floor, angles, distance, (side - height) * normal
 
         def rule(n, k, continued):
             def one(x, angles, distance, lift):
@@ -830,8 +831,8 @@ class VirtualCasingExteriorField:
         idle = zeros(jax.eval_shape(locate, points[0]))
         tier, angles, distance, lift = jax.lax.map(
             lambda a: jax.lax.cond(a[1], locate, lambda _: idle, a[0]), (points, active))
-        # active targets first and the deepest tier first, so that a chunk shares one rule
-        level = jnp.where(active, tier + 1, 0)
+        # active targets first and those within the floor first, so that a chunk shares one rule
+        level = jnp.where(active, 1 + tier, 0)
         rank = jnp.argsort(-level)
         batch = 4 if jax.default_backend() == "cpu" else 32
         padding = (-points.shape[0]) % batch
@@ -841,8 +842,7 @@ class VirtualCasingExteriorField:
             return jnp.concatenate((a, jnp.repeat(a[-1:], padding, axis=0))).reshape((-1, batch) + a.shape[1:])
 
         rules = (lambda *a: zeros(jax.eval_shape(rules[1], *a)),
-                 rule(nodes, order, False), rule(double, order, False),
-                 rule(double, MAX_DERIVATIVE_ORDER, True))
+                 rule(nodes, order, False), rule(nodes, MAX_DERIVATIVE_ORDER, True))
         out = jax.lax.map(
             lambda c: jax.lax.switch(jnp.max(c[0]), rules, *c[1:]),
             tuple(chunks(a) for a in (level, points, angles, distance, lift)))
