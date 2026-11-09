@@ -658,7 +658,7 @@ class VirtualCasingExteriorField:
 
         cache = self.__dict__.setdefault("_level_source_cache", {})
         if key not in cache or traced(cache[key]):
-            value = build()
+            value = jax.jit(build)()  # compiled: eager, these cost seconds
             if traced(value):
                 cache.pop(key, None)  # a stale entry from another trace
                 return value
