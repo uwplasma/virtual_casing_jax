@@ -68,61 +68,131 @@ gives derivatives up to order 3::
 Each target is routed, by a stop-gradient ``jnp.where`` that is safe under
 ``jit``, to the closed forms when their estimated error is below ``tol`` (``100**k
 * tol`` for the ``k``-th derivative, scaled by the surface half-extent ``L`` and
-the RMS surface field ``B*``), and otherwise to the near-surface sum, evaluated
+the RMS surface field ``B*``), and otherwise to a rule graded about the target, evaluated
 only for those targets. The closed-form estimate is ``30`` times the squared
 difference between the coarsest and the finest level.
 
-For a routed target a harmonic polynomial field ``P`` is fitted to the surface
-field around the nearest node, and the layer sum is taken for the density of
-``B - P``. The layer integral of ``P`` is known exactly (``0`` outside the surface,
-``-P(x)`` inside, derivatives included) and is added back. Within a smooth
-window of 10 coarse nodes around the target the sum runs over a level twice as
-fine, elsewhere over the finest schedule level. The side is decided by a fixed
-number of Newton steps on the Fourier interpolant of the surface, so the map is
-``jit``-, ``vmap``- and AD-compatible: ``jvp``, ``grad`` and ``jacfwd`` agree with
-the returned derivatives to rounding. A target on the surface returns the
-outside limit, and the result jumps by at most ``tol`` where the routing switches.
+The graded rule is the same layer sum as the closed forms, over better placed
+nodes. The field data and the boundary are interpolated spectrally from their
+samples (cylindrical components, so one field period suffices). For each target
+the nearest boundary point is found by a fixed number of Newton steps, and the
+nodes ``theta = theta* + u - a sin u`` (likewise ``phi``), with ``u`` uniform
+and ``a`` chosen so that the local spacing is an eighth of the distance, cluster
+about it: the substitution is entire and periodic, so the trapezoid rule stays
+spectrally accurate while the nodes crowd the singularity. The default node
+count is twice that of the finest schedule level and at least ``256 x 512``,
+because resolving a distance does not depend on the data
+(``ExteriorFieldConfig.graded_nodes`` overrides it).
+Within ``1e-3`` it is evaluated at that distance, on the target's side, with
+``B`` and its derivatives to order 3, and Taylor-continued along the normal:
+each side's field is analytic up to the boundary, so a target on the surface
+returns the outside limit. The grading centre is held fixed under
+differentiation (the rule's value does not depend on it), so ``jvp``, ``grad``
+and ``jacfwd`` through the targets and the field data agree with the returned
+derivatives, up to the truncation of the continuation (``1e-8`` of the scale
+within ``1e-3``). The result jumps by at most ``tol`` where the routing
+switches.
 
-``estimate`` is the misfit of the fitted field one node ring outside the fit,
-times a factor calibrated on the gate cases. It cannot see the resolution of the
-field data: with ``n`` nodes per direction the data is known to its Fourier
-interpolation error, ``6e-4``, ``6e-6`` and ``2e-10`` for ``n = 24, 48, 96`` on
-the gate fixture, and no evaluation of the same data does better.
+``estimate`` is, for a graded target, the larger of the change from using
+every second node, the last Taylor term (within ``1e-3``) and the field's
+spectrum in the top quarter of the samples. The last one is what bounds the
+resolution of the data: with ``n`` samples per direction the field is known to
+its Fourier interpolation error, ``6e-4``, ``6e-6`` and ``2e-10`` for
+``n = 24, 48, 96`` on the gate fixture, and no evaluation of the same data does
+better.
 
-Measured worst scaled errors ``e_k = L**k max|D**k B - ref| / B*`` over
-``d = 10**-4 .. 1`` minor radii, on both sides, targets above random points and
-nodes, with ``n x n`` field data (closed forms at 0.01 a for comparison):
+Measured worst scaled errors ``e_k = L**k max|D**k B - ref| / B*`` for ``k = 0``
+(``B``) and ``k = 1`` (``grad B``), over both sides and random targets above
+random nodes, against the same rule on four times the nodes:
 
 .. list-table::
    :header-rows: 1
 
-   * - n
-     - closed forms, 0.01 a
-     - accurate, non-axisymmetric
-     - accurate, ``R0/a = 3, 8, 12`` (outside)
-   * - 48
-     - e0 5, e1 1e3
-     - e0 1.2e-6, e1 1.1e-5
-     - e0 7e-9, 1e-7, 2e-6; e1 2e-6, 1e-5, 4e-5
-   * - 96
-     - e0 1.2, e1 2.4e2
-     - e0 1e-9, e1 3.5e-7
-     - e0 2e-9, 7e-9, 6e-8; e1 3e-6, 1.2e-6, 8e-7
+   * - deck
+     - quantity
+     - d/a = 1
+     - d/a = 0.1
+     - d/a = 0.01
+     - d/a = 0.001
+     - d/a = 0
 
-At ``n = 96`` the goal ``e0 <= 1e-8``, ``e1 <= 1e-6`` holds at every distance on
-the non-axisymmetric fixture; at smaller ``n`` the data sets the error. Orders 2
-and 3 lose a digit or two per decade of ``d`` below ``0.1 a``. On a thin torus
-the error has a floor that rises with the aspect ratio (``R0/a = 12``: ``e0``
-``6e-8`` at ``n = 96`` and ``144``, ``2e-8`` at ``192``) that finer data does not
-remove: the fitted polynomial grows like ``(R/a)**8`` over the torus and the
-rounding of its cancelling layer sum is proportional to that. Stronger
-regularization lowers the floor but costs the near-surface ``e1``; a decaying
-point-source basis, a physical-norm penalty and a size-scaled ridge were tried
-and were less accurate. Check ``estimate`` for such surfaces.
+   * - QA deck, 64x64
+     - B
+     - 7e-15
+     - 8e-15
+     - 4e-14
+     - 9e-12
+     - 4e-11
+
+   *
+     -
+     - grad B
+     - 2e-13
+     - 1e-13
+     - 1e-11
+     - 2e-08
+     - 4e-08
+
+   * - QA deck, 128x128
+     - B
+     - 4e-12
+     - 3e-15
+     - 3e-14
+     - 3e-13
+     - 6e-13
+
+   *
+     -
+     - grad B
+     - 2e-13
+     - 4e-14
+     - 3e-12
+     - 2e-10
+     - 6e-10
+
+   * - QA, R0/a = 15, 64x64
+     - B
+     - 8e-15
+     - 7e-15
+     - 1e-13
+     - 9e-12
+     - 4e-11
+
+   *
+     -
+     - grad B
+     - 1e-13
+     - 1e-13
+     - 2e-11
+     - 2e-08
+     - 5e-08
+
+   * - QA, R0/a = 15, 128x128
+     - B
+     - 2e-13
+     - 4e-15
+     - 5e-14
+     - 5e-13
+     - 1e-12
+
+   *
+     -
+     - grad B
+     - 8e-12
+     - 9e-14
+     - 1e-11
+     - 5e-10
+     - 1e-09
+
+Data of 24 to 48 samples per direction are known only to their Fourier
+interpolation error (``1e-5`` to ``1e-7``); ``estimate`` reports that limit.
+
 
 Cost: targets the closed forms resolve cost about the same as before (a second
-evaluation at the coarsest level gives the estimate); a routed target costs about
-1 ms (``B``) to 2 ms (with the gradient) at ``n = 96`` on a laptop CPU.
+evaluation at the coarsest level gives the estimate); a graded target costs
+about 7 ms (``B``) to 9 ms (with the gradient) above ``1e-3`` half-extents, and about 25 ms within it (order-3 jets on at least 131 072 nodes), at 64 samples per direction on a laptop CPU; the closed forms cost about 0.4 ms. On an accelerator the targets of a chunk run together, but the rule is still several times slower than the closed forms. The graded rule is a point-query tool: it runs target by target, so a
+large batch of near-surface targets is better served by the closed forms on a
+finer data set where that is possible.
 
 Core types
 ----------
