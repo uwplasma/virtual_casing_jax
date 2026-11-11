@@ -5,6 +5,9 @@ This folder mirrors the pedagogic cases from the original
 example (use `PYTHONPATH=.` from the repo root).
 
 Examples:
+- `exterior_field_tutorial.py`: exterior field of a three-period stellarator-like surface against
+  closed-form dipole fields: values, error estimate, derivative jets and `jax.grad`.
+- `mirror_field.py`: field of the sources inside and outside a closed mirror surface with end caps.
 - `w7x_external_B.py`: external-field accuracy on W7-X geometry.
 - `w7x_gradB.py`: GradB accuracy on W7-X geometry.
 - `testdata_phi_grid.py`: validates the phi grid layout for half-period
