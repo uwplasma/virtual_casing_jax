@@ -382,17 +382,18 @@ def _graded_point(series, theta, phi):
     return x[0, 0], e_theta[0, 0], e_phi[0, 0]
 
 
-def _nearest_surface_point(series, point, steps: int = 6):
-    """``(theta, phi)`` of the surface point nearest ``point``.
+def _nearest_surface_point(position, cloud, cloud_angles, spacing, point, steps: int = 6):
+    """Angles of the surface point nearest ``point``, for ``position(a, b)``.
 
-    The nearest cloud sample, then Newton on the squared distance with steps no
-    longer than two cloud spacings, keeping the best iterate.
+    The nearest sample of the ``cloud`` (positions and their angles), then Newton
+    on the squared distance with steps no longer than two cloud ``spacing``s,
+    keeping the best iterate.
     """
-    start = series["cloud_angles"][jnp.argmin(jnp.sum((series["cloud"] - point) ** 2, axis=1))]
-    limit = 2.0 * series["cloud_spacing"]
+    start = cloud_angles[jnp.argmin(jnp.sum((cloud - point) ** 2, axis=1))]
+    limit = 2.0 * spacing
 
     def distance2(angles):
-        return jnp.sum((_graded_point(series, angles[0], angles[1])[0] - point) ** 2)
+        return jnp.sum((position(angles[0], angles[1]) - point) ** 2)
 
     def step(carry, _):
         angles, best, best_value = carry
@@ -795,7 +796,9 @@ class VirtualCasingExteriorField:
         def locate(x):
             """Whether the target is within the floor, its grading centre and distance, and its lift."""
             x = jax.lax.stop_gradient(x)
-            angles = _nearest_surface_point(series, x)
+            angles = _nearest_surface_point(
+                lambda t, p: _graded_point(series, t, p)[0], series["cloud"],
+                series["cloud_angles"], series["cloud_spacing"], x)
             foot, e_theta, e_phi = _graded_point(series, angles[0], angles[1])
             normal = jnp.cross(e_theta, e_phi) * series["orientation"]
             normal = normal / jnp.linalg.norm(normal)
