@@ -317,10 +317,15 @@ def _graded_evaluate(series, phis, thetas):
     half = jnp.einsum("pk,klq->plq", toroidal, c)
     half_phi = jnp.einsum("pk,klq->plq", toroidal * (1j * kp)[None, :], c[..., :3])
 
-    x = jnp.real(jnp.einsum("plq,tl->ptq", half[..., :3], poloidal))
-    x_theta = jnp.real(jnp.einsum("plq,tl->ptq", half[..., :3], poloidal * (1j * kt)[None, :]))
-    x_phi = jnp.real(jnp.einsum("plq,tl->ptq", half_phi, poloidal))
-    B = jnp.real(jnp.einsum("plq,tl->ptq", half[..., 3:], poloidal))
+    def real_sum(a, b):
+        """``Re sum_l a[p, l, q] b[t, l]`` as two real products: half of a complex one."""
+        return (jnp.einsum("plq,tl->ptq", a.real, b.real)
+                - jnp.einsum("plq,tl->ptq", a.imag, b.imag))
+
+    x = real_sum(half[..., :3], poloidal)
+    x_theta = real_sum(half[..., :3], poloidal * (1j * kt)[None, :])
+    x_phi = real_sum(half_phi, poloidal)
+    B = real_sum(half[..., 3:], poloidal)
     cosine, sine = jnp.cos(phis)[:, None], jnp.sin(phis)[:, None]
 
     def cartesian(v):
@@ -828,9 +833,7 @@ class VirtualCasingExteriorField:
         def zeros(shapes):
             return jax.tree_util.tree_map(lambda a: jnp.zeros(a.shape, a.dtype), shapes)
 
-        idle = zeros(jax.eval_shape(locate, points[0]))
-        tier, angles, distance, lift = jax.lax.map(
-            lambda a: jax.lax.cond(a[1], locate, lambda _: idle, a[0]), (points, active))
+        tier, angles, distance, lift = jax.lax.map(locate, points, batch_size=1024)
         # active targets first and those within the floor first, so that a chunk shares one rule
         level = jnp.where(active, 1 + tier, 0)
         rank = jnp.argsort(-level)
