@@ -52,8 +52,6 @@ class ExteriorFieldConfig:
     """Configuration for fixed-schedule exterior-field evaluation."""
 
     digits: int = 8
-    src_nphi: int = 64
-    src_ntheta: int = 64
     levels: tuple[tuple[int, int], ...] | None = None
     chunk_size: int | str = "auto"
     target_chunk_size: int | str = "auto"
@@ -65,7 +63,6 @@ class ExteriorFieldConfig:
     #: ``(poloidal, toroidal)`` nodes of the graded rule over the full torus;
     #: ``None`` takes twice the finest schedule level, and at least 256 x 512.
     graded_nodes: tuple[int, int] | None = None
-    validate_orientation: bool = True
     dtype: str = "float64"
 
 
