@@ -363,6 +363,9 @@ def _graded_series(gamma, field, nfp):
                 np.where(np.arange(len(pick)) < n, k[pick], -k[pick]))
 
     (rows, w_t, k_t), (cols, w_p, k_p) = modes(nphi), modes(ntheta)
+    # real data: the modes of negative poloidal wavenumber are the conjugates of the others
+    positive = k_p >= 0
+    cols, w_p, k_p = cols[positive], w_p[positive] * np.where(k_p[positive] > 0, 2.0, 1.0), k_p[positive]
     series = dict(coefficients=coefficients[rows][:, cols] * (w_t[:, None] * w_p[None, :])[..., None],
                   kp=jnp.asarray(k_t * nfp), kt=jnp.asarray(k_p))
     # the field's spectrum within the top quarter of either direction: what the samples cannot resolve
@@ -837,7 +840,7 @@ class VirtualCasingExteriorField:
         # active targets first and those within the floor first, so that a chunk shares one rule
         level = jnp.where(active, 1 + tier, 0)
         rank = jnp.argsort(-level)
-        batch = 4 if jax.default_backend() == "cpu" else 32
+        batch = min(points.shape[0], 4 if jax.default_backend() == "cpu" else 32)
         padding = (-points.shape[0]) % batch
 
         def chunks(a):
@@ -846,8 +849,9 @@ class VirtualCasingExteriorField:
 
         rules = (lambda *a: zeros(jax.eval_shape(rules[1], *a)),
                  rule(nodes, order, False), rule(nodes, MAX_DERIVATIVE_ORDER, True))
+        # rematerialised per chunk: a reverse pass keeps the chunk's inputs, not the layer sums' tapes
         out = jax.lax.map(
-            lambda c: jax.lax.switch(jnp.max(c[0]), rules, *c[1:]),
+            jax.checkpoint(lambda c: jax.lax.switch(jnp.max(c[0]), rules, *c[1:])),
             tuple(chunks(a) for a in (level, points, angles, distance, lift)))
         return jax.tree_util.tree_map(
             lambda a: a.reshape((-1,) + a.shape[2:])[:points.shape[0]][jnp.argsort(rank)], out)
