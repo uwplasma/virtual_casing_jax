@@ -85,21 +85,21 @@ def test_precision_pilot_tiles_targets_without_changing_plan(monkeypatch):
         vc.setup(_DIG, _NFP, _HP, nt, npol, X, nt, npol, nt, npol)
         return vc.plan_precision()
 
-    original = vc_module.laplace_dx_u_eval_singular
+    original = vc_module.laplace_fxd_u_eval_singular
     tiles = []
 
     def record(*args, **kwargs):
         tiles.append(kwargs.get("target_chunk_size"))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(vc_module, "laplace_dx_u_eval_singular", record)
+    monkeypatch.setattr(vc_module, "laplace_fxd_u_eval_singular", record)
     tiled = plan()
     assert tiles and all(t is not None and 0 < t < nt*npol for t in tiles)
 
     def unblocked(*args, **kwargs):
         return original(*args, **dict(kwargs, target_chunk_size=None))
 
-    monkeypatch.setattr(vc_module, "laplace_dx_u_eval_singular", unblocked)
+    monkeypatch.setattr(vc_module, "laplace_fxd_u_eval_singular", unblocked)
     reference = plan()
     assert (tiled.quad_nt, tiled.quad_np, tiled.patch_dim0) == (
         reference.quad_nt, reference.quad_np, reference.patch_dim0)
