@@ -34,6 +34,12 @@ so ``external + internal = B0`` at every target.
   ``internal = B0/2 - PV``. The jump between the two one-sided limits is
   ``B0``. ``compute_principal_value_B`` returns ``PV = (external - internal)/2``
   in a single quadrature pass.
+- Sign of the principal value. In the layer-potential convention
+  ``V^{+-} = PV V +- b/2`` (``V^+`` the limit from outside of the field of the
+  inside sources, ``b`` the trace), ``V^+`` is ``compute_internal_B`` and
+  ``V^-`` is ``-compute_external_B``, so ``PV V = -compute_principal_value_B``.
+  The method returns the average of the two limits of the *total* field, not
+  of ``V``; negate it to compare with ``PV V``.
 - A constant ``B0`` has only outside sources: ``external = B0``,
   ``internal = 0`` and ``PV = B0/2``.
 - Off the surface the jump term is absent. ``B_plasma_xyz`` with
@@ -48,6 +54,20 @@ so ``external + internal = B0`` at every target.
 - On the surface, field values (order 0) and their gradients are available;
   higher derivative orders are evaluated off the surface only
   (``B_and_derivatives_xyz``).
+
+Density space
+-------------
+
+The trace is sampled as a vector field and integrated against the surface
+normal, so the unit normal's own spectrum enters the integrand. The sampled
+Cartesian components must be band-limited below the Nyquist index of the source
+grid, and the quadrature grid is chosen to integrate a constant trace to
+``10**-digits``. A trace derived from a scalar, ``s n`` (a pure charge) or
+``s e_theta`` (a pure current), is not band-limited at all, since the
+normal or tangent adds an infinite geometric tail: keep the scalar ``s`` to
+poloidal ``m`` and toroidal (per period) ``k`` at most half the Nyquist index
+(``m <= n_theta/4``, ``k <= n_phi/4``, with ``n_phi`` the samples per field period).
+Above that the error grows; the returned error estimate flags it.
 
 Targets at any distance from the surface
 ----------------------------------------

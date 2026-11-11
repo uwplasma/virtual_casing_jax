@@ -153,7 +153,7 @@ def test_branches_coefficient_gradient_and_single_level():
 @pytest.mark.parametrize("side", (1, -1))
 def test_the_default_field_methods_are_accurate_next_to_the_surface(side):
     surface = _rotating_ellipse(NPHI, NTHETA, NFP)
-    config = ExteriorFieldConfig(digits=6, src_nphi=NPHI, src_ntheta=NTHETA)
+    config = ExteriorFieldConfig(digits=6)
     default = VirtualCasingExteriorField(surface, config)
     legacy = VirtualCasingExteriorField(surface, replace(config, near_surface=False))
     points = _targets(side, 1e-3, 0.37)
@@ -180,7 +180,7 @@ def test_the_default_never_does_worse_than_the_closed_forms_on_a_thin_torus(monk
     monkeypatch.setattr(oracle, "A_MINOR", 0.065)
     monkeypatch.setattr(oracle, "DELTA", 0.015)
     surface = oracle._rotating_ellipse(NPHI, NTHETA, NFP)
-    config = ExteriorFieldConfig(digits=8, src_nphi=NPHI, src_ntheta=NTHETA)
+    config = ExteriorFieldConfig(digits=8)
     default = VirtualCasingExteriorField(surface, config)
     legacy = VirtualCasingExteriorField(surface, replace(config, near_surface=False))
     for distance in (1.0, 0.7, 0.3, 0.1, 1e-2):
