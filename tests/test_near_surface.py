@@ -16,9 +16,12 @@ import numpy as np
 import pytest
 from test_offsurface_level_choice import (
     A_MINOR,
+    CURRENT,
     DELTA,
+    MU0,
     R0,
     _field,
+    _offsets,
     _ring_field,
     _rotating_ellipse,
     _z_axis_field,
@@ -204,3 +207,24 @@ def test_routing_by_the_field_alone_does_not_depend_on_the_order_asked_for(field
     (value,), _ = field.B_and_derivatives_accurate_xyz(points, order=0)
     (routed, *_), _ = field.B_and_derivatives_accurate_xyz(points, order=3, route_order=0)
     np.testing.assert_allclose(routed, value, rtol=1e-12, atol=0)
+
+
+def test_coarse_data_without_axisymmetry_keeps_the_toroidal_modes_it_resolves():
+    """One period of data (nfp = 1) from sources of no symmetry: its spectrum is not centred on mode 0."""
+    angle = 2.0 * np.pi * np.arange(512) / 512
+    plane = np.stack([np.cos(angle), np.cos(0.6) * np.sin(angle), np.sin(0.6) * np.sin(angle)], axis=1)
+    source, tangent = np.array([1.9, 0.5, 0.4]) + 0.25 * plane, np.stack(
+        [-np.sin(angle), np.cos(0.6) * np.cos(angle), np.sin(0.6) * np.cos(angle)], axis=1)
+
+    def loop(points):  # an off-axis loop outside the surface
+        separation = points[:, None, :] - source[None]
+        return 0.125 * np.mean(np.cross(tangent[None], separation) / np.linalg.norm(
+            separation, axis=-1, keepdims=True) ** 3, axis=1) * MU0 * CURRENT
+
+    surface = _rotating_ellipse(24, 36, 1)
+    nodes = np.asarray(surface.gamma).reshape(3, -1).T
+    B_total = jnp.asarray((_ring_field(nodes) + loop(nodes)).T.reshape(surface.gamma.shape))
+    coarse = _field(replace(surface, B_total=B_total), 8)
+    points = _offsets(surface, 0.1 * A_MINOR)
+    error = np.max(np.abs(_accurate(coarse, points, 0)[0][0] - _ring_field(points))) / np.max(np.abs(_ring_field(points)))
+    assert error <= 4e-4  # 5.3e-4 with the cylindrical window
