@@ -16,11 +16,15 @@ import numpy as np
 import pytest
 from test_offsurface_level_choice import (
     A_MINOR,
+    B0R0,
+    CURRENT,
     DELTA,
+    MU0,
     R0,
     _field,
     _ring_field,
     _rotating_ellipse,
+    _scale,
     _z_axis_field,
 )
 
@@ -65,6 +69,10 @@ def _oracle(points, side):
 @pytest.fixture(scope="module")
 def field():
     return _field(_rotating_ellipse(NPHI, NTHETA, NFP), 6)
+
+
+def _scale_of(field):
+    return _scale(field.surface_data)
 
 
 def _accurate(field, points, order=1, **kwargs):
@@ -204,3 +212,59 @@ def test_routing_by_the_field_alone_does_not_depend_on_the_order_asked_for(field
     (value,), _ = field.B_and_derivatives_accurate_xyz(points, order=0)
     (routed, *_), _ = field.B_and_derivatives_accurate_xyz(points, order=3, route_order=0)
     np.testing.assert_allclose(routed, value, rtol=1e-12, atol=0)
+
+
+def _oracle_jets(points, side, order=3):
+    """Jets to ``order`` of the filament (outside) or minus the z-axis (inside) field.
+
+    Automatic derivatives of the analytic formulas, which share nothing with the
+    layer sums under test.
+    """
+    angle = 2.0 * jnp.pi * jnp.arange(2048) / 2048
+    source = jnp.stack([R0 * jnp.cos(angle), R0 * jnp.sin(angle), 0.0 * angle], axis=1)
+    tangent = jnp.stack([-jnp.sin(angle), jnp.cos(angle), 0.0 * angle], axis=1)
+
+    def ring(x):
+        r = x - source
+        kernel = jnp.cross(tangent, r) / jnp.linalg.norm(r, axis=1, keepdims=True) ** 3
+        return MU0 * CURRENT * R0 / (2.0 * len(angle)) * jnp.sum(kernel, axis=0)
+
+    def axis(x):
+        return -B0R0 * jnp.array([-x[1], x[0], 0.0]) / (x[0] ** 2 + x[1] ** 2)
+
+    function, jets = (ring if side > 0 else axis), []
+    for _ in range(order + 1):
+        jets.append(np.asarray(jax.jit(jax.vmap(function))(jnp.asarray(points))))
+        function = jax.jacfwd(function)
+    return jets
+
+
+@pytest.fixture(scope="module")
+def routed_jets(field):
+    return jax.jit(lambda p: field.B_and_derivatives_accurate_xyz(p, order=3)[0])
+
+
+def _jet_errors(routed_jets, field_scale, points, side):
+    """Scaled ``L**k max|D**k B - ref| / B*`` for k = 0..3."""
+    got = routed_jets(jnp.asarray(points))
+    return [A_MINOR**k * np.max(np.abs(np.asarray(g) - r)) / field_scale
+            for k, (g, r) in enumerate(zip(got, _oracle_jets(points, side)))]
+
+
+@pytest.mark.parametrize("side, distance", ((1, 3.0), (1, 0.5), (1, 1e-2), (-1, 0.5), (-1, 1e-2)))
+def test_jets_of_orders_two_and_three_match_the_filament_fields(field, routed_jets, side, distance):
+    """The closed forms (far) and the graded rule (near), on both sides, to third order."""
+    scale = _scale_of(field)
+    errors = _jet_errors(routed_jets, scale, _targets(side, distance, 0.37), side)
+    for order, (error, gate) in enumerate(zip(errors, (1e-8, 1e-7, 1e-6, 1e-5))):
+        assert error <= gate, (order, error)
+
+
+@pytest.mark.parametrize("side", (1, -1))
+def test_jets_within_the_floor_are_limited_by_the_continuation(field, routed_jets, side):
+    """Closer than ``_FLOOR`` the jets are Taylor-continued from the floor, third order without a fourth.
+
+    Orders 0 and 1 keep their gates; order 2 is good to about ``1e-4`` and order 3 to a few percent.
+    """
+    errors = _jet_errors(routed_jets, _scale_of(field), _targets(side, 1e-4, 0.37), side)
+    assert all(error <= gate for error, gate in zip(errors, (1e-8, 1e-6, 3e-4, 0.15))), errors
