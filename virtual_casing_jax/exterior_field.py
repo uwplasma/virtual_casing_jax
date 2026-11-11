@@ -446,23 +446,27 @@ def _graded_sources(series, center, distance, nodes):
     return x, jnp.cross(area, B), jnp.sum(area * B, axis=-1)
 
 
-def _continue(jets, delta, order):
+def _continue(jets, delta, order, extent):
     """Taylor-continue ``jets`` (``B`` and its derivatives) by ``delta``, to ``order``.
 
-    Also returns the last term of the series for ``B``, which bounds what the
-    truncation and the data's own error in the highest derivative leave.
+    Also returns, per derivative, the size of what the series leaves out.  For
+    ``B`` this is its last term; for a derivative whose series has no term to
+    spare, the last term times ``(len(jets) + 1) |delta| / extent`` stands in
+    for the next one, which is not known.  Both bound what the truncation
+    and the data's own error in the highest derivative leave.
     """
-    out, last = [], 0.0
+    out, left = [], []
     for j in range(order + 1):
-        total = jets[j]
+        total, last = jets[j], jets[j]
         for k in range(1, len(jets) - j):
             term = jets[j + k]
             for _ in range(k):
                 term = term @ delta
-            total = total + term / math.factorial(k)
-            last = term / math.factorial(k) if j == 0 else last
+            last = term / math.factorial(k)
+            total = total + last
         out.append(total)
-    return tuple(out), jnp.max(jnp.abs(last))
+        left.append(jnp.max(jnp.abs(last)) * (1.0 if j == 0 else (len(jets) + 1) * jnp.linalg.norm(delta) / extent))
+    return tuple(out), left
 
 
 class VirtualCasingExteriorField:
@@ -789,7 +793,9 @@ class VirtualCasingExteriorField:
         exterior and interior fields are analytic up to the surface, so the
         outside limit is what a target on it returns.  The estimate is the
         difference from the same rule on every second node, or the larger of that
-        and the field's spectrum at the edge of what the samples resolve.  The
+        and the field's spectrum at the edge of what the samples resolve.  Within the
+        floor the derivatives count too, by what their continuation leaves out
+        scaled by ``100**-k``, and orders two and up use twice the nodes.  The
         grading centre is held fixed under differentiation.
         """
         from .derivative_kernels import MAX_DERIVATIVE_ORDER, layer_derivatives
@@ -821,17 +827,27 @@ class VirtualCasingExteriorField:
                 moved = x + lift
                 grid, current, charge = _graded_sources(series, angles, distance, n)
 
-                def layer(step, weight, order):
+                def layer(step, weight, order, at=moved):
                     return layer_derivatives(
-                        moved[None], grid[::step, ::step].reshape(-1, 3),
+                        at[None], grid[::step, ::step].reshape(-1, 3),
                         weight * current[::step, ::step].reshape(-1, 3),
                         weight * charge[::step, ::step].reshape(-1), order=order)
 
                 jets = tuple(v[0] for v in layer(1, 1.0, k))
                 miss = jnp.max(jnp.abs(jets[0] - layer(2, 4.0, 0)[0][0])) / reference
                 if continued:
-                    jets, tail = _continue(jets, -lift, order)
-                    miss = jnp.maximum(miss, tail / reference)
+                    start = jets[-1]
+                    jets, left = _continue(jets, -lift, order, extent)
+                    if order > 2:
+                        # the missing fourth derivative along the normal: the third at twice the height
+                        up = (moved - _graded_point(series, angles[0], angles[1])[0]) / distance
+                        far = layer(1, 1.0, 3, moved + distance * up)[3][0]
+                        fix = (-lift @ up) * (far - start) / distance
+                        jets = jets[:3] + (jets[3] + fix,)
+                        left[3] = jnp.max(jnp.abs(fix)) * 5.0 * (jnp.linalg.norm(lift) + distance) / extent
+                    # the k-th derivative may be off by ``tol * 100**k``, scaled by the extent
+                    miss = jnp.maximum(miss, jnp.max(jnp.stack(
+                        [m * extent**j / 100.0**j for j, m in enumerate(left)])) / reference)
                 return jets, jnp.maximum(miss, series["tail"] / reference)
 
             return jax.vmap(one)
@@ -851,7 +867,8 @@ class VirtualCasingExteriorField:
             return jnp.concatenate((a, jnp.repeat(a[-1:], padding, axis=0))).reshape((-1, batch) + a.shape[1:])
 
         rules = (lambda *a: zeros(jax.eval_shape(rules[1], *a)),
-                 rule(nodes, order, False), rule(nodes, MAX_DERIVATIVE_ORDER, True))
+                 rule(nodes, order, False),
+                 rule(nodes if order < 2 else tuple(2 * m for m in nodes), MAX_DERIVATIVE_ORDER, True))
         # rematerialised per chunk: a reverse pass keeps the chunk's inputs, not the layer sums' tapes
         out = jax.lax.map(
             jax.checkpoint(lambda c: jax.lax.switch(jnp.max(c[0]), rules, *c[1:])),

@@ -261,10 +261,16 @@ def test_jets_of_orders_two_and_three_match_the_filament_fields(field, routed_je
 
 
 @pytest.mark.parametrize("side", (1, -1))
-def test_jets_within_the_floor_are_limited_by_the_continuation(field, routed_jets, side):
-    """Closer than ``_FLOOR`` the jets are Taylor-continued from the floor, third order without a fourth.
+def test_jets_within_the_floor_are_continued_and_the_estimate_covers_them(field, side):
+    """Closer than ``_FLOOR`` the jets are Taylor-continued from the floor, the fourth derivative from a second height.
 
-    Orders 0 and 1 keep their gates; order 2 is good to about ``1e-4`` and order 3 to a few percent.
+    Orders 0 and 1 keep their gates, order 2 is good to ``3e-5`` and order 3 to a few ``1e-3``; the
+    estimate bounds every order, scaled by ``100**-k``.
     """
-    errors = _jet_errors(routed_jets, _scale_of(field), _targets(side, 1e-4, 0.37), side)
-    assert all(error <= gate for error, gate in zip(errors, (1e-8, 1e-6, 3e-4, 0.15))), errors
+    points = _targets(side, 1e-4, 0.37)
+    jets, estimate = jax.jit(lambda p: field.B_and_derivatives_accurate_xyz(p, order=3))(jnp.asarray(points))
+    scale = _scale_of(field)
+    errors = [A_MINOR**k * np.max(np.abs(np.asarray(g) - r)) / scale
+              for k, (g, r) in enumerate(zip(jets, _oracle_jets(points, side)))]
+    assert all(error <= gate for error, gate in zip(errors, (1e-8, 1e-6, 3e-5, 3e-3))), errors
+    assert all(error / 100.0**k <= np.max(estimate) for k, error in enumerate(errors)), (errors, estimate)
