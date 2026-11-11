@@ -100,7 +100,7 @@ def b_external(x, pf=PF):
 
 def make(B):
     return VirtualCasingExteriorField(
-        torus_data(B), ExteriorFieldConfig(src_nphi=N, src_ntheta=N)
+        torus_data(B), ExteriorFieldConfig()
     )
 
 

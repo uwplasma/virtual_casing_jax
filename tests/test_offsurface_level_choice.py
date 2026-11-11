@@ -75,7 +75,6 @@ def _field(surface, digits, levels=None):
         surface,
         ExteriorFieldConfig(
             digits=digits, levels=levels,
-            src_nphi=int(surface.gamma.shape[1]), src_ntheta=int(surface.gamma.shape[2]),
             near_surface=False,  # these tests are about the schedule alone
         ),
     )
@@ -271,8 +270,7 @@ def test_gradient_schedule_reports_its_own_estimate():
 def test_return_estimate_needs_the_jitted_schedule():
     surface = _rotating_ellipse(8, 8, 3)
     field = VirtualCasingExteriorField(
-        surface, ExteriorFieldConfig(digits=3, use_jit_schedule=False,
-                                     src_nphi=8, src_ntheta=8))
+        surface, ExteriorFieldConfig(digits=3, use_jit_schedule=False))
     with pytest.raises(ValueError, match="use_jit_schedule"):
         field.B_plasma_error_estimate(_offsets(surface, 0.2, count=2))
 
