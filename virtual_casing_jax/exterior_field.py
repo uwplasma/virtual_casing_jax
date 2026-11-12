@@ -297,6 +297,8 @@ _GRADING = 8.0
 _MAX_GRADING = 0.9999
 #: Targets closer than this fraction of the half-extent are continued from it.
 _FLOOR = 1.0e-3
+#: Safety factor on the rule's noise, amplified by the continuation, in the error estimate.
+_SAFETY = 10.0
 #: Fewest nodes of the default rule: resolving a distance does not depend on the data.
 _MIN_NODES = (256, 512)
 
@@ -443,14 +445,16 @@ def _graded_sources(series, center, distance, nodes):
     return x, jnp.cross(area, B), jnp.sum(area * B, axis=-1)
 
 
-def _continue(jets, delta, order, extent):
+def _continue(jets, delta, order, extent, noise, distance):
     """Taylor-continue ``jets`` (``B`` and its derivatives) by ``delta``, to ``order``.
 
     Also returns, per derivative, the size of what the series leaves out.  For
     ``B`` this is its last term; for a derivative whose series has no term to
     spare, the last term times ``(len(jets) + 1) |delta| / extent`` stands in
     for the next one, which is not known.  Both bound what the truncation
-    and the data's own error in the highest derivative leave.
+    and the data's own error in the highest derivative leave.  A sum off by
+    ``noise`` at ``distance`` from the surface has its derivatives of order two
+    and up off by ``noise / distance**j`` (``_SAFETY`` times, as a bound).
     """
     out, left = [], []
     for j in range(order + 1):
@@ -463,6 +467,8 @@ def _continue(jets, delta, order, extent):
             total = total + last
         out.append(total)
         left.append(jnp.max(jnp.abs(last)) * (1.0 if j == 0 else (len(jets) + 1) * jnp.linalg.norm(delta) / extent))
+        if j > 1:
+            left[j] = jnp.maximum(left[j], _SAFETY * noise / distance**j)
     return tuple(out), left
 
 
@@ -834,14 +840,14 @@ class VirtualCasingExteriorField:
                 miss = jnp.max(jnp.abs(jets[0] - layer(2, 4.0, 0)[0][0])) / reference
                 if continued:
                     start = jets[-1]
-                    jets, left = _continue(jets, -lift, order, extent)
+                    jets, left = _continue(jets, -lift, order, extent, miss * reference, distance)
                     if order > 2:
                         # the missing fourth derivative along the normal: the third at twice the height
                         up = (moved - _graded_point(series, angles[0], angles[1])[0]) / distance
                         far = layer(1, 1.0, 3, moved + distance * up)[3][0]
                         fix = (-lift @ up) * (far - start) / distance
                         jets = jets[:3] + (jets[3] + fix,)
-                        left[3] = jnp.max(jnp.abs(fix)) * 5.0 * (jnp.linalg.norm(lift) + distance) / extent
+                        left[3] = jnp.maximum(left[3], jnp.max(jnp.abs(fix)) * 5.0 * (jnp.linalg.norm(lift) + distance) / extent)
                     # the k-th derivative may be off by ``tol * 100**k``, scaled by the extent
                     miss = jnp.maximum(miss, jnp.max(jnp.stack(
                         [m * extent**j / 100.0**j for j, m in enumerate(left)])) / reference)

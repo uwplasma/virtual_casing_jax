@@ -22,6 +22,7 @@ from test_offsurface_level_choice import (
     MU0,
     R0,
     _field,
+    _offsets,
     _ring_field,
     _rotating_ellipse,
     _scale,
@@ -274,3 +275,28 @@ def test_jets_within_the_floor_are_continued_and_the_estimate_covers_them(field,
               for k, (g, r) in enumerate(zip(jets, _oracle_jets(points, side)))]
     assert all(error <= gate for error, gate in zip(errors, (1e-8, 1e-6, 3e-5, 3e-3))), errors
     assert all(error / 100.0**k <= np.max(estimate) for k, error in enumerate(errors)), (errors, estimate)
+
+
+@pytest.mark.parametrize("side", (1, -1))
+@pytest.mark.parametrize("kind", ("constant", "external"))
+def test_estimate_bounds_the_error_within_the_floor_where_the_jets_are_known_exactly(kind, side):
+    """A constant trace and an external-only trace have exact jets (zero or minus the trace's field).
+
+    The estimate, scaled by ``100**k``, must bound the error of every order at 1e-4 of the minor radius,
+    on data the rule resolves only to a few digits.
+    """
+    constant = np.array([0.3, -0.2, 0.5])
+    surface = _rotating_ellipse(24, 24, 1 if kind == "constant" else 3)
+    points = np.asarray(surface.gamma).reshape(3, -1).T
+    trace = constant[None] + 0 * points if kind == "constant" else _z_axis_field(points)
+    field = _field(replace(surface, B_total=jnp.asarray(trace.T.reshape(surface.gamma.shape))), 6)
+    if kind == "constant":
+        targets = _offsets(surface, side * 1e-4 * A_MINOR, 6)
+        exact = [-constant * (side < 0) * np.ones((len(targets), 3))] + [np.zeros((len(targets),) + (3,) * k) for k in (2, 3, 4)]
+    else:
+        targets = _targets(side, 1e-4, 0.37)
+        exact = _oracle_jets(targets, side) if side < 0 else [np.zeros_like(j) for j in _oracle_jets(targets, side)]
+    jets, estimate = jax.jit(lambda p: field.B_and_derivatives_accurate_xyz(p, order=3))(jnp.asarray(targets))
+    scale = _scale_of(field)
+    for k, (got, want) in enumerate(zip(jets, exact)):
+        assert A_MINOR**k * np.max(np.abs(np.asarray(got) - want)) / scale / 100.0**k <= np.max(estimate), (k, estimate)

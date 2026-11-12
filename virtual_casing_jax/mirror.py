@@ -209,7 +209,7 @@ class MirrorExteriorField:
                     rough = layer_derivatives(moved[None], *build((q - 2, n // 2)), order=0)[0][0]
                     miss = jnp.max(jnp.abs(jets[0] - rough)) / reference
                     if continued:
-                        jets, left = _continue(jets, -lift, order, extent)
+                        jets, left = _continue(jets, -lift, order, extent, miss * reference, floor)
                         miss = jnp.maximum(miss, jnp.max(jnp.stack(
                             [m * extent**j / 100.0**j for j, m in enumerate(left)])) / reference)
                     return jets, miss
