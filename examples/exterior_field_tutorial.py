@@ -45,7 +45,7 @@ def surface():
         theta=theta, phi=phi, nfp=NFP, stellsym=False, signgs=1)
 
 
-field = VirtualCasingExteriorField(surface(), ExteriorFieldConfig(digits=8, src_nphi=NPHI, src_ntheta=NTHETA))
+field = VirtualCasingExteriorField(surface(), ExteriorFieldConfig(digits=8))
 
 # targets on both sides of the surface at phi = 0, down to a micrometre from it
 out = jnp.array([[R0 + (A + DELTA) + d, 0.0, 0.0] for d in (1.0, 0.1, 1e-3, 1e-6)])

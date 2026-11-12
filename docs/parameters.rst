@@ -53,10 +53,6 @@ shape ``(3, nphi, ntheta)``.
        closed forms or the graded rule, and the level of the error estimate you compare with.
        Raising it costs more nodes on the surface; the data resolution caps what is reachable
        (see :doc:`tutorial_near_surface`).
-   * - ``src_nphi``, ``src_ntheta``
-     - ``64``, ``64``
-     - Not read: the grid is the shape of ``surface_data.gamma``. Set the resolution by
-       sampling the boundary on the grid you want.
    * - ``levels``
      - ``None``
      - Closed-form schedule as ``((n_toroidal, n_poloidal), ...)``, counts around the
@@ -93,10 +89,6 @@ shape ``(3, nphi, ntheta)``.
        the finest schedule level, at least ``256 x 512``. The distance to resolve, not the data,
        sets the need, so lowering it saves time only for targets that stay far from the surface;
        raising it buys nothing beyond the data limit.
-   * - ``validate_orientation``
-     - ``True``
-     - Not read by the current implementation. The outward direction is always chosen from the
-       geometry.
    * - ``dtype``
      - ``"float64"``
      - ``"float64"`` or ``"float32"``. Use float64 (and ``jax_enable_x64``) for ``digits`` above
