@@ -16,11 +16,16 @@ import numpy as np
 import pytest
 from test_offsurface_level_choice import (
     A_MINOR,
+    B0R0,
+    CURRENT,
     DELTA,
+    MU0,
     R0,
     _field,
+    _offsets,
     _ring_field,
     _rotating_ellipse,
+    _scale,
     _z_axis_field,
 )
 
@@ -65,6 +70,10 @@ def _oracle(points, side):
 @pytest.fixture(scope="module")
 def field():
     return _field(_rotating_ellipse(NPHI, NTHETA, NFP), 6)
+
+
+def _scale_of(field):
+    return _scale(field.surface_data)
 
 
 def _accurate(field, points, order=1, **kwargs):
@@ -145,7 +154,7 @@ def test_branches_coefficient_gradient_and_single_level():
 @pytest.mark.parametrize("side", (1, -1))
 def test_the_default_field_methods_are_accurate_next_to_the_surface(side):
     surface = _rotating_ellipse(NPHI, NTHETA, NFP)
-    config = ExteriorFieldConfig(digits=6, src_nphi=NPHI, src_ntheta=NTHETA)
+    config = ExteriorFieldConfig(digits=6)
     default = VirtualCasingExteriorField(surface, config)
     legacy = VirtualCasingExteriorField(surface, replace(config, near_surface=False))
     points = _targets(side, 1e-3, 0.37)
@@ -172,7 +181,7 @@ def test_the_default_never_does_worse_than_the_closed_forms_on_a_thin_torus(monk
     monkeypatch.setattr(oracle, "A_MINOR", 0.065)
     monkeypatch.setattr(oracle, "DELTA", 0.015)
     surface = oracle._rotating_ellipse(NPHI, NTHETA, NFP)
-    config = ExteriorFieldConfig(digits=8, src_nphi=NPHI, src_ntheta=NTHETA)
+    config = ExteriorFieldConfig(digits=8)
     default = VirtualCasingExteriorField(surface, config)
     legacy = VirtualCasingExteriorField(surface, replace(config, near_surface=False))
     for distance in (1.0, 0.7, 0.3, 0.1, 1e-2):
@@ -204,3 +213,111 @@ def test_routing_by_the_field_alone_does_not_depend_on_the_order_asked_for(field
     (value,), _ = field.B_and_derivatives_accurate_xyz(points, order=0)
     (routed, *_), _ = field.B_and_derivatives_accurate_xyz(points, order=3, route_order=0)
     np.testing.assert_allclose(routed, value, rtol=1e-12, atol=0)
+
+
+def test_coarse_data_without_axisymmetry_keeps_the_toroidal_modes_it_resolves():
+    """One period of data (nfp = 1) from sources of no symmetry: its spectrum is not centred on mode 0."""
+    angle = 2.0 * np.pi * np.arange(512) / 512
+    plane = np.stack([np.cos(angle), np.cos(0.6) * np.sin(angle), np.sin(0.6) * np.sin(angle)], axis=1)
+    source, tangent = np.array([1.9, 0.5, 0.4]) + 0.25 * plane, np.stack(
+        [-np.sin(angle), np.cos(0.6) * np.cos(angle), np.sin(0.6) * np.cos(angle)], axis=1)
+
+    def loop(points):  # an off-axis loop outside the surface
+        separation = points[:, None, :] - source[None]
+        return 0.125 * np.mean(np.cross(tangent[None], separation) / np.linalg.norm(
+            separation, axis=-1, keepdims=True) ** 3, axis=1) * MU0 * CURRENT
+
+    surface = _rotating_ellipse(24, 36, 1)
+    nodes = np.asarray(surface.gamma).reshape(3, -1).T
+    B_total = jnp.asarray((_ring_field(nodes) + loop(nodes)).T.reshape(surface.gamma.shape))
+    coarse = _field(replace(surface, B_total=B_total), 8)
+    points = _offsets(surface, 0.1 * A_MINOR)
+    error = np.max(np.abs(_accurate(coarse, points, 0)[0][0] - _ring_field(points))) / np.max(np.abs(_ring_field(points)))
+    assert error <= 4e-4  # 5.3e-4 with the cylindrical window
+
+
+def _oracle_jets(points, side, order=3):
+    """Jets to ``order`` of the filament (outside) or minus the z-axis (inside) field.
+
+    Automatic derivatives of the analytic formulas, which share nothing with the
+    layer sums under test.
+    """
+    angle = 2.0 * jnp.pi * jnp.arange(2048) / 2048
+    source = jnp.stack([R0 * jnp.cos(angle), R0 * jnp.sin(angle), 0.0 * angle], axis=1)
+    tangent = jnp.stack([-jnp.sin(angle), jnp.cos(angle), 0.0 * angle], axis=1)
+
+    def ring(x):
+        r = x - source
+        kernel = jnp.cross(tangent, r) / jnp.linalg.norm(r, axis=1, keepdims=True) ** 3
+        return MU0 * CURRENT * R0 / (2.0 * len(angle)) * jnp.sum(kernel, axis=0)
+
+    def axis(x):
+        return -B0R0 * jnp.array([-x[1], x[0], 0.0]) / (x[0] ** 2 + x[1] ** 2)
+
+    function, jets = (ring if side > 0 else axis), []
+    for _ in range(order + 1):
+        jets.append(np.asarray(jax.jit(jax.vmap(function))(jnp.asarray(points))))
+        function = jax.jacfwd(function)
+    return jets
+
+
+@pytest.fixture(scope="module")
+def routed_jets(field):
+    return jax.jit(lambda p: field.B_and_derivatives_accurate_xyz(p, order=3)[0])
+
+
+def _jet_errors(routed_jets, field_scale, points, side):
+    """Scaled ``L**k max|D**k B - ref| / B*`` for k = 0..3."""
+    got = routed_jets(jnp.asarray(points))
+    return [A_MINOR**k * np.max(np.abs(np.asarray(g) - r)) / field_scale
+            for k, (g, r) in enumerate(zip(got, _oracle_jets(points, side)))]
+
+
+@pytest.mark.parametrize("side, distance", ((1, 3.0), (1, 0.5), (1, 1e-2), (-1, 0.5), (-1, 1e-2)))
+def test_jets_of_orders_two_and_three_match_the_filament_fields(field, routed_jets, side, distance):
+    """The closed forms (far) and the graded rule (near), on both sides, to third order."""
+    scale = _scale_of(field)
+    errors = _jet_errors(routed_jets, scale, _targets(side, distance, 0.37), side)
+    for order, (error, gate) in enumerate(zip(errors, (1e-8, 1e-7, 1e-6, 1e-5))):
+        assert error <= gate, (order, error)
+
+
+@pytest.mark.parametrize("side", (1, -1))
+def test_jets_within_the_floor_are_continued_and_the_estimate_covers_them(field, side):
+    """Closer than ``_FLOOR`` the jets are Taylor-continued from the floor, the fourth derivative from a second height.
+
+    Orders 0 and 1 keep their gates, order 2 is good to ``3e-5`` and order 3 to a few ``1e-3``; the
+    estimate bounds every order, scaled by ``100**-k``.
+    """
+    points = _targets(side, 1e-4, 0.37)
+    jets, estimate = jax.jit(lambda p: field.B_and_derivatives_accurate_xyz(p, order=3))(jnp.asarray(points))
+    scale = _scale_of(field)
+    errors = [A_MINOR**k * np.max(np.abs(np.asarray(g) - r)) / scale
+              for k, (g, r) in enumerate(zip(jets, _oracle_jets(points, side)))]
+    assert all(error <= gate for error, gate in zip(errors, (1e-8, 1e-6, 3e-5, 3e-3))), errors
+    assert all(error / 100.0**k <= np.max(estimate) for k, error in enumerate(errors)), (errors, estimate)
+
+
+@pytest.mark.parametrize("side", (1, -1))
+@pytest.mark.parametrize("kind", ("constant", "external"))
+def test_estimate_bounds_the_error_within_the_floor_where_the_jets_are_known_exactly(kind, side):
+    """A constant trace and an external-only trace have exact jets (zero or minus the trace's field).
+
+    The estimate, scaled by ``100**k``, must bound the error of every order at 1e-4 of the minor radius,
+    on data the rule resolves only to a few digits.
+    """
+    constant = np.array([0.3, -0.2, 0.5])
+    surface = _rotating_ellipse(24, 24, 1 if kind == "constant" else 3)
+    points = np.asarray(surface.gamma).reshape(3, -1).T
+    trace = constant[None] + 0 * points if kind == "constant" else _z_axis_field(points)
+    field = _field(replace(surface, B_total=jnp.asarray(trace.T.reshape(surface.gamma.shape))), 6)
+    if kind == "constant":
+        targets = _offsets(surface, side * 1e-4 * A_MINOR, 6)
+        exact = [-constant * (side < 0) * np.ones((len(targets), 3))] + [np.zeros((len(targets),) + (3,) * k) for k in (2, 3, 4)]
+    else:
+        targets = _targets(side, 1e-4, 0.37)
+        exact = _oracle_jets(targets, side) if side < 0 else [np.zeros_like(j) for j in _oracle_jets(targets, side)]
+    jets, estimate = jax.jit(lambda p: field.B_and_derivatives_accurate_xyz(p, order=3))(jnp.asarray(targets))
+    scale = _scale_of(field)
+    for k, (got, want) in enumerate(zip(jets, exact)):
+        assert A_MINOR**k * np.max(np.abs(np.asarray(got) - want)) / scale / 100.0**k <= np.max(estimate), (k, estimate)

@@ -25,7 +25,6 @@ from .integrals import (
     laplace_fxd2_u_eval_vec,
     laplace_fxd2_u_eval_singular,
     laplace_fxd2_u_eval_vec_singular,
-    laplace_dx_u_eval_singular,
     computeB_offsurface_adaptive,
     computeB_offsurface_adaptive_schedule,
     computeGradB_offsurface_adaptive_schedule,
@@ -248,51 +247,36 @@ class VirtualCasingJAX:
             max(max(surf_nt_full, src_nt_full), optim_aspect_ratio * quad_np)
             / (self.nfp_eff * self.trg_nt)
         )
-
         trg_nt_self = surf_nt_full // self.nfp_eff
         trg_np_self = surf_np_full
 
-        for _ in range(3):
-            quad_nt_aligned = math.ceil(quad_nt / surf_nt_full) * surf_nt_full
-            quad_np_aligned = math.ceil(quad_np / surf_np_full) * surf_np_full
-
-            X_quad = resample(
-                self.surface_coord,
-                surf_nt_full,
-                surf_np_full,
-                quad_nt_aligned,
-                quad_np_aligned,
-            )
-            dX_quad = grad2d(X_quad, quad_nt_aligned, quad_np_aligned)
-            ones = jnp.ones((quad_nt_aligned, quad_np_aligned), dtype=X_quad.dtype)
-            U = laplace_dx_u_eval_singular(
-                X_quad,
-                dX_quad,
-                ones,
-                trg_nt_self,
-                trg_np_self,
-                self.nfp_eff,
-                digits=digits,
-                chunk_size=1024,
+        # A constant trace has no field on the interior side, whatever the surface.  Its
+        # density ``n x c`` carries the spectrum of the normal, which the density 1 lacks.
+        constant = jnp.full((3, 1, 1), 1.0 / math.sqrt(3.0), dtype=self.surface_coord.dtype)
+        for _ in range(4):
+            quad_np_aligned = self.trg_np * max(1, round((quad_nt / optim_aspect_ratio) / self.trg_np))
+            quad_nt_aligned = self.nfp_eff * self.trg_nt * max(1, round(
+                (optim_aspect_ratio * quad_np_aligned) / (self.nfp_eff * self.trg_nt)))
+            setup = self._build_quad_setup(quad_nt_aligned, quad_np_aligned)
+            c = jnp.broadcast_to(constant, setup.normal.shape)
+            kwargs = dict(
+                digits=digits, chunk_size=1024, orient=setup.orient,
                 target_chunk_size=autotune_chunk_sizes(
-                    "b", quad_nt_aligned * quad_np_aligned,
-                    trg_nt_self * trg_np_self)[1],
-            )
-            err = float(jnp.max(jnp.abs(jnp.asarray(U).reshape(-1) + 0.5)))
-            if err <= 0:
+                    "b", quad_nt_aligned * quad_np_aligned, trg_nt_self * trg_np_self)[1])
+            args = (setup.quad_coord, setup.dX)
+            grid = (self.trg_nt, self.trg_np, self.nfp_eff)
+            gradG_J = laplace_fxd_u_eval_vec_singular(
+                *args, cross_prod(c, setup.normal), *grid, **kwargs)
+            gradG_BdotN = laplace_fxd_u_eval_singular(
+                *args, dot_prod(c, setup.normal), *grid, **kwargs)
+            field = curl_single_layer_gradient(jnp.asarray(gradG_J).reshape((3, 3, self.trg_nt, self.trg_np)))
+            field = field + jnp.asarray(gradG_BdotN).reshape((3, self.trg_nt, self.trg_np))
+            err = float(jnp.max(jnp.abs(0.5 * constant - field)))
+            if err < 10 ** (-digits):
                 break
-            scal = max(1.0, (digits + 1) / (math.log(err) / math.log(0.1)))
-            quad_nt = int(scal * quad_nt_aligned)
-            quad_np = int(scal * quad_np_aligned)
-            if err < 10 ** (-digits) or scal < 1.5:
-                break
+            quad_nt = int(max(1.0, (digits + 1) / (math.log(err) / math.log(0.1))) * quad_nt_aligned)
 
-        quad_np = self.trg_np * round((quad_nt / optim_aspect_ratio) / self.trg_np)
-        quad_nt = self.nfp_eff * self.trg_nt * round(
-            (optim_aspect_ratio * quad_np) / (self.nfp_eff * self.trg_nt)
-        )
-
-        return int(quad_nt), int(quad_np)
+        return int(quad_nt_aligned), int(quad_np_aligned)
 
     def _build_quad_setup(self, quad_nt: int, quad_np: int):
         surf_nt_full = int(self.surface_coord.shape[1])
@@ -392,7 +376,8 @@ class VirtualCasingJAX:
             raise RuntimeError("VirtualCasingJAX.setup must be called before compute_external_gradB")
 
         if quad_nt is None or quad_np is None:
-            quad_nt_sel, quad_np_sel = self._select_quad_sizes(digits)
+            # a derivative loses about two digits to the same quadrature
+            quad_nt_sel, quad_np_sel = self._select_quad_sizes(digits + 2)
             quad_nt = quad_nt_sel
             quad_np = quad_np_sel
 
@@ -889,7 +874,9 @@ class VirtualCasingJAX:
         """Compute the principal-value (two-sided average) trace of the field.
 
         With ``external = PV + B0/2`` and ``internal = B0/2 - PV``, this returns
-        ``PV = (external - internal) / 2`` from a single quadrature pass.
+        ``PV = (external - internal) / 2`` from a single quadrature pass.  In the
+        layer-potential convention ``V^{+-} = PV V +- B0/2`` of the field ``V`` of
+        the inside sources, ``PV V`` is the *negative* of this.
         It accepts the keyword arguments of :meth:`compute_external_B`.
         """
         return self._compute_B_signed(B0, sign=1.0, jump_weight=0.0, **kwargs)

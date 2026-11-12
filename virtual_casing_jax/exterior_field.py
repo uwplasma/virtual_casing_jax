@@ -52,8 +52,6 @@ class ExteriorFieldConfig:
     """Configuration for fixed-schedule exterior-field evaluation."""
 
     digits: int = 8
-    src_nphi: int = 64
-    src_ntheta: int = 64
     levels: tuple[tuple[int, int], ...] | None = None
     chunk_size: int | str = "auto"
     target_chunk_size: int | str = "auto"
@@ -65,7 +63,6 @@ class ExteriorFieldConfig:
     #: ``(poloidal, toroidal)`` nodes of the graded rule over the full torus;
     #: ``None`` takes twice the finest schedule level, and at least 256 x 512.
     graded_nodes: tuple[int, int] | None = None
-    validate_orientation: bool = True
     dtype: str = "float64"
 
 
@@ -300,6 +297,8 @@ _GRADING = 8.0
 _MAX_GRADING = 0.9999
 #: Targets closer than this fraction of the half-extent are continued from it.
 _FLOOR = 1.0e-3
+#: Safety factor on the rule's noise, amplified by the continuation, in the error estimate.
+_SAFETY = 10.0
 #: Fewest nodes of the default rule: resolving a distance does not depend on the data.
 _MIN_NODES = (256, 512)
 
@@ -311,11 +310,14 @@ def _graded_evaluate(series, phis, thetas):
 
     Separable: the toroidal phases contract first, then the poloidal ones.
     """
-    c, kp, kt = series["coefficients"], series["kp"], series["kt"]
+    c, c_xy, kp, kp_xy, kt, kt_xy = (series[k] for k in ("coefficients", "xy", "kp", "kp_xy", "kt", "kt_xy"))
     toroidal = jnp.exp(1j * jnp.outer(phis, kp))
     poloidal = jnp.exp(1j * jnp.outer(thetas, kt))
     half = jnp.einsum("pk,klq->plq", toroidal, c)
     half_phi = jnp.einsum("pk,klq->plq", toroidal * (1j * kp)[None, :], c[..., :3])
+    # B_x + i B_y; the phase of the Cartesian components is already in ``kp_xy``
+    b_xy = jnp.einsum("pl,tl->pt", jnp.einsum("pk,kl->pl", jnp.exp(1j * jnp.outer(phis, kp_xy)), c_xy),
+                      jnp.exp(1j * jnp.outer(thetas, kt_xy)))
 
     def real_sum(a, b):
         """``Re sum_l a[p, l, q] b[t, l]`` as two real products: half of a complex one."""
@@ -325,7 +327,7 @@ def _graded_evaluate(series, phis, thetas):
     x = real_sum(half[..., :3], poloidal)
     x_theta = real_sum(half[..., :3], poloidal * (1j * kt)[None, :])
     x_phi = real_sum(half_phi, poloidal)
-    B = real_sum(half[..., 3:], poloidal)
+    B_z = real_sum(half[..., 3:], poloidal)[..., 0]
     cosine, sine = jnp.cos(phis)[:, None], jnp.sin(phis)[:, None]
 
     def cartesian(v):
@@ -334,7 +336,8 @@ def _graded_evaluate(series, phis, thetas):
 
     turn = jnp.stack((-sine * x[..., 0] - cosine * x[..., 1],
                       cosine * x[..., 0] - sine * x[..., 1], jnp.zeros_like(x[..., 0])), axis=-1)
-    return cartesian(x), cartesian(x_theta), cartesian(x_phi) + turn, cartesian(B)
+    B = jnp.stack((jnp.real(b_xy), jnp.imag(b_xy), B_z), axis=-1)
+    return cartesian(x), cartesian(x_theta), cartesian(x_phi) + turn, B
 
 
 def _graded_series(gamma, field, nfp):
@@ -352,26 +355,48 @@ def _graded_series(gamma, field, nfp):
     def cylindrical(v):
         return jnp.stack((cosine * v[0] + sine * v[1], -sine * v[0] + cosine * v[1], v[2]), axis=-1)
 
-    coefficients = jnp.fft.fft2(jnp.concatenate((cylindrical(gamma), cylindrical(field)), axis=-1),
-                                axes=(0, 1)) / (nphi * ntheta)
+    cyl = cylindrical(field)
+    scale = nphi * ntheta
+    boundary = jnp.fft.fft2(jnp.concatenate((cylindrical(gamma), cyl[..., 2:]), axis=-1), axes=(0, 1)) / scale
+    # B_x + i B_y = e^{i phi} (B_R + i B_phi).  Which toroidal mode a row of its transform stands
+    # for, m or m - n, is a guess about the spectrum, which for a field of no symmetry is centred on
+    # a Cartesian mode and for an axisymmetric one on a cylindrical mode, a mode apart at nfp = 1.
+    # The window ends where the spectrum is smallest.
+    transverse = jnp.fft.fft2(cyl[..., 0] + 1j * cyl[..., 1], axes=(0, 1)) / scale
+    energy = jnp.sum(jnp.abs(transverse) ** 2, axis=1)
+    energy = energy + jnp.roll(energy, 1) + jnp.roll(energy, -1)
+    index = np.arange(nphi)
+    shifts = np.array(sorted(range(-(nphi // 4), nphi // 4 + 1), key=abs))
+    centre = jax.lax.stop_gradient(jnp.asarray(shifts)[jnp.argmin(energy[(shifts - nphi // 2) % nphi])])
+    low = centre - nphi // 2
+    window = low + jnp.mod(index - low, nphi)  # the mode of each row within [centre - n/2, centre + n/2)
+    split = jnp.mod(low, nphi).astype(int)[None] if nphi % 2 == 0 else jnp.zeros(0, int)
+    rows_xy = jnp.concatenate((jnp.asarray(index), split))
+    w_xy = jnp.ones(nphi + split.size).at[split].set(0.5).at[nphi:].set(0.5)
+    k_xy = nfp * jnp.concatenate((window, window[split] + nphi)) + 1
 
-    def modes(n):
+    def modes(n, period=1):
         """Row picks, weights and wavenumbers, the Nyquist mode split into two halves."""
         k = np.fft.fftfreq(n, 1.0 / n)
         pick = np.r_[0:n, np.flatnonzero(k == -n / 2)]
         return (pick, np.where(np.abs(k[pick]) == n / 2, 0.5, 1.0),
-                np.where(np.arange(len(pick)) < n, k[pick], -k[pick]))
+                period * np.where(np.arange(len(pick)) < n, k[pick], -k[pick]))
 
-    (rows, w_t, k_t), (cols, w_p, k_p) = modes(nphi), modes(ntheta)
+    (rows, w_t, k_t), (cols, w_p, k_p) = modes(nphi, nfp), modes(ntheta)
+    series = dict(xy=transverse[rows_xy][:, cols] * (w_xy[:, None] * w_p[None, :]),
+                  kp_xy=k_xy, kt_xy=jnp.asarray(k_p))
     # real data: the modes of negative poloidal wavenumber are the conjugates of the others
     positive = k_p >= 0
     cols, w_p, k_p = cols[positive], w_p[positive] * np.where(k_p[positive] > 0, 2.0, 1.0), k_p[positive]
-    series = dict(coefficients=coefficients[rows][:, cols] * (w_t[:, None] * w_p[None, :])[..., None],
-                  kp=jnp.asarray(k_t * nfp), kt=jnp.asarray(k_p))
+    series.update(coefficients=boundary[rows][:, cols] * (w_t[:, None] * w_p[None, :])[..., None],
+                  kp=jnp.asarray(k_t), kt=jnp.asarray(k_p))
     # the field's spectrum within the top quarter of either direction: what the samples cannot resolve
-    edge = (np.abs(np.fft.fftfreq(nphi, 1.0 / nphi))[:, None] >= 0.375 * nphi) \
-        | (np.abs(np.fft.fftfreq(ntheta, 1.0 / ntheta))[None, :] >= 0.375 * ntheta)
-    series["tail"] = jnp.max(jnp.where(edge[..., None], jnp.abs(coefficients[..., 3:]), 0.0))
+    poloidal_edge = np.abs(np.fft.fftfreq(ntheta, 1.0 / ntheta))[None, :] >= 0.375 * ntheta
+    toroidal_edge = np.abs(np.fft.fftfreq(nphi, 1.0 / nphi))[:, None] >= 0.375 * nphi
+    transverse_edge = (jnp.abs(window - centre) >= 0.375 * nphi)[:, None]
+    series["tail"] = jnp.maximum(
+        jnp.max(jnp.where(transverse_edge | poloidal_edge, jnp.abs(transverse), 0.0)),
+        jnp.max(jnp.where(toroidal_edge | poloidal_edge, jnp.abs(boundary[..., 3]), 0.0)))
     x, e_theta, e_phi, _ = _graded_evaluate(
         series, phi[:, 0], jnp.linspace(0.0, 2.0 * jnp.pi, ntheta, endpoint=False))
     series["orientation"] = jax.lax.stop_gradient(jnp.sign(jnp.sum(x * jnp.cross(e_theta, e_phi))))
@@ -446,23 +471,31 @@ def _graded_sources(series, center, distance, nodes):
     return x, jnp.cross(area, B), jnp.sum(area * B, axis=-1)
 
 
-def _continue(jets, delta, order):
+def _continue(jets, delta, order, extent, noise, distance):
     """Taylor-continue ``jets`` (``B`` and its derivatives) by ``delta``, to ``order``.
 
-    Also returns the last term of the series for ``B``, which bounds what the
-    truncation and the data's own error in the highest derivative leave.
+    Also returns, per derivative, the size of what the series leaves out.  For
+    ``B`` this is its last term; for a derivative whose series has no term to
+    spare, the last term times ``(len(jets) + 1) |delta| / extent`` stands in
+    for the next one, which is not known.  Both bound what the truncation
+    and the data's own error in the highest derivative leave.  A sum off by
+    ``noise`` at ``distance`` from the surface has its derivatives of order two
+    and up off by ``noise / distance**j`` (``_SAFETY`` times, as a bound).
     """
-    out, last = [], 0.0
+    out, left = [], []
     for j in range(order + 1):
-        total = jets[j]
+        total, last = jets[j], jets[j]
         for k in range(1, len(jets) - j):
             term = jets[j + k]
             for _ in range(k):
                 term = term @ delta
-            total = total + term / math.factorial(k)
-            last = term / math.factorial(k) if j == 0 else last
+            last = term / math.factorial(k)
+            total = total + last
         out.append(total)
-    return tuple(out), jnp.max(jnp.abs(last))
+        left.append(jnp.max(jnp.abs(last)) * (1.0 if j == 0 else (len(jets) + 1) * jnp.linalg.norm(delta) / extent))
+        if j > 1:
+            left[j] = jnp.maximum(left[j], _SAFETY * noise / distance**j)
+    return tuple(out), left
 
 
 class VirtualCasingExteriorField:
@@ -789,7 +822,9 @@ class VirtualCasingExteriorField:
         exterior and interior fields are analytic up to the surface, so the
         outside limit is what a target on it returns.  The estimate is the
         difference from the same rule on every second node, or the larger of that
-        and the field's spectrum at the edge of what the samples resolve.  The
+        and the field's spectrum at the edge of what the samples resolve.  Within the
+        floor the derivatives count too, by what their continuation leaves out
+        scaled by ``100**-k``, and orders two and up use twice the nodes.  The
         grading centre is held fixed under differentiation.
         """
         from .derivative_kernels import MAX_DERIVATIVE_ORDER, layer_derivatives
@@ -821,17 +856,27 @@ class VirtualCasingExteriorField:
                 moved = x + lift
                 grid, current, charge = _graded_sources(series, angles, distance, n)
 
-                def layer(step, weight, order):
+                def layer(step, weight, order, at=moved):
                     return layer_derivatives(
-                        moved[None], grid[::step, ::step].reshape(-1, 3),
+                        at[None], grid[::step, ::step].reshape(-1, 3),
                         weight * current[::step, ::step].reshape(-1, 3),
                         weight * charge[::step, ::step].reshape(-1), order=order)
 
                 jets = tuple(v[0] for v in layer(1, 1.0, k))
                 miss = jnp.max(jnp.abs(jets[0] - layer(2, 4.0, 0)[0][0])) / reference
                 if continued:
-                    jets, tail = _continue(jets, -lift, order)
-                    miss = jnp.maximum(miss, tail / reference)
+                    start = jets[-1]
+                    jets, left = _continue(jets, -lift, order, extent, miss * reference, distance)
+                    if order > 2:
+                        # the missing fourth derivative along the normal: the third at twice the height
+                        up = (moved - _graded_point(series, angles[0], angles[1])[0]) / distance
+                        far = layer(1, 1.0, 3, moved + distance * up)[3][0]
+                        fix = (-lift @ up) * (far - start) / distance
+                        jets = jets[:3] + (jets[3] + fix,)
+                        left[3] = jnp.maximum(left[3], jnp.max(jnp.abs(fix)) * 5.0 * (jnp.linalg.norm(lift) + distance) / extent)
+                    # the k-th derivative may be off by ``tol * 100**k``, scaled by the extent
+                    miss = jnp.maximum(miss, jnp.max(jnp.stack(
+                        [m * extent**j / 100.0**j for j, m in enumerate(left)])) / reference)
                 return jets, jnp.maximum(miss, series["tail"] / reference)
 
             return jax.vmap(one)
@@ -851,7 +896,8 @@ class VirtualCasingExteriorField:
             return jnp.concatenate((a, jnp.repeat(a[-1:], padding, axis=0))).reshape((-1, batch) + a.shape[1:])
 
         rules = (lambda *a: zeros(jax.eval_shape(rules[1], *a)),
-                 rule(nodes, order, False), rule(nodes, MAX_DERIVATIVE_ORDER, True))
+                 rule(nodes, order, False),
+                 rule(nodes if order < 2 else tuple(2 * m for m in nodes), MAX_DERIVATIVE_ORDER, True))
         # rematerialised per chunk: a reverse pass keeps the chunk's inputs, not the layer sums' tapes
         out = jax.lax.map(
             jax.checkpoint(lambda c: jax.lax.switch(jnp.max(c[0]), rules, *c[1:])),
