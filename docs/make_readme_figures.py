@@ -137,8 +137,7 @@ def exact(points, side):
 
 
 def make_field(nphi=32, ntheta=48, **config):
-    return VirtualCasingExteriorField(rotating_ellipse(nphi, ntheta), ExteriorFieldConfig(
-        digits=8, src_nphi=nphi, src_ntheta=ntheta, **config))
+    return VirtualCasingExteriorField(rotating_ellipse(nphi, ntheta), ExteriorFieldConfig(digits=8, **config))
 
 
 def save(fig, name):
@@ -182,7 +181,7 @@ def channels():
         ax.set_xlabel("toroidal angle (deg)")
         ax.set_ylabel("poloidal angle (deg)")
         fig.colorbar(im, ax=ax, label="T", pad=0.02)
-    field = VirtualCasingExteriorField(surf, ExteriorFieldConfig(digits=8, src_nphi=nphi, src_ntheta=ntheta))
+    field = VirtualCasingExteriorField(surf, ExteriorFieldConfig(digits=8))
     xs, zs = np.linspace(0.45, 1.55, 90), np.linspace(-0.55, 0.55, 80)
     X, Z = np.meshgrid(xs, zs)
     pts = jnp.asarray(np.stack([X.ravel(), 0 * X.ravel(), Z.ravel()], 1))
@@ -331,7 +330,7 @@ def gradients():
     def make(gamma, B):
         s = VmecSurfaceFieldData(gamma=gamma, B_total=B, normal=surf.normal, area_vector=surf.area_vector,
                                  theta=surf.theta, phi=surf.phi, nfp=NFP, stellsym=False, signgs=1)
-        return VirtualCasingExteriorField(s, ExteriorFieldConfig(digits=8, src_nphi=nphi, src_ntheta=ntheta, validate_orientation=False))
+        return VirtualCasingExteriorField(s, ExteriorFieldConfig(digits=8))
 
     def loss_target(p):
         return jnp.sum(make(surf.gamma, surf.B_total).B_plasma_xyz(p) ** 2)

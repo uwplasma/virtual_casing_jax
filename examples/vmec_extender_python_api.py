@@ -21,7 +21,7 @@ def main():
     parser.add_argument("wout", help="VMEC/VMEX wout NetCDF file")
     parser.add_argument("--nphi", type=int, default=32)
     parser.add_argument("--ntheta", type=int, default=32)
-    parser.add_argument("--digits", type=int, default=4)
+    parser.add_argument("--digits", type=int, default=8)
     parser.add_argument(
         "--target",
         type=float,
