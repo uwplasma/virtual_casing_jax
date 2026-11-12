@@ -1,0 +1,14 @@
+{
+ "CPU: Xeon W-2295, 36 threads": {
+  "closed forms only, d/a=0.01": 471.6,
+  "closed forms only, d/a=1.0": 511.0,
+  "graded default, d/a=0.01": 17.9,
+  "graded default, d/a=1.0": 650.8
+ },
+ "GPU: RTX A4000": {
+  "closed forms only, d/a=0.01": 3462.3,
+  "closed forms only, d/a=1.0": 3561.8,
+  "graded default, d/a=0.01": 321.9,
+  "graded default, d/a=1.0": 13739.4
+ }
+}
