@@ -310,11 +310,14 @@ def _graded_evaluate(series, phis, thetas):
 
     Separable: the toroidal phases contract first, then the poloidal ones.
     """
-    c, kp, kt = series["coefficients"], series["kp"], series["kt"]
+    c, c_xy, kp, kp_xy, kt, kt_xy = (series[k] for k in ("coefficients", "xy", "kp", "kp_xy", "kt", "kt_xy"))
     toroidal = jnp.exp(1j * jnp.outer(phis, kp))
     poloidal = jnp.exp(1j * jnp.outer(thetas, kt))
     half = jnp.einsum("pk,klq->plq", toroidal, c)
     half_phi = jnp.einsum("pk,klq->plq", toroidal * (1j * kp)[None, :], c[..., :3])
+    # B_x + i B_y; the phase of the Cartesian components is already in ``kp_xy``
+    b_xy = jnp.einsum("pl,tl->pt", jnp.einsum("pk,kl->pl", jnp.exp(1j * jnp.outer(phis, kp_xy)), c_xy),
+                      jnp.exp(1j * jnp.outer(thetas, kt_xy)))
 
     def real_sum(a, b):
         """``Re sum_l a[p, l, q] b[t, l]`` as two real products: half of a complex one."""
@@ -324,7 +327,7 @@ def _graded_evaluate(series, phis, thetas):
     x = real_sum(half[..., :3], poloidal)
     x_theta = real_sum(half[..., :3], poloidal * (1j * kt)[None, :])
     x_phi = real_sum(half_phi, poloidal)
-    B = real_sum(half[..., 3:], poloidal)
+    B_z = real_sum(half[..., 3:], poloidal)[..., 0]
     cosine, sine = jnp.cos(phis)[:, None], jnp.sin(phis)[:, None]
 
     def cartesian(v):
@@ -333,7 +336,8 @@ def _graded_evaluate(series, phis, thetas):
 
     turn = jnp.stack((-sine * x[..., 0] - cosine * x[..., 1],
                       cosine * x[..., 0] - sine * x[..., 1], jnp.zeros_like(x[..., 0])), axis=-1)
-    return cartesian(x), cartesian(x_theta), cartesian(x_phi) + turn, cartesian(B)
+    B = jnp.stack((jnp.real(b_xy), jnp.imag(b_xy), B_z), axis=-1)
+    return cartesian(x), cartesian(x_theta), cartesian(x_phi) + turn, B
 
 
 def _graded_series(gamma, field, nfp):
@@ -351,26 +355,48 @@ def _graded_series(gamma, field, nfp):
     def cylindrical(v):
         return jnp.stack((cosine * v[0] + sine * v[1], -sine * v[0] + cosine * v[1], v[2]), axis=-1)
 
-    coefficients = jnp.fft.fft2(jnp.concatenate((cylindrical(gamma), cylindrical(field)), axis=-1),
-                                axes=(0, 1)) / (nphi * ntheta)
+    cyl = cylindrical(field)
+    scale = nphi * ntheta
+    boundary = jnp.fft.fft2(jnp.concatenate((cylindrical(gamma), cyl[..., 2:]), axis=-1), axes=(0, 1)) / scale
+    # B_x + i B_y = e^{i phi} (B_R + i B_phi).  Which toroidal mode a row of its transform stands
+    # for, m or m - n, is a guess about the spectrum, which for a field of no symmetry is centred on
+    # a Cartesian mode and for an axisymmetric one on a cylindrical mode, a mode apart at nfp = 1.
+    # The window ends where the spectrum is smallest.
+    transverse = jnp.fft.fft2(cyl[..., 0] + 1j * cyl[..., 1], axes=(0, 1)) / scale
+    energy = jnp.sum(jnp.abs(transverse) ** 2, axis=1)
+    energy = energy + jnp.roll(energy, 1) + jnp.roll(energy, -1)
+    index = np.arange(nphi)
+    shifts = np.array(sorted(range(-(nphi // 4), nphi // 4 + 1), key=abs))
+    centre = jax.lax.stop_gradient(jnp.asarray(shifts)[jnp.argmin(energy[(shifts - nphi // 2) % nphi])])
+    low = centre - nphi // 2
+    window = low + jnp.mod(index - low, nphi)  # the mode of each row within [centre - n/2, centre + n/2)
+    split = jnp.mod(low, nphi).astype(int)[None] if nphi % 2 == 0 else jnp.zeros(0, int)
+    rows_xy = jnp.concatenate((jnp.asarray(index), split))
+    w_xy = jnp.ones(nphi + split.size).at[split].set(0.5).at[nphi:].set(0.5)
+    k_xy = nfp * jnp.concatenate((window, window[split] + nphi)) + 1
 
-    def modes(n):
+    def modes(n, period=1):
         """Row picks, weights and wavenumbers, the Nyquist mode split into two halves."""
         k = np.fft.fftfreq(n, 1.0 / n)
         pick = np.r_[0:n, np.flatnonzero(k == -n / 2)]
         return (pick, np.where(np.abs(k[pick]) == n / 2, 0.5, 1.0),
-                np.where(np.arange(len(pick)) < n, k[pick], -k[pick]))
+                period * np.where(np.arange(len(pick)) < n, k[pick], -k[pick]))
 
-    (rows, w_t, k_t), (cols, w_p, k_p) = modes(nphi), modes(ntheta)
+    (rows, w_t, k_t), (cols, w_p, k_p) = modes(nphi, nfp), modes(ntheta)
+    series = dict(xy=transverse[rows_xy][:, cols] * (w_xy[:, None] * w_p[None, :]),
+                  kp_xy=k_xy, kt_xy=jnp.asarray(k_p))
     # real data: the modes of negative poloidal wavenumber are the conjugates of the others
     positive = k_p >= 0
     cols, w_p, k_p = cols[positive], w_p[positive] * np.where(k_p[positive] > 0, 2.0, 1.0), k_p[positive]
-    series = dict(coefficients=coefficients[rows][:, cols] * (w_t[:, None] * w_p[None, :])[..., None],
-                  kp=jnp.asarray(k_t * nfp), kt=jnp.asarray(k_p))
+    series.update(coefficients=boundary[rows][:, cols] * (w_t[:, None] * w_p[None, :])[..., None],
+                  kp=jnp.asarray(k_t), kt=jnp.asarray(k_p))
     # the field's spectrum within the top quarter of either direction: what the samples cannot resolve
-    edge = (np.abs(np.fft.fftfreq(nphi, 1.0 / nphi))[:, None] >= 0.375 * nphi) \
-        | (np.abs(np.fft.fftfreq(ntheta, 1.0 / ntheta))[None, :] >= 0.375 * ntheta)
-    series["tail"] = jnp.max(jnp.where(edge[..., None], jnp.abs(coefficients[..., 3:]), 0.0))
+    poloidal_edge = np.abs(np.fft.fftfreq(ntheta, 1.0 / ntheta))[None, :] >= 0.375 * ntheta
+    toroidal_edge = np.abs(np.fft.fftfreq(nphi, 1.0 / nphi))[:, None] >= 0.375 * nphi
+    transverse_edge = (jnp.abs(window - centre) >= 0.375 * nphi)[:, None]
+    series["tail"] = jnp.maximum(
+        jnp.max(jnp.where(transverse_edge | poloidal_edge, jnp.abs(transverse), 0.0)),
+        jnp.max(jnp.where(toroidal_edge | poloidal_edge, jnp.abs(boundary[..., 3]), 0.0)))
     x, e_theta, e_phi, _ = _graded_evaluate(
         series, phi[:, 0], jnp.linspace(0.0, 2.0 * jnp.pi, ntheta, endpoint=False))
     series["orientation"] = jax.lax.stop_gradient(jnp.sign(jnp.sum(x * jnp.cross(e_theta, e_phi))))
