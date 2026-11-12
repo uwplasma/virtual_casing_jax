@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
 
 
 def main():
-    src = Path("/Users/rogerio/local/virtual-casing/extern/BIEST/include/biest/surface.txx")
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: extract_w7x_coeffs.py <BIEST surface.txx> <output w7x_coeffs.py>")
+    src = Path(sys.argv[1])
     if not src.exists():
         raise SystemExit(f"Missing source file: {src}")
 
@@ -33,7 +36,7 @@ def main():
         rbc[i + 10, j + 10] = r
         zbs[i + 10, j + 10] = z
 
-    out = Path("/Users/rogerio/local/virtual_casing_jax/virtual_casing_jax/w7x_coeffs.py")
+    out = Path(sys.argv[2])
     with out.open("w") as f:
         f.write('"""W7X_ Fourier coefficients extracted from BIEST surface.txx."""\n')
         f.write("from __future__ import annotations\n\n")

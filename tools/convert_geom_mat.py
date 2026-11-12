@@ -46,7 +46,7 @@ def main():
     parser.add_argument(
         "--src",
         type=Path,
-        default=Path("/Users/rogerio/local/virtual-casing/extern/BIEST/geom"),
+        required=True,
         help="Path to geom/*.mat directory",
     )
     parser.add_argument(

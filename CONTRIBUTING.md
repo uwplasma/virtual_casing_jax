@@ -1,4 +1,4 @@
-# AGENTS.md
+# Contributing
 
 When modifying VMEC-extender or BMW code:
 
