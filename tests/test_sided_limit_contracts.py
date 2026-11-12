@@ -160,3 +160,40 @@ def test_field_period_data_matches_full_torus():
         full = np.asarray(getattr(vf, name)(Bf))[:, : nt_full // 2, :]
         period = np.asarray(getattr(vp, name)(Bp))
         np.testing.assert_allclose(period, full, rtol=1e-6, atol=1e-8 * np.abs(full).max())
+
+
+def test_constant_trace_has_no_inside_field_on_a_strongly_shaped_torus():
+    """The quadrature grid is sized for the normal's spectrum, not only for the density 1.
+
+    Poloidal triangularity makes the speed of the parametrisation vary by a factor two, so the
+    unit normal is far from band-limited; a constant trace must still give zero, to ``digits``.
+    """
+    n = 16
+    theta, phi = np.meshgrid(np.linspace(0.0, 2.0 * np.pi, n, endpoint=False),
+                             np.linspace(0.0, 2.0 * np.pi, n, endpoint=False))
+    R = 1.0 + 0.3 * np.cos(theta) + 0.05 * np.cos(2.0 * theta)
+    X = np.stack([R * np.cos(phi), R * np.sin(phi), 0.3 * np.sin(theta) - 0.05 * np.sin(2.0 * theta)])
+    vc = VirtualCasingJAX()
+    vc.setup(8, 1, False, n, n, X, n, n, n, n)
+    assert np.max(np.abs(vc.compute_internal_B(jnp.ones((3, n, n))))) <= 2e-8
+
+
+def test_double_layer_of_the_density_one_is_minus_one_half_on_the_surface():
+    """The scalar self-test of the singular quadrature that the grid selection used to rely on."""
+    from virtual_casing_jax import laplace_dx_u_eval_singular
+    from virtual_casing_jax.surface_ops import grad2d, resample
+
+    X = resample(jnp.asarray(_torus(N, N)), N, N, 4 * N, 4 * N)
+    U = laplace_dx_u_eval_singular(X, grad2d(X, 4 * N, 4 * N), jnp.ones((4 * N, 4 * N)), N, N, 1, digits=DIGITS)
+    np.testing.assert_allclose(np.asarray(U), -0.5, atol=2e-2)
+
+
+def test_selected_grid_divides_into_the_targets_of_every_field_period_for_half_period_data():
+    from virtual_casing_jax import SurfType, VirtualCasingTestData
+
+    nfp, nt, npol = 5, 10, 20
+    X = VirtualCasingTestData.surface_coordinates(nfp, True, nt, npol, SurfType.W7X_)
+    vc = VirtualCasingJAX()
+    vc.setup(3, nfp, True, nt, npol, X, 2 * nt, npol, 2 * nt, npol)
+    quad_nt, quad_np = vc._select_quad_sizes(3)
+    assert quad_nt % (vc.nfp_eff * vc.trg_nt) == 0 and quad_np % vc.trg_np == 0
