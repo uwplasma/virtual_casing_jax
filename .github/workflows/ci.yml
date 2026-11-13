@@ -12,9 +12,12 @@ env:
 permissions:
   contents: read
 
+# Every job reads its runner from the repository variable CI_RUNS_ON (a JSON
+# runner label or label list); unset, they run on ubuntu-22.04. Fork pull
+# requests always use hosted runners.
 jobs:
   tests:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_RUNS_ON || '"ubuntu-22.04"') || 'ubuntu-22.04' }}
     permissions:
       contents: read
     strategy:
@@ -25,37 +28,40 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: ${{ matrix.python-version }}
+          enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install pytest h5py
+          uv pip install -e . pytest h5py
       - name: Run tests
         env:
           JAX_ENABLE_X64: "1"
           JAX_PLATFORMS: cpu
+          TMPDIR: ${{ runner.temp }}
         run: |
           python -m pytest -q -m "not large and not reference"
 
   coverage:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_RUNS_ON || '"ubuntu-22.04"') || 'ubuntu-22.04' }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.12"
+          enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install pytest pytest-cov h5py
+          uv pip install -e . pytest pytest-cov h5py
       - name: Fetch checksummed reference data
         run: python tools/fetch_reference_data.py
       - name: Run coverage suite
@@ -63,6 +69,7 @@ jobs:
           JAX_ENABLE_X64: "1"
           JAX_PLATFORMS: cpu
           XLA_FLAGS: --xla_force_host_platform_device_count=2
+          TMPDIR: ${{ runner.temp }}
         run: |
           python -m pytest -q -m "not large" \
             --cov=virtual_casing_jax \
@@ -94,21 +101,22 @@ jobs:
           fail_ci_if_error: false
 
   docs:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_RUNS_ON || '"ubuntu-22.04"') || 'ubuntu-22.04' }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.11"
+          enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install docs dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install -r docs/requirements.txt
+          uv pip install -e . -r docs/requirements.txt
       - name: Build docs
         run: |
           sphinx-build -W --keep-going -b html docs docs/_build/html
