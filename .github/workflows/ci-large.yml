@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
