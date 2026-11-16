@@ -367,7 +367,15 @@ def _graded_series(gamma, field, nfp):
     energy = energy + jnp.roll(energy, 1) + jnp.roll(energy, -1)
     index = np.arange(nphi)
     shifts = np.array(sorted(range(-(nphi // 4), nphi // 4 + 1), key=abs))
-    centre = jax.lax.stop_gradient(jnp.asarray(shifts)[jnp.argmin(energy[(shifts - nphi // 2) % nphi])])
+    # A spectrum that is zero to rounding (an axisymmetric field) or that has no clearly smallest
+    # window leaves the choice to noise, and a choice that noise makes differs between a point and
+    # its neighbours, so that the derivative of the sampled field is not the limit of its
+    # differences.  Energies below a floor count as equal, and another window must be smaller than
+    # the cylindrical one, the first of ``shifts``, by a factor to be chosen over it.
+    edge = energy[(shifts - nphi // 2) % nphi]
+    edge = jnp.maximum(edge, 1.0e-20 * jnp.sum(energy))
+    best = jnp.argmin(edge)
+    centre = jax.lax.stop_gradient(jnp.asarray(shifts)[jnp.where(edge[best] * 3.0 < edge[0], best, 0)])
     low = centre - nphi // 2
     window = low + jnp.mod(index - low, nphi)  # the mode of each row within [centre - n/2, centre + n/2)
     split = jnp.mod(low, nphi).astype(int)[None] if nphi % 2 == 0 else jnp.zeros(0, int)

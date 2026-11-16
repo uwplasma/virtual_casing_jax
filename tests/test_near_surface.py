@@ -321,3 +321,29 @@ def test_estimate_bounds_the_error_within_the_floor_where_the_jets_are_known_exa
     scale = _scale_of(field)
     for k, (got, want) in enumerate(zip(jets, exact)):
         assert A_MINOR**k * np.max(np.abs(np.asarray(got) - want)) / scale / 100.0**k <= np.max(estimate), (k, estimate)
+
+
+@pytest.mark.parametrize("delta", [0.0, 0.08])
+def test_graded_field_gradient_in_the_surface_field_matches_central_differences(monkeypatch, delta):
+    """``jax.grad`` of the graded field w.r.t. ``B_total`` is the limit of its differences.
+
+    With ``delta = 0`` the surface and its field are axisymmetric, so the toroidal spectrum of
+    the samples vanishes to rounding outside one mode and the window of the transform must not
+    be chosen by that noise.
+    """
+    monkeypatch.setattr("test_offsurface_level_choice.DELTA", delta)
+    surface = _rotating_ellipse(16, 16, 1)
+    targets = jnp.asarray(_offsets(surface, 0.005, 2))
+    weight = jnp.asarray(np.random.default_rng(3).normal(size=(2, 3)))
+
+    def value(B_total):
+        field = VirtualCasingExteriorField(
+            replace(surface, B_total=B_total), ExteriorFieldConfig(graded_nodes=(32, 64)))
+        return jnp.vdot(field.B_and_derivatives_accurate_xyz(targets, order=0, tol=-1.0)[0][0], weight)
+
+    direction = jnp.asarray(np.random.default_rng(4).normal(size=surface.B_total.shape))
+    autodiff = float(jnp.vdot(jax.grad(value)(surface.B_total), direction))
+    step = 1e-7
+    numeric = (float(value(surface.B_total + step * direction))
+               - float(value(surface.B_total - step * direction))) / (2 * step)
+    assert abs(autodiff - numeric) <= 1e-6 * abs(numeric), (autodiff, numeric)
