@@ -103,18 +103,20 @@ spectrally accurate while the nodes crowd the singularity. The default node
 count is twice that of the finest schedule level and at least ``256 x 512``,
 because resolving a distance does not depend on the data
 (``ExteriorFieldConfig.graded_nodes`` overrides it).
-Within ``1e-3`` it is evaluated at that distance, on the target's side, with
-``B`` and its derivatives to order 3, and Taylor-continued along the normal:
+Within ``1e-3`` of the half-extent (``1.3e-2`` for derivatives of order two and up, whose
+noise grows as an inverse power of the distance) it is evaluated at three heights from that
+distance up to 3.5 times it, on the target's side, with ``B`` and its derivatives to the order
+asked for and their height derivative, and a polynomial in the height is fitted through them:
 each side's field is analytic up to the boundary, so a target on the surface
 returns the outside limit. The grading centre is held fixed under
 differentiation (the rule's value does not depend on it), so ``jvp``, ``grad``
 and ``jacfwd`` through the targets and the field data agree with the returned
-derivatives, up to the truncation of the continuation (``1e-8`` of the scale
+derivatives, up to the truncation of the fit (``1e-8`` of the scale
 within ``1e-3``). The result jumps by at most ``tol`` where the routing
 switches.
 
 ``estimate`` is, for a graded target, the larger of the change from using
-every second node, the last Taylor term (within ``1e-3``) and the field's
+every second node, the change of the fit within the floor and the field's
 spectrum in the top quarter of the samples. The last one is what bounds the
 resolution of the data: with ``n`` samples per direction the field is known to
 its Fourier interpolation error, ``6e-4``, ``6e-6`` and ``2e-10`` for

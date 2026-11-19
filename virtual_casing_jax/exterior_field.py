@@ -295,8 +295,12 @@ def _near_surface_taylor_B(plan: NearSurfaceTaylorPlan, point):
 _GRADING = 8.0
 #: The substitution ``u - a sin u`` stays monotone for ``a < 1``.
 _MAX_GRADING = 0.9999
-#: Targets closer than this fraction of the half-extent are continued from it.
+#: Targets closer than this fraction of the half-extent are continued from it; for derivatives of
+#: order two and up, whose noise grows as an inverse power of the distance, from ``_FLOOR_HIGH``.
 _FLOOR = 1.0e-3
+_FLOOR_HIGH = 1.3e-2
+#: The heights, in units of the floor, at which the rule is evaluated within it.
+_HEIGHTS = (1.0, 2.0, 3.5)
 #: Safety factor on the rule's noise, amplified by the continuation, in the error estimate.
 _SAFETY = 10.0
 #: Fewest nodes of the default rule: resolving a distance does not depend on the data.
@@ -777,9 +781,9 @@ class VirtualCasingExteriorField:
 
         Returns ``(values, estimate)``: the ``order + 1`` arrays and a relative
         error estimate of ``B`` per target (for a graded one, the change from
-        halving the rule's nodes, the last Taylor term within ``1e-3`` of the
-        surface, or the spectrum of the field data at the edge of what they
-        resolve, whichever is largest).  ``jvp``,
+        halving the rule's nodes, the change of the fit within the floor, or the
+        spectrum of the field data at the edge of what they resolve, whichever
+        is largest).  ``jvp``,
         ``grad`` and ``jacfwd`` through the targets and the field data agree with
         the returned derivatives.  A target on the surface returns the outside
         limit.
@@ -825,24 +829,26 @@ class VirtualCasingExteriorField:
         Each target gets its own quadrature (see :func:`_graded_sources`) about
         its nearest surface point, in the Cartesian layer sums of
         :func:`~virtual_casing_jax.derivative_kernels.layer_derivatives`.  Within
-        ``_FLOOR`` of the surface the rule is evaluated at that distance and the
-        jets are Taylor-continued along the normal, from the same side; the
-        exterior and interior fields are analytic up to the surface, so the
-        outside limit is what a target on it returns.  The estimate is the
-        difference from the same rule on every second node, or the larger of that
-        and the field's spectrum at the edge of what the samples resolve.  Within the
-        floor the derivatives count too, by what their continuation leaves out
-        scaled by ``100**-k``, and orders two and up use twice the nodes.  The
-        grading centre is held fixed under differentiation.
+        ``_FLOOR`` of the surface (``_FLOOR_HIGH`` for orders two and up) the rule is
+        evaluated at three heights above that distance and the jets are fitted by a
+        polynomial in the height through those values and their height derivatives,
+        along the normal, from the same side; the exterior and interior fields are
+        analytic up to the surface, so the outside limit is what a target on it
+        returns.  The estimate is the difference from the same rule on every
+        second node, or the larger of that and the field's spectrum at the edge
+        of what the samples resolve.  Within the floor the derivatives count too,
+        by what the fit leaves out and the rule's noise it carries, scaled by
+        ``100**-k``, and orders two and up use twice the nodes.  The grading
+        centre is held fixed under differentiation.
         """
-        from .derivative_kernels import MAX_DERIVATIVE_ORDER, layer_derivatives
+        from .derivative_kernels import layer_derivatives
 
         fine = self.schedule_levels[-1]
         nodes = self.config.graded_nodes or tuple(
             max(2 * n, m) for n, m in zip((fine[1], fine[0]), _MIN_NODES))
         series = self._cached(("series",), lambda: _graded_series(
             self.gamma, self.B_total, int(self.surface_data.nfp)))
-        floor = _FLOOR * extent
+        floor = (_FLOOR_HIGH if order > 1 else _FLOOR) * extent
 
         def locate(x):
             """Whether the target is within the floor, its grading centre and distance, and its lift."""
@@ -862,29 +868,48 @@ class VirtualCasingExteriorField:
         def rule(n, k, continued):
             def one(x, angles, distance, lift):
                 moved = x + lift
-                grid, current, charge = _graded_sources(series, angles, distance, n)
 
-                def layer(step, weight, order, at=moved):
+                def layer(step, weight, order, at, sources):
                     return layer_derivatives(
-                        at[None], grid[::step, ::step].reshape(-1, 3),
-                        weight * current[::step, ::step].reshape(-1, 3),
-                        weight * charge[::step, ::step].reshape(-1), order=order)
+                        at[None], sources[0][::step, ::step].reshape(-1, 3),
+                        weight * sources[1][::step, ::step].reshape(-1, 3),
+                        weight * sources[2][::step, ::step].reshape(-1), order=order)
 
-                jets = tuple(v[0] for v in layer(1, 1.0, k))
-                miss = jnp.max(jnp.abs(jets[0] - layer(2, 4.0, 0)[0][0])) / reference
-                if continued:
-                    start = jets[-1]
-                    jets, left = _continue(jets, -lift, order, extent, miss * reference, distance)
-                    if order > 2:
-                        # the missing fourth derivative along the normal: the third at twice the height
-                        up = (moved - _graded_point(series, angles[0], angles[1])[0]) / distance
-                        far = layer(1, 1.0, 3, moved + distance * up)[3][0]
-                        fix = (-lift @ up) * (far - start) / distance
-                        jets = jets[:3] + (jets[3] + fix,)
-                        left[3] = jnp.maximum(left[3], jnp.max(jnp.abs(fix)) * 5.0 * (jnp.linalg.norm(lift) + distance) / extent)
-                    # the k-th derivative may be off by ``tol * 100**k``, scaled by the extent
-                    miss = jnp.maximum(miss, jnp.max(jnp.stack(
-                        [m * extent**j / 100.0**j for j, m in enumerate(left)])) / reference)
+                if not continued:
+                    sources = _graded_sources(series, angles, distance, n)
+                    jets = tuple(v[0] for v in layer(1, 1.0, k, moved, sources))
+                    miss = jnp.max(jnp.abs(jets[0] - layer(2, 4.0, 0, moved, sources)[0][0])) / reference
+                    return jets, jnp.maximum(miss, series["tail"] / reference)
+                # a polynomial in the height, fitted to the rule and its height derivative at a few heights
+                up = jax.lax.stop_gradient((moved - _graded_point(series, angles[0], angles[1])[0]) / distance)
+                heights = jnp.asarray(_HEIGHTS) * distance
+                scale = heights[-1] - distance
+
+                def at_height(h):
+                    srcs, at = _graded_sources(series, angles, h, n), moved + (h - distance) * up
+                    jets, rate = jax.jvp(lambda y: tuple(v[0] for v in layer(1, 1.0, k, y, srcs)), (at,), (up,))
+                    return jets, rate, jnp.max(jnp.abs(jets[0] - layer(2, 4.0, 0, at, srcs)[0][0]))
+
+                fits, rates, noise = jax.lax.map(at_height, heights)
+
+                def weights(m):
+                    t, power = (heights[:m] - distance) / scale, jnp.arange(2 * m)
+                    basis = jnp.concatenate((t[:, None] ** power, power * t[:, None] ** jnp.maximum(power - 1, 0)))
+                    w = jnp.linalg.solve(basis.T, (-(lift @ up) / scale) ** power).reshape(2, m)
+                    return jnp.pad(w, ((0, 0), (0, len(heights) - m)))
+
+                def combine(w):
+                    return tuple(jnp.tensordot(w[0], f, axes=1) + scale * jnp.tensordot(w[1], r, axes=1)
+                                 for f, r in zip(fits, rates))
+
+                full, short = weights(len(heights)), weights(len(heights) - 1)
+                jets = combine(full)
+                # the fit's change on dropping its last height, and the sums' noise: as it is at the first
+                # height for B and its gradient, and as the fit carries it, amplified as 1 / distance**j, above
+                reach = (jnp.abs(full[0]) + scale * jnp.abs(full[1]) / heights) @ noise * _SAFETY
+                miss = jnp.max(jnp.stack([jnp.maximum(
+                    jnp.max(jnp.abs(a - c)), noise[0] if j < 2 else reach / heights[0] ** j) * extent**j / 100.0**j
+                    for j, (a, c) in enumerate(zip(jets, combine(short)))])) / reference
                 return jets, jnp.maximum(miss, series["tail"] / reference)
 
             return jax.vmap(one)
@@ -905,7 +930,7 @@ class VirtualCasingExteriorField:
 
         rules = (lambda *a: zeros(jax.eval_shape(rules[1], *a)),
                  rule(nodes, order, False),
-                 rule(nodes if order < 2 else tuple(2 * m for m in nodes), MAX_DERIVATIVE_ORDER, True))
+                 rule(nodes if order < 2 else tuple(2 * m for m in nodes), order, True))
         # rematerialised per chunk: a reverse pass keeps the chunk's inputs, not the layer sums' tapes
         out = jax.lax.map(
             jax.checkpoint(lambda c: jax.lax.switch(jnp.max(c[0]), rules, *c[1:])),

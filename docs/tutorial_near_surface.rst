@@ -11,7 +11,7 @@ twice (a fine and a coarse level of the closed-form sums) and routes it:
   closed form is kept;
 * otherwise the target gets its own quadrature, graded about its nearest point on the surface
   (``graded_nodes``, default at least ``256 x 512``), and within ``1e-3`` of the half-extent the
-  jets are Taylor-continued along the normal from that distance, so a target on the surface returns
+  jets are fitted along the normal from heights above that distance, so a target on the surface returns
   the limit from outside.
 
 .. image:: readme_near_surface.png
@@ -28,8 +28,8 @@ The estimate
 
 * for a target kept on the closed forms it is ``30`` times the squared difference between the
   coarsest and the finest level, scaled by the RMS surface field;
-* for a graded target it is the largest of the change from using every second node, the last Taylor
-  term (within ``1e-3``), and the spectrum of the sampled field in the top quarter of the samples.
+* for a graded target it is the largest of the change from using every second node, the change of
+  the fit within that distance, and the spectrum of the sampled field in the top quarter of the samples.
 
 The last term is what bounds the data: with ``n`` samples per direction the field is known only to
 its Fourier interpolation error (``6e-4``, ``6e-6`` and ``2e-10`` for ``n = 24, 48, 96`` on the gate
