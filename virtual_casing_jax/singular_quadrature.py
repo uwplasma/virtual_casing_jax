@@ -1,3 +1,15 @@
+# Translated to Python/JAX and modified from:
+#  BIEST, https://github.com/dmalhotra/BIEST
+#    include/biest/singular_correction.hpp      SingularCorrection::InitPrecomp
+#    include/biest/boundary_integ_op.txx        FieldPeriodBIOp::SetupSingular_ (patch-size ladder)
+#    Copyright (C) 2018-2026 The Simons Foundation, Inc. and the BIEST authors
+#    Author: Dhairya Malhotra
+#  SCTL, https://github.com/dmalhotra/SCTL
+#    include/sctl/quadrule.txx                  LegQuadRule::ComputeNdsWts, LegQuadRule::LegPoly
+#    Copyright (C) 2017-2026 The Simons Foundation, Inc. and the SCTL authors
+#    Author: Dhairya Malhotra
+# Modifications Copyright (C) 2026 the virtual_casing_jax authors
+# SPDX-License-Identifier: Apache-2.0
 """Singular quadrature utilities (POU + polar correction)."""
 from __future__ import annotations
 

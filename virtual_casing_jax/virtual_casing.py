@@ -1,3 +1,18 @@
+# Translated to Python/JAX and modified from:
+#  virtual-casing, https://github.com/hiddenSymmetries/virtual-casing
+#    include/virtual-casing.hpp                 VirtualCasing
+#                                               Authors: Dhairya Malhotra, Matt Landreman, Bharat Medasani
+#    include/virtual-casing.txx                 VirtualCasing::Setup, ComputeBext, ComputeBint,
+#                                               ComputeGradBext, ComputeGradBint, ComputeBextOffSurf,
+#                                               ComputeBintOffSurf
+#                                               Authors: Dhairya Malhotra, Bharat Medasani
+#    Copyright (C) 2021-2026 The Simons Foundation, Inc. and the virtual-casing authors
+#  BIEST, https://github.com/dmalhotra/BIEST
+#    include/biest/boundary_integ_op.txx        FieldPeriodBIOp::SetupSingular (quadrature grid)
+#    Copyright (C) 2018-2026 The Simons Foundation, Inc. and the BIEST authors
+#    Author: Dhairya Malhotra
+# Modifications Copyright (C) 2026 the virtual_casing_jax authors
+# SPDX-License-Identifier: Apache-2.0
 """High-level Virtual Casing routines in JAX."""
 from __future__ import annotations
 

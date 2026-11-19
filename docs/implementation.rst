@@ -37,13 +37,15 @@ Boundary integrals can be memory-intensive. We plan to implement
 ``custom_vjp`` rules that re-evaluate kernels during the backward pass
 instead of storing large intermediates.
 
-Compatibility with Reference Code
+Relation to the original C++ code
 ---------------------------------
 
-The goal is bitwise-identical results for small test cases, and
-numerical parity for larger grids. All critical numerics and
-normalizations follow the BIEST implementation [BIEST]_ and the
-formulation in [MCO2019]_.
+The numerical core is translated from virtual-casing [VC]_ and BIEST
+[BIEST]_, with the Gauss-Legendre rule from SCTL [SCTL]_. Each translated
+module names its source files in its header, and the ``NOTICE`` file lists
+the original copyright and authors. The method is described in [MCO2019]_
+and [MCIO2019]_. The goal is bitwise-identical results for small test
+cases, and numerical parity for larger grids.
 
 Boundary Integrals (Baseline)
 -----------------------------

@@ -1,0 +1,97 @@
+cff-version: 1.2.0
+message: "If you use virtual_casing_jax, please cite the software and the works it is translated from, listed below."
+type: software
+title: "virtual_casing_jax"
+authors:
+  - name: "UW Plasma"
+  - given-names: Dhairya
+    family-names: Malhotra
+abstract: "A JAX translation of virtual-casing, and of the parts of BIEST and SCTL it uses, for computing the magnetic field due to plasma currents from the total field on a toroidal surface with high-order singular quadrature, with differentiable and batched evaluation."
+repository-code: "https://github.com/uwplasma/virtual_casing_jax"
+url: "https://virtual-casing-jax.readthedocs.io"
+license: Apache-2.0
+references:
+  - type: software
+    title: "virtual-casing: the virtual-casing principle on toroidal surfaces"
+    authors:
+      - given-names: Dhairya
+        family-names: Malhotra
+      - given-names: Bharat
+        family-names: Medasani
+      - given-names: Matt
+        family-names: Landreman
+      - given-names: Chris
+        family-names: Smiet
+      - given-names: Antoine
+        family-names: Cerfon
+    repository-code: "https://github.com/hiddenSymmetries/virtual-casing"
+    license: Apache-2.0
+    doi: "10.5281/zenodo.23619289"
+    notes: "virtual_casing.py, functional.py and testdata.py are translated from virtual-casing."
+  - type: software
+    title: "BIEST: Boundary Integral Equation Solver for Taylor states"
+    authors:
+      - given-names: Dhairya
+        family-names: Malhotra
+    repository-code: "https://github.com/dmalhotra/BIEST"
+    license: Apache-2.0
+    doi: "10.5281/zenodo.23511944"
+    notes: "The singular quadrature, surface operators, kernels and off-surface evaluation are translated from BIEST."
+  - type: software
+    title: "SCTL: Scientific Computing Template Library"
+    authors:
+      - given-names: Dhairya
+        family-names: Malhotra
+      - given-names: Tianyue
+        family-names: Li
+      - given-names: Robert
+        family-names: Blackwell
+      - given-names: Abtin
+        family-names: Rahimian
+      - given-names: Wen
+        family-names: Yan
+      - given-names: Xuanzhao
+        family-names: Gao
+    repository-code: "https://github.com/dmalhotra/SCTL"
+    license: Apache-2.0
+    doi: "10.5281/zenodo.23511629"
+    notes: "The Gauss-Legendre rule in singular_quadrature.py is translated from SCTL."
+  - type: article
+    title: "Efficient high-order singular quadrature schemes in magnetic fusion"
+    authors:
+      - given-names: Dhairya
+        family-names: Malhotra
+      - given-names: Antoine J.
+        family-names: Cerfon
+      - given-names: Michael
+        family-names: "O'Neil"
+      - given-names: Evan
+        family-names: Toler
+    journal: "Plasma Physics and Controlled Fusion"
+    publisher:
+      name: IOP Publishing
+    volume: 62
+    issue: 2
+    start: "024004"
+    year: 2020
+    month: 2
+    doi: "10.1088/1361-6587/ab57f4"
+  - type: article
+    title: "Taylor states in stellarators: A fast high-order boundary integral solver"
+    authors:
+      - given-names: Dhairya
+        family-names: Malhotra
+      - given-names: Antoine
+        family-names: Cerfon
+      - given-names: Lise-Marie
+        family-names: Imbert-Gérard
+      - given-names: Michael
+        family-names: "O'Neil"
+    journal: "Journal of Computational Physics"
+    publisher:
+      name: Elsevier BV
+    volume: 397
+    start: 108791
+    year: 2019
+    month: 11
+    doi: "10.1016/j.jcp.2019.06.067"

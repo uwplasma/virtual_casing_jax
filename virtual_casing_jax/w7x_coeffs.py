@@ -1,3 +1,10 @@
+# Translated to Python/JAX and modified from:
+#  BIEST, https://github.com/dmalhotra/BIEST
+#    include/biest/surface.txx                  W7X_ Fourier coefficients
+#    Copyright (C) 2018-2026 The Simons Foundation, Inc. and the BIEST authors
+#    Author: Dhairya Malhotra
+# Modifications Copyright (C) 2026 the virtual_casing_jax authors
+# SPDX-License-Identifier: Apache-2.0
 """W7X_ Fourier coefficients extracted from BIEST surface.txx."""
 from __future__ import annotations
 
